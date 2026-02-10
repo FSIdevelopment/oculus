@@ -1,0 +1,1506 @@
+{
+  "EMA_100": {
+    "used_in": [
+      "Semiconductor_Momentum"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      34.96
+    ],
+    "asset_classes": [
+      "semiconductors"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "ATR": {
+    "used_in": [
+      "Semiconductor_Momentum",
+      "titan_gld_v2"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      34.96,
+      null
+    ],
+    "asset_classes": [
+      "semiconductors",
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "EMA_50": {
+    "used_in": [
+      "Semiconductor_Momentum"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      34.96
+    ],
+    "asset_classes": [
+      "semiconductors"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        119.6817
+      ],
+      "operators": [
+        "<="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        56.6758
+      ],
+      "operators": [
+        ">="
+      ]
+    }
+  },
+  "STOCH_OVERBOUGHT": {
+    "used_in": [
+      "Semiconductor_Momentum"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      34.96
+    ],
+    "asset_classes": [
+      "semiconductors"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        0.0
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        1.0
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "EMA_200": {
+    "used_in": [
+      "Semiconductor_Momentum"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      34.96
+    ],
+    "asset_classes": [
+      "semiconductors"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        116.3503
+      ],
+      "operators": [
+        "<="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        53.4044
+      ],
+      "operators": [
+        ">="
+      ]
+    }
+  },
+  "BB_UPPER": {
+    "used_in": [
+      "Semiconductor_Momentum"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      34.96
+    ],
+    "asset_classes": [
+      "semiconductors"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "STOCH_OVERSOLD": {
+    "used_in": [
+      "Semiconductor_Momentum"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      34.96
+    ],
+    "asset_classes": [
+      "semiconductors"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        0.0
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        0.0
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "PRICE_VS_52W_LOW": {
+    "used_in": [
+      "Semiconductor_Momentum",
+      "Titan_Gold_V4"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      34.96,
+      null
+    ],
+    "asset_classes": [
+      "semiconductors",
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        39.96
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        109.1263
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "OBV_EMA": {
+    "used_in": [
+      "Semiconductor_Momentum",
+      "Titan_Gold_V4"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      34.96,
+      null
+    ],
+    "asset_classes": [
+      "semiconductors",
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "PRICE_VS_VWAP": {
+    "used_in": [
+      "Semiconductor_Momentum",
+      "Titan Gold V3",
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 4,
+    "returns_when_used": [
+      34.96,
+      null,
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "semiconductors",
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 2,
+      "thresholds": [
+        4.349,
+        4.3666
+      ],
+      "operators": [
+        ">=",
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 2,
+      "thresholds": [
+        29.6813,
+        25.3894
+      ],
+      "operators": [
+        "<=",
+        "<="
+      ]
+    }
+  },
+  "ATR_PCT": {
+    "used_in": [
+      "titan_gld_v2",
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 3,
+    "returns_when_used": [
+      null,
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 2,
+      "thresholds": [
+        0.9456,
+        1.0119
+      ],
+      "operators": [
+        ">=",
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 2,
+      "thresholds": [
+        1.246,
+        1.8676
+      ],
+      "operators": [
+        "<=",
+        "<="
+      ]
+    }
+  },
+  "ADX_CHG_5": {
+    "used_in": [
+      "titan_gld_v2"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        -5.7975
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        5.176
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "MOMENTUM_42D": {
+    "used_in": [
+      "titan_gld_v2"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        5.1824
+      ],
+      "operators": [
+        "<="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        -2.5968
+      ],
+      "operators": [
+        ">="
+      ]
+    }
+  },
+  "KC_PCT": {
+    "used_in": [
+      "titan_gld_v2"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "RSI_21": {
+    "used_in": [
+      "titan_gld_v2"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        61.5182
+      ],
+      "operators": [
+        "<="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        42.9849
+      ],
+      "operators": [
+        ">="
+      ]
+    }
+  },
+  "PRICE_VS_EMA_13": {
+    "used_in": [
+      "titan_gld_v2"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "ADX_CHG_3": {
+    "used_in": [
+      "titan_gld_v2"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        -3.571
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        3.2699
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "MOMENTUM_21D": {
+    "used_in": [
+      "titan_gld_v2",
+      "Titan Gold V3",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 3,
+    "returns_when_used": [
+      null,
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "STOCH_K_14_CHG_5": {
+    "used_in": [
+      "titan_gld_v2"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "PRICE_52W_RANGE_PCT": {
+    "used_in": [
+      "Titan Gold V3"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "MOMENTUM_126D": {
+    "used_in": [
+      "Titan Gold V3",
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 3,
+    "returns_when_used": [
+      null,
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 3,
+      "thresholds": [
+        18.2755,
+        -4.9997,
+        -1.7016
+      ],
+      "operators": [
+        "<=",
+        ">=",
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 3,
+      "thresholds": [
+        -1.3481,
+        15.7359,
+        16.8194
+      ],
+      "operators": [
+        ">=",
+        "<=",
+        "<="
+      ]
+    }
+  },
+  "PLUS_DI": {
+    "used_in": [
+      "Titan Gold V3",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        22.6781
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        38.5689
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "OBV_DIFF": {
+    "used_in": [
+      "Titan Gold V3",
+      "Titan_Gold_V4"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        -1123985.6955
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        3519578.3549
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "ROC_20": {
+    "used_in": [
+      "Titan Gold V3"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "TREND_SLOPE_100D": {
+    "used_in": [
+      "Titan Gold V3",
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 3,
+    "returns_when_used": [
+      null,
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 2,
+      "thresholds": [
+        0.1186,
+        0.1205
+      ],
+      "operators": [
+        "<=",
+        "<="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 2,
+      "thresholds": [
+        -0.0489,
+        -0.0328
+      ],
+      "operators": [
+        ">=",
+        ">="
+      ]
+    }
+  },
+  "MOMENTUM_63D": {
+    "used_in": [
+      "Titan Gold V3",
+      "Titan_Gold_V4"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        -3.0844
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        9.8187
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "MFI": {
+    "used_in": [
+      "Titan Gold V3"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "PRICE_VS_EMA_21": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "VOLUME_RATIO": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "MACD_HIST_CHG_1": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "VOLUME_TREND_20D": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        0.8714
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        1.1299
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "BREAKOUT_20D": {
+    "used_in": [
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "PRICE_VS_EMA_50": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "MOMENTUM_252D": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "EMA_CROSS_8_21": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "CMF": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        -0.0673
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        0.133
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "MOM_3M": {
+    "used_in": [
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "MOM_1M": {
+    "used_in": [
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "PRICE_ACCEL": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "MACD_CROSS": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "ADX": {
+    "used_in": [
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        40.2177
+      ],
+      "operators": [
+        "<="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        20.5966
+      ],
+      "operators": [
+        ">="
+      ]
+    }
+  },
+  "STOCH_CROSS": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "BB_SQUEEZE": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "RSI_14_CHG_1": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "ROC_5": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "ROC_10": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "RSI_BULLISH_DIV": {
+    "used_in": [
+      "Titan_Gold_V4"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      null
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "BB_PCT_B": {
+    "used_in": [
+      "Titan_Gold_V4",
+      "Titan_Gold_V5"
+    ],
+    "times_used": 2,
+    "returns_when_used": [
+      null,
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "HIGHER_HIGH": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "PRICE_VS_EMA_200": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "PRICE_VS_52W_HIGH": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "RSI_14": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "TREND_SLOPE": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "MACD_HIST": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "BB_WIDTH": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 1,
+      "thresholds": [
+        4.6712
+      ],
+      "operators": [
+        ">="
+      ]
+    },
+    "as_exit_rule": {
+      "count": 1,
+      "thresholds": [
+        9.9896
+      ],
+      "operators": [
+        "<="
+      ]
+    }
+  },
+  "MACD_SIGNAL": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "EMA_STACK_SCORE": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  },
+  "HIGHER_LOW": {
+    "used_in": [
+      "Titan_Gold_V5"
+    ],
+    "times_used": 1,
+    "returns_when_used": [
+      35.84124500000001
+    ],
+    "asset_classes": [
+      "gold"
+    ],
+    "as_entry_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    },
+    "as_exit_rule": {
+      "count": 0,
+      "thresholds": [],
+      "operators": []
+    }
+  }
+}
