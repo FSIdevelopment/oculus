@@ -55,21 +55,26 @@ class TrainingWorker:
 
         try:
             while self.running:
-                # Block and wait for job (timeout=1 to allow graceful shutdown)
+                # Block and wait for job ID from queue (timeout=1 to allow graceful shutdown)
                 job_data = self.redis.blpop(config.job_queue, timeout=1)
 
                 if job_data is None:
                     continue
 
-                # Unpack job from Redis list
-                _, job_json = job_data
+                # Unpack job ID from Redis list
+                _, job_id = job_data
                 try:
+                    # Fetch full job payload from Redis
+                    job_json = self.redis.get(job_id)
+                    if job_json is None:
+                        logger.error(f"Job data not found for ID: {job_id}")
+                        continue
+
                     job = json.loads(job_json)
-                    job_id = job.get('job_id', 'unknown')
                     logger.info(f"Received job: {job_id}")
 
                     # Process job asynchronously
-                    asyncio.create_task(self._process_and_report(job))
+                    asyncio.create_task(self._process_and_report(job, job_id))
 
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse job JSON: {e}")
@@ -81,31 +86,31 @@ class TrainingWorker:
         finally:
             self.stop()
 
-    async def _process_and_report(self, job: dict):
+    async def _process_and_report(self, job: dict, job_id: str):
         """Process a job and report results back to Redis.
 
         Args:
             job: Job configuration dictionary
+            job_id: Job ID from Redis queue
         """
-        job_id = job.get('job_id', 'unknown')
         try:
             # Process job
-            result = await self.processor.process_job(job)
+            result = await self.processor.process_job(job, job_id)
 
-            # Publish result to Redis
-            result_channel = f"{config.result_channel}:{job_id}"
-            self.redis.publish(result_channel, json.dumps(result))
-            logger.info(f"[{job_id}] Result published to {result_channel}")
+            # Store result in Redis with 24h TTL
+            result_key = f"{config.result_key_prefix}:{job_id}"
+            self.redis.set(result_key, json.dumps(result), ex=86400)
+            logger.info(f"[{job_id}] Result stored at {result_key}")
 
         except Exception as e:
             logger.exception(f"[{job_id}] Failed to process job: {e}")
             error_result = {
-                "job_id": job_id,
+                "build_id": job.get('build_id', 'unknown'),
                 "status": "error",
                 "error": str(e)
             }
-            result_channel = f"{config.result_channel}:{job_id}"
-            self.redis.publish(result_channel, json.dumps(error_result))
+            result_key = f"{config.result_key_prefix}:{job_id}"
+            self.redis.set(result_key, json.dumps(error_result), ex=86400)
 
     def stop(self):
         """Stop the worker gracefully."""

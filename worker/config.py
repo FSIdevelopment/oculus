@@ -50,12 +50,12 @@ class WorkerConfig:
     @property
     def job_queue(self) -> str:
         """Redis queue name for training jobs."""
-        return os.getenv('JOB_QUEUE', 'oculus:training:jobs')
+        return os.getenv('JOB_QUEUE', 'training_queue')
 
     @property
-    def result_channel(self) -> str:
-        """Redis channel for publishing results."""
-        return os.getenv('RESULT_CHANNEL', 'oculus:training:results')
+    def result_key_prefix(self) -> str:
+        """Redis key prefix for storing results."""
+        return os.getenv('RESULT_KEY_PREFIX', 'result')
 
     @property
     def progress_channel_prefix(self) -> str:

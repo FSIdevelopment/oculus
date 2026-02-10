@@ -38,33 +38,36 @@ async def test_worker():
         logger.error(f"Failed to connect to Redis: {e}")
         return False
 
-    # Create test job
-    job_id = str(uuid.uuid4())[:8]
+    # Create test job matching backend format
+    build_id = f"build:{uuid.uuid4()}"
+    job_id = build_id
     job = {
-        "job_id": job_id,
+        "build_id": build_id,
+        "user_id": "test_user",
         "symbols": ["NVDA", "AMD"],  # Semiconductor stocks
-        "years": 2,
-        "hp_iterations": 10,  # Reduced for faster testing
-        "strategy_type": "momentum"
+        "timeframe": "1d",
+        "design": {
+            "years": 2,
+            "hp_iterations": 10,  # Reduced for faster testing
+            "strategy_type": "momentum"
+        }
     }
 
     logger.info(f"Sending test job: {job_id}")
     logger.info(f"  Symbols: {job['symbols']}")
-    logger.info(f"  Years: {job['years']}")
-    logger.info(f"  HP Iterations: {job['hp_iterations']}")
+    logger.info(f"  Years: {job['design']['years']}")
+    logger.info(f"  HP Iterations: {job['design']['hp_iterations']}")
 
-    # Send job to queue
-    redis_client.rpush(config.job_queue, json.dumps(job))
+    # Store job in Redis and queue it
+    redis_client.set(job_id, json.dumps(job), ex=86400)  # 24h TTL
+    redis_client.rpush(config.job_queue, job_id)
     logger.info(f"Job queued on {config.job_queue}")
 
-    # Subscribe to result channel
-    result_channel = f"{config.result_channel}:{job_id}"
+    # Subscribe to progress channel
     progress_channel = f"{config.progress_channel_prefix}:{job_id}"
-
     pubsub = redis_client.pubsub()
-    pubsub.subscribe(result_channel, progress_channel)
+    pubsub.subscribe(progress_channel)
 
-    logger.info(f"Listening for results on {result_channel}")
     logger.info(f"Listening for progress on {progress_channel}")
 
     # Wait for result (timeout after 1 hour)
@@ -88,8 +91,11 @@ async def test_worker():
                 status = data.get('status', 'unknown')
                 logger.info(f"  Progress: {phase} - {status}")
 
-            elif channel == result_channel:
-                result = data
+            # Check for result in Redis
+            result_key = f"{config.result_key_prefix}:{job_id}"
+            result_data = redis_client.get(result_key)
+            if result_data:
+                result = json.loads(result_data)
                 logger.info(f"Result received!")
                 break
 

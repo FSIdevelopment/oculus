@@ -52,36 +52,41 @@ class JobProcessor:
             except ImportError:
                 logger.warning("PyTorch not available, GPU acceleration disabled")
 
-    async def process_job(self, job_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_job(self, job_data: Dict[str, Any], job_id: str) -> Dict[str, Any]:
         """Process a training job.
 
         Args:
             job_data: Job configuration with fields:
-                - job_id: Unique job identifier
+                - build_id: Build identifier
+                - user_id: User identifier
                 - symbols: List of stock symbols
-                - years: Years of historical data
-                - hp_iterations: Hyperparameter search iterations
-                - feature_list: Optional list of features to use
-                - llm_design: Optional LLM design guidance
-                - strategy_type: Strategy type (e.g., "momentum")
+                - design: LLM design guidance (optional)
+                - timeframe: Trading timeframe (e.g., "1d")
+            job_id: Unique job identifier from Redis queue
 
         Returns:
             Result dictionary with status, metrics, rules, and backtest results
         """
-        job_id = job_data.get('job_id', 'unknown')
         reporter = ProgressReporter(job_id, self.redis)
 
         try:
-            # Extract job parameters
+            # Extract job parameters from backend format
             symbols = job_data.get('symbols', [])
-            years = job_data.get('years', 2)
-            hp_iterations = job_data.get('hp_iterations', 30)
-            strategy_type = job_data.get('strategy_type', 'momentum')
+            timeframe = job_data.get('timeframe', '1d')
+            design = job_data.get('design', {})
+            build_id = job_data.get('build_id', 'unknown')
+            user_id = job_data.get('user_id', 'unknown')
+
+            # Extract ML parameters from design or use defaults
+            years = design.get('years', 2) if design else 2
+            hp_iterations = design.get('hp_iterations', 30) if design else 30
+            strategy_type = design.get('strategy_type', 'momentum') if design else 'momentum'
 
             if not symbols:
                 raise ValueError("No symbols provided in job")
 
             logger.info(f"[{job_id}] Processing job: {symbols}, {years}y, {hp_iterations} HP iters")
+            logger.info(f"[{job_id}] Build: {build_id}, User: {user_id}")
             reporter.report_phase("job_received", "complete")
 
             # Step 1: Train ML models
@@ -137,10 +142,11 @@ class JobProcessor:
             # For now, we report completion without full optimization
             reporter.report_phase("optimization", "complete")
 
-            # Build result
+            # Build result matching backend expectations
             result = {
-                "job_id": job_id,
+                "build_id": build_id,
                 "status": "success",
+                "phase": "complete",
                 "model_metrics": {
                     "model_name": best_model_name,
                     "f1": metrics.get('f1', 0),
@@ -184,8 +190,9 @@ class JobProcessor:
             logger.exception(f"[{job_id}] Job failed: {e}")
             reporter.report_error("processing", str(e))
             return {
-                "job_id": job_id,
+                "build_id": build_id,
                 "status": "error",
+                "phase": "failed",
                 "error": str(e)
             }
 
