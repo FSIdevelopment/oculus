@@ -1,0 +1,741 @@
+[
+  {
+    "strategy_name": "Semiconductor_Momentum",
+    "strategy_dir": "strategies/semiconductor_momentum",
+    "symbols": [
+      "NVDA",
+      "AMD",
+      "AVGO",
+      "TSM",
+      "QCOM",
+      "MU",
+      "MRVL",
+      "AMAT",
+      "LRCX",
+      "KLAC",
+      "ASML"
+    ],
+    "asset_class": "semiconductors",
+    "description": "",
+    "timeframe": "1d",
+    "target": null,
+    "build_date": "2026-01-26",
+    "llm_assisted": false,
+    "model": {
+      "name": "XGBoost",
+      "f1": 0.71280276816609,
+      "precision": 0.6061051857300478,
+      "recall": 0.8650918635170604,
+      "auc": 0.6376777737219934,
+      "training_years": 7,
+      "hp_iterations": 90
+    },
+    "backtest": {
+      "total_return": 34.96,
+      "win_rate": 44.93,
+      "max_drawdown": 13.04,
+      "sharpe_ratio": 1.32,
+      "total_trades": 69,
+      "profit_factor": 2.14
+    },
+    "risk_params": {
+      "stop_loss": 0.02,
+      "trailing_stop": 0.07,
+      "max_positions": 4,
+      "position_size": 0.1,
+      "entry_score_threshold": 4
+    },
+    "features": {
+      "priority": [],
+      "top_ml_features": [
+        "STOCH_OVERSOLD",
+        "STOCH_OVERBOUGHT",
+        "EMA_200",
+        "EMA_50",
+        "PRICE_VS_52W_LOW",
+        "BB_UPPER",
+        "PRICE_VS_VWAP",
+        "OBV_EMA",
+        "ATR",
+        "EMA_100"
+      ],
+      "entry_rules_count": 10,
+      "exit_rules_count": 8,
+      "top_entry_rules": [
+        {
+          "feature": "STOCH_OVERSOLD",
+          "operator": ">=",
+          "threshold": 0.0
+        },
+        {
+          "feature": "STOCH_OVERBOUGHT",
+          "operator": ">=",
+          "threshold": 0.0
+        },
+        {
+          "feature": "EMA_200",
+          "operator": "<=",
+          "threshold": 116.3503
+        },
+        {
+          "feature": "EMA_50",
+          "operator": "<=",
+          "threshold": 119.6817
+        },
+        {
+          "feature": "PRICE_VS_52W_LOW",
+          "operator": ">=",
+          "threshold": 39.96
+        }
+      ],
+      "top_exit_rules": [
+        {
+          "feature": "STOCH_OVERSOLD",
+          "operator": "<=",
+          "threshold": 0.0
+        },
+        {
+          "feature": "STOCH_OVERBOUGHT",
+          "operator": "<=",
+          "threshold": 1.0
+        },
+        {
+          "feature": "EMA_200",
+          "operator": ">=",
+          "threshold": 53.4044
+        },
+        {
+          "feature": "EMA_50",
+          "operator": ">=",
+          "threshold": 56.6758
+        },
+        {
+          "feature": "PRICE_VS_52W_LOW",
+          "operator": "<=",
+          "threshold": 109.1263
+        }
+      ]
+    },
+    "iterations": {
+      "count": 0,
+      "results": []
+    },
+    "success": null
+  },
+  {
+    "strategy_name": "TITAN X GLD",
+    "strategy_dir": "strategies/titan_gld",
+    "symbols": [
+      "GLD"
+    ],
+    "asset_class": "gold",
+    "description": "GLD buy-and-hold trend follower. Stays 100% invested when price above 200 EMA. Captures 84%+ of gold uptrends with minimal drawdown (<4%). Conservative 15-20% annual returns.",
+    "timeframe": "8h",
+    "target": null,
+    "build_date": "2026-02-06",
+    "llm_assisted": false,
+    "model": {
+      "name": null,
+      "f1": null,
+      "precision": null,
+      "recall": null,
+      "auc": null,
+      "training_years": null,
+      "hp_iterations": null
+    },
+    "backtest": {
+      "total_return": 13.98,
+      "win_rate": 100.0,
+      "max_drawdown": 3.95,
+      "sharpe_ratio": 1.1,
+      "total_trades": 1,
+      "profit_factor": 13983.57
+    },
+    "risk_params": {
+      "stop_loss": 0.5,
+      "trailing_stop": 0.4,
+      "max_positions": 6,
+      "position_size": 0.1,
+      "entry_score_threshold": 3
+    },
+    "features": {
+      "priority": [],
+      "top_ml_features": [],
+      "entry_rules_count": 0,
+      "exit_rules_count": 0,
+      "top_entry_rules": [],
+      "top_exit_rules": []
+    },
+    "iterations": {
+      "count": 0,
+      "results": []
+    },
+    "success": null
+  },
+  {
+    "strategy_name": "titan_gld_v2",
+    "strategy_dir": "strategies/titan_gld_v2",
+    "symbols": [
+      "GLD"
+    ],
+    "asset_class": "gold",
+    "description": "",
+    "timeframe": "1d",
+    "target": null,
+    "build_date": "2026-02-06",
+    "llm_assisted": false,
+    "model": {
+      "name": "MLP_Small",
+      "f1": 0.7889447236180904,
+      "precision": 0.7405660377358491,
+      "recall": 0.8440860215053764,
+      "auc": 0.4931182795698925,
+      "training_years": 6,
+      "hp_iterations": 70
+    },
+    "backtest": {
+      "total_return": null,
+      "win_rate": null,
+      "max_drawdown": null,
+      "sharpe_ratio": null,
+      "total_trades": null,
+      "profit_factor": null
+    },
+    "risk_params": {
+      "stop_loss": 0.02,
+      "trailing_stop": 0.03,
+      "max_positions": 5,
+      "position_size": 0.1,
+      "entry_score_threshold": 3
+    },
+    "features": {
+      "priority": [],
+      "top_ml_features": [
+        "ADX_CHG_5",
+        "MOMENTUM_42D",
+        "RSI_21",
+        "ATR_PCT",
+        "ADX_CHG_3",
+        "STOCH_K_14_CHG_5",
+        "ATR",
+        "MOMENTUM_21D",
+        "PRICE_VS_EMA_13",
+        "KC_PCT"
+      ],
+      "entry_rules_count": 10,
+      "exit_rules_count": 8,
+      "top_entry_rules": [
+        {
+          "feature": "ADX_CHG_5",
+          "operator": ">=",
+          "threshold": -5.7975
+        },
+        {
+          "feature": "MOMENTUM_42D",
+          "operator": "<=",
+          "threshold": 5.1824
+        },
+        {
+          "feature": "RSI_21",
+          "operator": "<=",
+          "threshold": 61.5182
+        },
+        {
+          "feature": "ATR_PCT",
+          "operator": ">=",
+          "threshold": 0.9456
+        },
+        {
+          "feature": "ADX_CHG_3",
+          "operator": ">=",
+          "threshold": -3.571
+        }
+      ],
+      "top_exit_rules": [
+        {
+          "feature": "ADX_CHG_5",
+          "operator": "<=",
+          "threshold": 5.176
+        },
+        {
+          "feature": "MOMENTUM_42D",
+          "operator": ">=",
+          "threshold": -2.5968
+        },
+        {
+          "feature": "RSI_21",
+          "operator": ">=",
+          "threshold": 42.9849
+        },
+        {
+          "feature": "ATR_PCT",
+          "operator": "<=",
+          "threshold": 1.246
+        },
+        {
+          "feature": "ADX_CHG_3",
+          "operator": "<=",
+          "threshold": 3.2699
+        }
+      ]
+    },
+    "iterations": {
+      "count": 0,
+      "results": []
+    },
+    "success": null
+  },
+  {
+    "strategy_name": "Titan Gold V3",
+    "strategy_dir": "strategies/titan_gold_v3",
+    "symbols": [
+      "UGL",
+      "GLD",
+      "BAR",
+      "GDX"
+    ],
+    "asset_class": "gold",
+    "description": "",
+    "timeframe": "1d",
+    "target": null,
+    "build_date": "2026-02-07",
+    "llm_assisted": false,
+    "model": {
+      "name": "MLP_Large",
+      "f1": 0.585792349726776,
+      "precision": 0.5594989561586639,
+      "recall": 0.6146788990825688,
+      "auc": 0.6454535923354288,
+      "training_years": 11,
+      "hp_iterations": 100
+    },
+    "backtest": {
+      "total_return": null,
+      "win_rate": null,
+      "max_drawdown": null,
+      "sharpe_ratio": null,
+      "total_trades": null,
+      "profit_factor": null
+    },
+    "risk_params": {
+      "stop_loss": 0.02,
+      "trailing_stop": 0.03,
+      "max_positions": 4,
+      "position_size": 0.1,
+      "entry_score_threshold": 3
+    },
+    "features": {
+      "priority": [],
+      "top_ml_features": [
+        "PRICE_VS_VWAP",
+        "MOMENTUM_126D",
+        "MOMENTUM_63D",
+        "PLUS_DI",
+        "OBV_DIFF",
+        "MOMENTUM_21D",
+        "PRICE_52W_RANGE_PCT",
+        "TREND_SLOPE_100D",
+        "MFI",
+        "ROC_20"
+      ],
+      "entry_rules_count": 10,
+      "exit_rules_count": 8,
+      "top_entry_rules": [
+        {
+          "feature": "PRICE_VS_VWAP",
+          "operator": ">=",
+          "threshold": 4.349
+        },
+        {
+          "feature": "MOMENTUM_126D",
+          "operator": "<=",
+          "threshold": 18.2755
+        },
+        {
+          "feature": "MOMENTUM_63D",
+          "operator": ">=",
+          "threshold": -3.0844
+        },
+        {
+          "feature": "PLUS_DI",
+          "operator": ">=",
+          "threshold": 22.6781
+        },
+        {
+          "feature": "OBV_DIFF",
+          "operator": ">=",
+          "threshold": -1123985.6955
+        }
+      ],
+      "top_exit_rules": [
+        {
+          "feature": "PRICE_VS_VWAP",
+          "operator": "<=",
+          "threshold": 29.6813
+        },
+        {
+          "feature": "MOMENTUM_126D",
+          "operator": ">=",
+          "threshold": -1.3481
+        },
+        {
+          "feature": "MOMENTUM_63D",
+          "operator": "<=",
+          "threshold": 9.8187
+        },
+        {
+          "feature": "PLUS_DI",
+          "operator": "<=",
+          "threshold": 38.5689
+        },
+        {
+          "feature": "OBV_DIFF",
+          "operator": "<=",
+          "threshold": 3519578.3549
+        }
+      ]
+    },
+    "iterations": {
+      "count": 0,
+      "results": []
+    },
+    "success": null
+  },
+  {
+    "strategy_name": "Titan_Gold_V4",
+    "strategy_dir": "strategies/titan_gold_v4",
+    "symbols": [
+      "UGL",
+      "GLD",
+      "BAR",
+      "GDX"
+    ],
+    "asset_class": "gold",
+    "description": "Titan_Gold_V4: Momentum-persistence breakout strategy for gold assets. Enters on short-term momentum inflections confirmed by volume flow, using Bollinger squeeze setups and breakout signals as primary catalysts. Maintains 4 positions across all symbols with 25% allocation each. Uses moderate 5% trailing stop to capture multi-week moves while cycling through positions rapidly. Novel approach: combines divergence detection (RSI_BULLISH_DIV) with acceleration signals (PRICE_ACCEL, ROC_5) and volum",
+    "timeframe": "1d",
+    "target": null,
+    "build_date": "2026-02-09",
+    "llm_assisted": true,
+    "model": {
+      "name": "LightGBM",
+      "f1": 0.5388040712468194,
+      "precision": 0.5152068126520681,
+      "recall": 0.5646666666666667,
+      "auc": 0.5625710350255805,
+      "training_years": 27,
+      "hp_iterations": 100
+    },
+    "backtest": {
+      "total_return": null,
+      "win_rate": null,
+      "max_drawdown": null,
+      "sharpe_ratio": null,
+      "total_trades": null,
+      "profit_factor": null
+    },
+    "risk_params": {
+      "stop_loss": 0.045,
+      "trailing_stop": 0.05,
+      "max_positions": 5,
+      "position_size": 0.1,
+      "entry_score_threshold": 6
+    },
+    "features": {
+      "priority": [
+        "PRICE_ACCEL",
+        "ROC_5",
+        "ROC_10",
+        "CMF",
+        "OBV_DIFF",
+        "VOLUME_RATIO",
+        "RSI_BULLISH_DIV",
+        "BB_SQUEEZE",
+        "BREAKOUT_20D",
+        "BB_PCT_B",
+        "MACD_HIST_CHG_1",
+        "RSI_14_CHG_1",
+        "STOCH_CROSS",
+        "MACD_CROSS",
+        "PRICE_VS_EMA_21",
+        "PRICE_VS_EMA_50",
+        "MOM_1M",
+        "MOM_3M",
+        "ATR_PCT",
+        "EMA_CROSS_8_21"
+      ],
+      "top_ml_features": [
+        "TREND_SLOPE_100D",
+        "CMF",
+        "VOLUME_TREND_20D",
+        "ADX",
+        "MOMENTUM_126D",
+        "MOMENTUM_252D",
+        "OBV_EMA",
+        "MOMENTUM_63D",
+        "PRICE_VS_VWAP",
+        "PRICE_VS_52W_LOW"
+      ],
+      "entry_rules_count": 19,
+      "exit_rules_count": 13,
+      "top_entry_rules": [
+        {
+          "feature": "TREND_SLOPE_100D",
+          "operator": "<=",
+          "threshold": 0.1186
+        },
+        {
+          "feature": "CMF",
+          "operator": ">=",
+          "threshold": -0.0673
+        },
+        {
+          "feature": "VOLUME_TREND_20D",
+          "operator": ">=",
+          "threshold": 0.8714
+        },
+        {
+          "feature": "ADX",
+          "operator": "<=",
+          "threshold": 40.2177
+        },
+        {
+          "feature": "MOMENTUM_126D",
+          "operator": ">=",
+          "threshold": -4.9997
+        }
+      ],
+      "top_exit_rules": [
+        {
+          "feature": "TREND_SLOPE_100D",
+          "operator": ">=",
+          "threshold": -0.0489
+        },
+        {
+          "feature": "CMF",
+          "operator": "<=",
+          "threshold": 0.133
+        },
+        {
+          "feature": "VOLUME_TREND_20D",
+          "operator": "<=",
+          "threshold": 1.1299
+        },
+        {
+          "feature": "ADX",
+          "operator": ">=",
+          "threshold": 20.5966
+        },
+        {
+          "feature": "MOMENTUM_126D",
+          "operator": "<=",
+          "threshold": 15.7359
+        }
+      ]
+    },
+    "iterations": {
+      "count": 0,
+      "results": []
+    },
+    "success": null
+  },
+  {
+    "strategy_name": "IBKR UGL Algo V7.9 - Hybrid",
+    "strategy_dir": "strategies/ugl_hybrid",
+    "symbols": [
+      "UGL"
+    ],
+    "asset_class": "gold",
+    "description": "Aggressive UGL 2x leveraged gold trend-following strategy targeting +40% annual returns with max 10% drawdown. Uses 100% capital allocation.",
+    "timeframe": "8h",
+    "target": null,
+    "build_date": "2026-02-06",
+    "llm_assisted": false,
+    "model": {
+      "name": null,
+      "f1": null,
+      "precision": null,
+      "recall": null,
+      "auc": null,
+      "training_years": null,
+      "hp_iterations": null
+    },
+    "backtest": {
+      "total_return": 0.0,
+      "win_rate": 0,
+      "max_drawdown": 0.0,
+      "sharpe_ratio": 0.0,
+      "total_trades": 0,
+      "profit_factor": 0.0
+    },
+    "risk_params": {
+      "stop_loss": 0.1,
+      "trailing_stop": 0.06,
+      "max_positions": 6,
+      "position_size": 0.1,
+      "entry_score_threshold": 3
+    },
+    "features": {
+      "priority": [],
+      "top_ml_features": [],
+      "entry_rules_count": 0,
+      "exit_rules_count": 0,
+      "top_entry_rules": [],
+      "top_exit_rules": []
+    },
+    "iterations": {
+      "count": 0,
+      "results": []
+    },
+    "success": null
+  },
+  {
+    "strategy_name": "Titan_Gold_V5",
+    "strategy_dir": "strategies/titan_gold_v5",
+    "symbols": [
+      "UGL",
+      "GLD",
+      "BAR",
+      "GDX"
+    ],
+    "asset_class": "gold",
+    "description": "Titan_Gold_V5 Iteration 3: Extended Hold Trend Rider with Tighter Entries and Wider Exits. CRITICAL DIAGNOSIS: Iteration 2 achieved 43.3% return but only 8.3% capture rate with 1204 trades averaging tiny profits. The problem is rapid signal exits (1195/1204 trades) - the exit rules fire too quickly, cutting winners before they fully develop. This iteration takes a fundamentally different approach: (1) TIGHTER entries using EMA_STACK_SCORE, PRICE_VS_EMA_200, and HIGHER_HIGH to only enter when mul",
+    "timeframe": "1d",
+    "target": 55.0,
+    "build_date": "2026-02-10",
+    "llm_assisted": true,
+    "model": {
+      "name": "MLP_Large",
+      "f1": 0.6007702182284981,
+      "precision": 0.5416666666666666,
+      "recall": 0.6743515850144092,
+      "auc": 0.6678690238268479,
+      "training_years": 9,
+      "hp_iterations": 100
+    },
+    "backtest": {
+      "total_return": 35.84124500000001,
+      "win_rate": 60.53962900505903,
+      "max_drawdown": 8.02658687491394,
+      "sharpe_ratio": null,
+      "total_trades": 593,
+      "profit_factor": null
+    },
+    "risk_params": {
+      "stop_loss": 0.12,
+      "trailing_stop": 0.08,
+      "max_positions": 4,
+      "position_size": 0.25,
+      "entry_score_threshold": 4
+    },
+    "features": {
+      "priority": [
+        "PRICE_VS_EMA_200",
+        "EMA_STACK_SCORE",
+        "TREND_SLOPE",
+        "PRICE_VS_VWAP",
+        "RSI_14",
+        "ADX",
+        "HIGHER_HIGH",
+        "BREAKOUT_20D",
+        "MOM_1M",
+        "MOM_3M",
+        "MACD_HIST",
+        "BB_PCT_B",
+        "ATR_PCT",
+        "HIGHER_LOW"
+      ],
+      "top_ml_features": [
+        "PRICE_VS_VWAP",
+        "TREND_SLOPE_100D",
+        "ATR_PCT",
+        "MOMENTUM_126D",
+        "BB_WIDTH",
+        "EMA_STACK_SCORE",
+        "PLUS_DI",
+        "PRICE_VS_52W_HIGH",
+        "MACD_SIGNAL",
+        "MOMENTUM_21D"
+      ],
+      "entry_rules_count": 17,
+      "exit_rules_count": 13,
+      "top_entry_rules": [
+        {
+          "feature": "PRICE_VS_VWAP",
+          "operator": ">=",
+          "threshold": 4.3666
+        },
+        {
+          "feature": "TREND_SLOPE_100D",
+          "operator": "<=",
+          "threshold": 0.1205
+        },
+        {
+          "feature": "ATR_PCT",
+          "operator": ">=",
+          "threshold": 1.0119
+        },
+        {
+          "feature": "MOMENTUM_126D",
+          "operator": ">=",
+          "threshold": -1.7016
+        },
+        {
+          "feature": "BB_WIDTH",
+          "operator": ">=",
+          "threshold": 4.6712
+        }
+      ],
+      "top_exit_rules": [
+        {
+          "feature": "PRICE_VS_VWAP",
+          "operator": "<=",
+          "threshold": 25.3894
+        },
+        {
+          "feature": "TREND_SLOPE_100D",
+          "operator": ">=",
+          "threshold": -0.0328
+        },
+        {
+          "feature": "ATR_PCT",
+          "operator": "<=",
+          "threshold": 1.8676
+        },
+        {
+          "feature": "MOMENTUM_126D",
+          "operator": "<=",
+          "threshold": 16.8194
+        },
+        {
+          "feature": "BB_WIDTH",
+          "operator": "<=",
+          "threshold": 9.9896
+        }
+      ]
+    },
+    "iterations": {
+      "count": 3,
+      "results": [
+        {
+          "iteration": 1,
+          "return": 0,
+          "capture": 0.0,
+          "f1": 0.6115288220551378
+        },
+        {
+          "iteration": 2,
+          "return": 43.317332499999964,
+          "capture": 8.309389424851672,
+          "f1": 0.6553059643687065
+        },
+        {
+          "iteration": 3,
+          "return": 35.84124500000001,
+          "capture": 6.875281671061306,
+          "f1": 0.6007702182284981
+        }
+      ]
+    },
+    "success": false
+  }
+]
