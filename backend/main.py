@@ -4,7 +4,7 @@ FastAPI application entry point for Oculus Strategy Platform.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import auth, users, admin, chat, balance, products, ratings, strategies, licenses, subscriptions, payments
+from app.routers import auth, users, admin, chat, balance, products, ratings, strategies, licenses, subscriptions, payments, builds
 
 app = FastAPI(
     title="Oculus Strategy API",
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 app.include_router(strategies.router, prefix="/api/strategies", tags=["strategies"])
+app.include_router(builds.router, tags=["builds"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(chat.router, tags=["chat"])
 app.include_router(balance.router, tags=["balance"])

@@ -21,13 +21,14 @@ class StrategyUpdate(BaseModel):
 class BuildResponse(BaseModel):
     """Schema for strategy build details."""
     uuid: str
+    strategy_id: str
     status: str
     phase: Optional[str] = None
     tokens_consumed: float
     iteration_count: int
     started_at: datetime
     completed_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
 

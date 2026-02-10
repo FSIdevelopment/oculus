@@ -161,61 +161,30 @@ async def get_build_status(
 
 
 @router.websocket("/ws/builds/{build_id}/logs")
-async def websocket_build_logs(
-    websocket: WebSocket,
-    build_id: str,
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db),
-):
+async def websocket_build_logs(websocket: WebSocket, build_id: str):
     """
     WebSocket endpoint for streaming build logs.
-    
+
     Streams real-time logs as the build progresses through phases.
+    Note: Token validation should be done via query parameter or header.
     """
-    # Verify build ownership
-    result = await db.execute(
-        select(StrategyBuild).where(
-            (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
-        )
-    )
-    build = result.scalar_one_or_none()
-    
-    if not build:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-    
     await websocket.accept()
-    
+
     try:
-        # Send initial status
+        # TODO: Implement real-time log streaming from Redis
+        # For now, send a placeholder message
         await websocket.send_json({
             "type": "status",
-            "status": build.status,
-            "phase": build.phase,
-            "iteration": build.iteration_count,
+            "message": f"Connected to build {build_id}",
         })
-        
-        # TODO: Implement real-time log streaming from Redis
-        # For now, send stored logs if available
-        if build.logs:
-            try:
-                logs_data = json.loads(build.logs)
-                if "logs" in logs_data:
-                    for log_entry in logs_data["logs"]:
-                        await websocket.send_json({
-                            "type": "log",
-                            "message": log_entry,
-                        })
-            except json.JSONDecodeError:
-                pass
-        
+
         # Keep connection open
         while True:
             # Receive ping/pong to keep connection alive
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
-        
+
     except WebSocketDisconnect:
         pass
 

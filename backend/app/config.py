@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # Email
     RESEND_API_KEY: str = ""
 
+    # LLM and Build Orchestration
+    ANTHROPIC_API_KEY: str = ""
+    TUNNEL_URL: str = "http://localhost:4040"  # Ngrok tunnel to local M3 Max
+    REDIS_URL: str = "redis://localhost:6379"
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True

@@ -9,6 +9,7 @@ from app.models.license import License
 from app.models.subscription import Subscription
 from app.models.rating import Rating
 from app.models.strategy_build import StrategyBuild
+from app.models.build_history import BuildHistory, FeatureTracker
 
 __all__ = [
     "User",
@@ -21,5 +22,7 @@ __all__ = [
     "Subscription",
     "Rating",
     "StrategyBuild",
+    "BuildHistory",
+    "FeatureTracker",
 ]
 
