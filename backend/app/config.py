@@ -23,10 +23,16 @@ class Settings(BaseSettings):
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""
-    
+    STRIPE_CONNECT_CLIENT_ID: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+
+    # Data Provider Keys (centrally managed)
+    POLYGON_API_KEY: str = ""
+    ALPHAVANTAGE_API_KEY: str = ""
+
     # Email
     RESEND_API_KEY: str = ""
-    
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
