@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import UserResponse
-from app.schemas.users import UserUpdate, PayoutUpdate, BalanceResponse
+from app.schemas.users import UserUpdate, PayoutUpdate
 from app.auth.dependencies import get_current_active_user
 from app.auth.security import hash_password, verify_password
 
@@ -57,17 +57,6 @@ async def update_user_profile(
     await db.refresh(current_user)
     
     return current_user
-
-
-@router.get("/me/balance", response_model=BalanceResponse)
-async def get_user_balance(
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get current user's token balance."""
-    return {
-        "balance": current_user.balance,
-        "currency": "USD"
-    }
 
 
 @router.put("/me/payout")
