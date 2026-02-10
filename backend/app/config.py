@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Email
     RESEND_API_KEY: str = ""
 
+    # Docker Hub
+    DOCKER_HUB_USERNAME: str = "forfrontsolutions"
+    DOCKER_HUB_PAT: str = ""
+
     # LLM and Build Orchestration
     ANTHROPIC_API_KEY: str = ""
     TUNNEL_URL: str = "http://localhost:4040"  # Ngrok tunnel to local M3 Max

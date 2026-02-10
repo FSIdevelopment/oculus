@@ -9,8 +9,8 @@ from app.models.user import User
 from app.models.strategy import Strategy
 from app.models.strategy_build import StrategyBuild
 from app.schemas.strategies import (
-    StrategyCreate, StrategyUpdate, StrategyResponse, 
-    StrategyListResponse, BuildResponse
+    StrategyCreate, StrategyUpdate, StrategyResponse,
+    StrategyListResponse, BuildResponse, DockerInfoResponse
 )
 from app.auth.dependencies import get_current_active_user
 
@@ -230,5 +230,65 @@ async def get_strategy_builds(
         "total": total,
         "skip": skip,
         "limit": limit
+    }
+
+
+@router.get("/{strategy_id}/docker", response_model=DockerInfoResponse)
+async def get_docker_info(
+    strategy_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get Docker pull instructions and usage guide for a strategy."""
+    result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
+            Strategy.user_id == current_user.uuid,
+            Strategy.status != "deleted"
+        )
+    )
+    strategy = result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found"
+        )
+
+    if not strategy.docker_image_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Strategy Docker image not yet built"
+        )
+
+    image_url = strategy.docker_image_url
+    pull_command = f"docker pull {image_url}"
+    run_command = (
+        f"docker run -e LICENSE_ID=<your_license_id> "
+        f"-e WEBHOOK_URL=<your_webhook_url> {image_url}"
+    )
+
+    terms_of_use = """
+This strategy container is proprietary and licensed for authorized use only.
+By running this container, you agree to:
+1. Use this strategy only for authorized trading purposes
+2. Not reverse-engineer, modify, or redistribute this strategy
+3. Maintain confidentiality of strategy logic and parameters
+4. Comply with all applicable financial regulations
+5. Accept all trading risks and losses
+
+For full terms, visit: https://oculusalgorithms.com/terms
+"""
+
+    return {
+        "image_url": image_url,
+        "pull_command": pull_command,
+        "run_command": run_command,
+        "environment_variables": {
+            "LICENSE_ID": "Your strategy license ID (required)",
+            "WEBHOOK_URL": "URL to stream strategy output (optional)",
+            "OCULUS_API_URL": "Oculus API endpoint (default: https://api.oculusalgorithms.com)",
+        },
+        "terms_of_use": terms_of_use,
     }
 

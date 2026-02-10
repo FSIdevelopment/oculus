@@ -63,3 +63,15 @@ class StrategyListResponse(BaseModel):
     skip: int
     limit: int
 
+
+class DockerInfoResponse(BaseModel):
+    """Schema for Docker pull instructions and usage guide."""
+    image_url: str
+    pull_command: str
+    run_command: str
+    environment_variables: dict
+    terms_of_use: str
+
+    class Config:
+        from_attributes = True
+

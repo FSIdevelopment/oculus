@@ -14,6 +14,7 @@ from app.models.chat_history import ChatHistory
 from app.auth.dependencies import get_current_active_user
 from app.schemas.strategies import BuildResponse
 from app.services.build_orchestrator import BuildOrchestrator
+from app.services.docker_builder import DockerBuilder
 from app.config import settings
 
 router = APIRouter()
@@ -175,7 +176,26 @@ async def trigger_build(
             # Check if target metrics are met
             total_return = training_results.get('total_return', 0)
             if total_return >= target_return:
-                build.phase = "completed"
+                # Build Docker image before marking complete
+                build.phase = "building_docker"
+                await db.commit()
+
+                # TODO: Get strategy output directory from training results
+                # For now, use a placeholder path
+                strategy_output_dir = f"/tmp/strategy_{strategy.uuid}"
+
+                docker_builder = DockerBuilder(db)
+                success = await docker_builder.build_and_push(
+                    strategy, build, strategy_output_dir
+                )
+
+                if success:
+                    iteration_logs.append(f"Iteration {iteration}: Docker image built and pushed")
+                    build.phase = "completed"
+                else:
+                    iteration_logs.append(f"Iteration {iteration}: Docker build failed")
+                    build.phase = "completed"
+
                 build.status = "complete"
                 iteration_logs.append(f"Iteration {iteration}: Target achieved ({total_return}% >= {target_return}%)")
                 break

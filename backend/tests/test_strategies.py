@@ -280,3 +280,64 @@ async def test_admin_delete_strategy(client, test_db, test_user, admin_token, us
     )
     assert response.status_code == 204
 
+
+def test_get_docker_info_success(client, test_db, test_user, user_token):
+    """Test getting Docker info for a strategy with built image."""
+    # Create strategy with Docker image
+    strategy = Strategy(
+        uuid="docker-test-1",
+        name="Docker Test Strategy",
+        description="Test",
+        status="complete",
+        user_id=test_user.uuid,
+        docker_registry="forfrontsolutions",
+        docker_image_url="forfrontsolutions/docker-test-strategy:1",
+    )
+    test_db.add(strategy)
+    test_db.commit()
+
+    response = client.get(
+        f"/api/strategies/docker-test-1/docker",
+        headers={"Authorization": f"Bearer {user_token}"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["image_url"] == "forfrontsolutions/docker-test-strategy:1"
+    assert "docker pull" in data["pull_command"]
+    assert "docker run" in data["run_command"]
+    assert "LICENSE_ID" in data["environment_variables"]
+    assert "terms_of_use" in data
+
+
+def test_get_docker_info_not_built(client, test_db, test_user, user_token):
+    """Test getting Docker info for strategy without built image."""
+    # Create strategy without Docker image
+    strategy = Strategy(
+        uuid="no-docker-1",
+        name="No Docker Strategy",
+        description="Test",
+        status="draft",
+        user_id=test_user.uuid,
+    )
+    test_db.add(strategy)
+    test_db.commit()
+
+    response = client.get(
+        f"/api/strategies/no-docker-1/docker",
+        headers={"Authorization": f"Bearer {user_token}"}
+    )
+
+    assert response.status_code == 400
+    assert "not yet built" in response.json()["detail"]
+
+
+def test_get_docker_info_not_found(client, user_token):
+    """Test getting Docker info for non-existent strategy."""
+    response = client.get(
+        "/api/strategies/nonexistent/docker",
+        headers={"Authorization": f"Bearer {user_token}"}
+    )
+
+    assert response.status_code == 404
+
