@@ -3,19 +3,56 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --surface: #141414;
+  --surface-hover: #1a1a1a;
+  --border: #262626;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --text-secondary: #a3a3a3;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  @apply transition-colors duration-200;
+}
+
+html {
+  @apply scroll-smooth;
 }
 
 body {
+  @apply bg-background text-text antialiased;
   color: var(--foreground);
   background: var(--background);
+}
+
+/* Smooth transitions for interactive elements */
+button,
+a,
+input,
+textarea,
+select {
+  @apply transition-colors duration-200;
+}
+
+/* Focus styles for accessibility */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  @apply w-2 h-2;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-surface;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded hover:bg-text-secondary;
 }
 
