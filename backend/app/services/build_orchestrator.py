@@ -26,8 +26,8 @@ class BuildOrchestrator:
         self.logs: List[str] = []
     
     async def initialize(self):
-        """Initialize Redis connection."""
-        self.redis_client = await redis.from_url(settings.REDIS_URL)
+        """Initialize Redis connection via Ngrok tunnel."""
+        self.redis_client = await redis.from_url(settings.TUNNEL_URL)
     
     async def cleanup(self):
         """Clean up resources."""
