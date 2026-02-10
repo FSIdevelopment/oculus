@@ -5,12 +5,12 @@ import { authAPI } from '@/lib/api'
 import Cookies from 'js-cookie'
 
 export interface User {
-  id: string
+  uuid: string
   name: string
   email: string
-  phone?: string
+  phone_number?: string
   user_role: 'user' | 'admin'
-  token_balance: number
+  balance: number
 }
 
 interface AuthContextType {
@@ -56,7 +56,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     try {
       const response = await authAPI.login(email, password)
-      setUser(response.user)
+      if (response.refresh_token) {
+        Cookies.set('refresh_token', response.refresh_token, {
+          expires: 7,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+        })
+      }
+      const userData = await authAPI.getMe()
+      setUser(userData)
     } catch (error) {
       throw error
     }
@@ -70,7 +78,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ) => {
     try {
       const response = await authAPI.register(name, email, password, phone)
-      setUser(response.user)
+      if (response.refresh_token) {
+        Cookies.set('refresh_token', response.refresh_token, {
+          expires: 7,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+        })
+      }
+      const userData = await authAPI.getMe()
+      setUser(userData)
     } catch (error) {
       throw error
     }

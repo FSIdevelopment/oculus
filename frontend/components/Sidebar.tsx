@@ -65,7 +65,7 @@ export default function Sidebar() {
         <div className="px-6 py-4 border-b border-border">
           <p className="text-text-secondary text-sm mb-1">Token Balance</p>
           <p className="text-2xl font-bold text-primary">
-            🪙 {user?.token_balance || 0}
+            🪙 {user?.balance || 0}
           </p>
         </div>
 
