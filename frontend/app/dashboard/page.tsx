@@ -48,7 +48,7 @@ export default function DashboardPage() {
         <div className="bg-surface border border-border rounded-lg p-6">
           <p className="text-text-secondary text-sm mb-2">Token Balance</p>
           <p className="text-3xl font-bold text-primary">
-            🪙 {user?.token_balance || 0}
+            🪙 {user?.balance || 0}
           </p>
         </div>
         <div className="bg-surface border border-border rounded-lg p-6">
