@@ -259,7 +259,7 @@ export default function MarketplaceStrategyPage() {
             <button
               onClick={handleSubmitRating}
               disabled={submittingRating || ratingScore === 0}
-              className="bg-primary hover:bg-primary-hover text-white font-medium px-4 py-2 rounded transition-colors disabled:opacity-50 flex items-center gap-2"
+              className="bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white font-medium px-4 py-2 rounded transition-all hover:shadow-lg disabled:opacity-50 flex items-center gap-2"
             >
               {submittingRating && <Loader2 size={16} className="animate-spin" />}
               Submit Rating
