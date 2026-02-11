@@ -38,6 +38,7 @@ services:
       - key: STRIPE_CONNECT_CLIENT_ID
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: ANTHROPIC_API_KEY
         scope: RUN_TIME
         type: SECRET
@@ -45,10 +46,12 @@ services:
       - key: TUNNEL_URL
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
         value: 5.tcp.ngrok.io:21752
       - key: REDIS_URL
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: DOCKER_HUB_USERNAME
         scope: RUN_TIME
         type: SECRET
