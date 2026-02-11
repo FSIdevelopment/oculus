@@ -5,19 +5,24 @@ from sqlalchemy import select, func
 from datetime import datetime
 import secrets
 import string
+import stripe
 
 from app.database import get_db
+from app.config import settings
 from app.models.user import User
 from app.models.strategy import Strategy
 from app.schemas.users import (
     UserAdminUpdate, UserDetailResponse, UserListResponse,
-    UserListItem, ImpersonationTokenResponse
+    UserListItem, ImpersonationTokenResponse, AdminUserCreate
 )
 from app.schemas.strategies import StrategyResponse, StrategyUpdate, StrategyListResponse
 from app.auth.dependencies import admin_required
 from app.auth.security import hash_password, create_access_token
 
 router = APIRouter()
+
+# Configure Stripe
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 @router.get("/users", response_model=UserListResponse)
@@ -60,6 +65,61 @@ async def list_users(
         "skip": skip,
         "limit": limit
     }
+
+
+@router.post("/users", response_model=UserDetailResponse)
+async def create_user(
+    user_data: AdminUserCreate,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a new user (admin only).
+
+    - Validates email uniqueness
+    - Hashes password with bcrypt
+    - Creates user in DB
+    - Optionally creates Stripe customer (non-blocking)
+    - Returns UserDetailResponse
+    """
+    # Check if email already exists
+    result = await db.execute(select(User).where(User.email == user_data.email))
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already in use"
+        )
+
+    # Create new user
+    new_user = User(
+        name=user_data.name,
+        email=user_data.email,
+        password_hash=hash_password(user_data.password),
+        phone_number=user_data.phone_number,
+        balance=0.0,
+        status=user_data.status,
+        user_role=user_data.user_role
+    )
+
+    # Try to create Stripe customer (non-blocking)
+    if settings.STRIPE_SECRET_KEY:
+        try:
+            customer = stripe.Customer.create(
+                email=user_data.email,
+                name=user_data.name
+            )
+            new_user.stripe_customer_id = customer.id
+        except Exception:
+            # Don't fail user creation if Stripe is unavailable
+            pass
+
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    return new_user
 
 
 @router.get("/users/{user_id}", response_model=UserDetailResponse)

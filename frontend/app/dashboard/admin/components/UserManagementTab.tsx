@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { adminAPI } from '@/lib/api'
-import { Search, Edit2, Trash2, RotateCcw, Eye } from 'lucide-react'
+import { Search, Edit2, Trash2, RotateCcw, Eye, Plus } from 'lucide-react'
 import UserDetailModal from './UserDetailModal'
+import UserCreateModal from './UserCreateModal'
 
 interface User {
   uuid: string
@@ -25,6 +26,7 @@ export default function UserManagementTab() {
   const [total, setTotal] = useState(0)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [showModal, setShowModal] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
   const limit = 20
 
@@ -41,7 +43,7 @@ export default function UserManagementTab() {
         limit,
         search: search || undefined,
       })
-      setUsers(data.data || [])
+      setUsers(data.items || [])
       setTotal(data.total || 0)
     } catch (err) {
       setError('Failed to load users')
@@ -84,7 +86,7 @@ export default function UserManagementTab() {
 
   return (
     <div className="space-y-4">
-      {/* Search Bar */}
+      {/* Search Bar and Create Button */}
       <div className="flex gap-2">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-3 text-text-secondary" size={20} />
@@ -99,6 +101,13 @@ export default function UserManagementTab() {
             className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-text placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover flex items-center gap-2"
+        >
+          <Plus size={20} />
+          Create User
+        </button>
       </div>
 
       {/* Users Table */}
@@ -209,6 +218,17 @@ export default function UserManagementTab() {
             fetchUsers()
             setShowModal(false)
             setSelectedUser(null)
+          }}
+        />
+      )}
+
+      {/* User Create Modal */}
+      {showCreateModal && (
+        <UserCreateModal
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={() => {
+            fetchUsers()
+            setShowCreateModal(false)
           }}
         />
       )}
