@@ -369,6 +369,14 @@ async def trigger_build(
     )
 
 
+@router.get("/api/builds/pricing")
+async def get_build_pricing():
+    """Return current build pricing configuration (public, no auth required)."""
+    return {
+        "tokens_per_iteration": settings.TOKENS_PER_ITERATION,
+    }
+
+
 @router.get("/api/builds/{build_id}", response_model=BuildResponse)
 async def get_build_status(
     build_id: str,
@@ -512,10 +520,3 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
             logger.debug("Unexpected error during client cleanup for build %s", build_id)
 
 
-
-@router.get("/api/builds/pricing")
-async def get_build_pricing():
-    """Return current build pricing configuration (public, no auth required)."""
-    return {
-        "tokens_per_iteration": settings.TOKENS_PER_ITERATION,
-    }
