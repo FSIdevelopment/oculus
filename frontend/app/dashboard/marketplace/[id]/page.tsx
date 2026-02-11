@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { strategyAPI, marketplaceAPI, ratingsAPI } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
@@ -31,7 +31,6 @@ interface Rating {
 
 export default function MarketplaceStrategyPage() {
   const params = useParams()
-  const router = useRouter()
   const { user } = useAuth()
   const strategyId = params.id as string
 

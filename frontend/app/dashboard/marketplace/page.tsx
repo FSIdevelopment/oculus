@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { marketplaceAPI } from '@/lib/api'
-import { Star, TrendingUp, Users, Search } from 'lucide-react'
+import { Users, Search } from 'lucide-react'
 
 interface Strategy {
   uuid: string
@@ -48,7 +48,7 @@ export default function MarketplacePage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedType, setSelectedType] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
-  const [sortOrder, setSortOrder] = useState('desc')
+  const [sortOrder] = useState('desc')
   const [skip, setSkip] = useState(0)
   const [total, setTotal] = useState(0)
 
