@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { loadStripe } from '@stripe/stripe-js'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { loadStripe, Stripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import api from '@/lib/api'
 import { AlertCircle, X } from 'lucide-react'
@@ -19,12 +19,12 @@ interface PaymentFormProps {
   onCancel: () => void
 }
 
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!)
-
 export default function PaymentForm({ product, onSuccess, onCancel }: PaymentFormProps) {
   const [clientSecret, setClientSecret] = useState<string | null>(null)
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const intentCreated = useRef(false)
 
   const createPaymentIntent = useCallback(async () => {
     try {
@@ -32,6 +32,8 @@ export default function PaymentForm({ product, onSuccess, onCancel }: PaymentFor
         product_id: product.uuid,
       })
       setClientSecret(response.data.client_secret)
+      // Use the publishable key from the backend response
+      setStripePromise(loadStripe(response.data.publishable_key))
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create payment intent')
     } finally {
@@ -40,6 +42,8 @@ export default function PaymentForm({ product, onSuccess, onCancel }: PaymentFor
   }, [product.uuid])
 
   useEffect(() => {
+    if (intentCreated.current) return
+    intentCreated.current = true
     createPaymentIntent()
   }, [createPaymentIntent])
 
@@ -89,7 +93,7 @@ export default function PaymentForm({ product, onSuccess, onCancel }: PaymentFor
           <p className="text-2xl font-bold text-primary">${product.price.toFixed(2)}</p>
         </div>
 
-        {clientSecret && (
+        {clientSecret && stripePromise && (
           <Elements stripe={stripePromise} options={{ clientSecret }}>
             <CheckoutForm product={product} onSuccess={onSuccess} onCancel={onCancel} />
           </Elements>
