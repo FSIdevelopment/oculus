@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_CONNECT_CLIENT_ID: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Data Provider Keys (centrally managed)
     POLYGON_API_KEY: str = ""

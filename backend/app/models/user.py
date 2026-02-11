@@ -27,7 +27,8 @@ class User(Base):
     
     # Stripe integration
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    
+    stripe_connect_account_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

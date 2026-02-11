@@ -8,7 +8,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.logging_config import setup_logging
-from app.routers import auth, users, admin, chat, balance, products, ratings, strategies, licenses, subscriptions, payments, builds
+from app.routers import auth, users, admin, chat, balance, products, ratings, strategies, licenses, subscriptions, payments, builds, connect
 
 # Configure logging
 setup_logging()
@@ -63,6 +63,7 @@ app.include_router(ratings.router, tags=["ratings"])
 app.include_router(licenses.router, tags=["licenses"])
 app.include_router(subscriptions.router, tags=["subscriptions"])
 app.include_router(payments.router, tags=["payments"])
+app.include_router(connect.router, tags=["connect"])
 
 
 @app.get("/health")
