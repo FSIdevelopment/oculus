@@ -14,6 +14,11 @@ cd /app
 alembic upgrade head
 echo "Migrations complete!"
 
+# Seed default admin user
+echo "Seeding admin user..."
+python -m scripts.seed_admin
+echo "Admin seed complete!"
+
 # Start the application
 echo "Starting Oculus API..."
 exec "$@"

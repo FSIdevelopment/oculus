@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     TUNNEL_URL: str = "http://localhost:4040"  # Ngrok tunnel to local M3 Max
     REDIS_URL: str = "redis://localhost:6379"
 
+    # Admin Seed
+    ADMIN_EMAIL: str = "admin@oculusalgorithms.com"
+    ADMIN_PASSWORD: str = "Admin123!"
+    ADMIN_NAME: str = "Admin"
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
