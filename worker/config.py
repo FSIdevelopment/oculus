@@ -29,8 +29,17 @@ class WorkerConfig:
 
     @property
     def redis_url(self) -> str:
-        """Redis connection URL."""
-        return os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        """Redis connection URL.
+
+        Checks WORKER_REDIS_URL first (worker-specific override),
+        then REDIS_URL, defaulting to localhost.
+        The worker runs locally alongside the Redis container,
+        so it should connect via localhost, not through the ngrok tunnel.
+        """
+        return os.getenv(
+            'WORKER_REDIS_URL',
+            os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        )
 
     @property
     def redis_host(self) -> str:

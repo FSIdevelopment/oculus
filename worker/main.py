@@ -146,12 +146,17 @@ async def main():
                         key, value = line.split('=', 1)
                         os.environ[key.strip()] = value.strip()
 
-    # Connect to Redis using URL-based connection
+    # Connect to Redis using URL-based connection with timeout settings
     try:
-        redis_client = redis.Redis.from_url(config.redis_url, decode_responses=True)
+        redis_client = redis.Redis.from_url(
+            config.redis_url,
+            decode_responses=True,
+            socket_timeout=30,
+            socket_connect_timeout=10,
+        )
         redis_client.ping()
         logger.info(f"Connected to Redis: {config.redis_url}")
-    except redis.ConnectionError as e:
+    except (redis.ConnectionError, redis.exceptions.TimeoutError) as e:
         logger.error(f"Failed to connect to Redis: {e}")
         sys.exit(1)
 
