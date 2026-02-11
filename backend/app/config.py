@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     # LLM and Build Orchestration
     ANTHROPIC_API_KEY: str = ""
+    CLAUDE_MAX_TOKENS: int = 10000  # Max tokens for Claude API responses (must be > thinking budget)
     TUNNEL_URL: str = "http://localhost:4040"  # Ngrok tunnel to local M3 Max
     REDIS_URL: str = "redis://localhost:6379"
 
