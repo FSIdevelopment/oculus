@@ -22,9 +22,6 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Estimated token cost for a build — used for server-side balance validation
-ESTIMATED_TOKEN_COST = 50
-
 router = APIRouter()
 
 
@@ -115,6 +112,50 @@ async def _run_build_loop(
             # Iteration loop: design → train → refine → repeat
             for iteration in range(max_iterations):
                 build.iteration_count = iteration
+
+                # Deduct tokens for this iteration
+                try:
+                    await deduct_tokens(
+                        bg_db,
+                        user_id,
+                        settings.TOKENS_PER_ITERATION,
+                        f"Build iteration {iteration + 1} for '{strategy_name}'"
+                    )
+                    build.tokens_consumed += settings.TOKENS_PER_ITERATION
+                    await bg_db.commit()
+                except HTTPException as e:
+                    if e.status_code == 402:
+                        # Insufficient balance — stop build gracefully
+                        build.status = "stopped"
+                        build.phase = "insufficient_tokens"
+                        build.completed_at = datetime.utcnow()
+                        build.logs = json.dumps({
+                            "error": "Insufficient token balance",
+                            "message": f"Build stopped at iteration {iteration + 1}. Please purchase more tokens to continue.",
+                            "iterations_completed": iteration,
+                            "tokens_consumed": build.tokens_consumed,
+                        })
+                        await bg_db.commit()
+
+                        # Notify via Redis progress channel
+                        try:
+                            import redis.asyncio as redis_async
+                            redis_client = await redis_async.from_url(settings.REDIS_URL)
+                            await redis_client.publish(
+                                f"oculus:training:progress:build:{build_id}",
+                                json.dumps({
+                                    "phase": "stopped",
+                                    "status": "insufficient_tokens",
+                                    "message": f"Build stopped — insufficient token balance. {iteration} iterations completed.",
+                                })
+                            )
+                            await redis_client.close()
+                        except Exception:
+                            pass  # Redis notification is best-effort
+
+                        logger.info("Build %s stopped at iteration %d due to insufficient tokens", build_id, iteration + 1)
+                        return
+                    raise  # Re-raise non-402 errors
 
                 if iteration == 0:
                     # First iteration: initial design
@@ -246,7 +287,7 @@ async def trigger_build(
     Trigger a new strategy build with LLM iteration loop.
 
     - Validates strategy ownership
-    - Validates token balance (requires >= ESTIMATED_TOKEN_COST)
+    - Validates token balance (requires >= TOKENS_PER_ITERATION for at least one iteration)
     - Creates StrategyBuild record and commits it
     - Launches the build loop as a background task
     - Returns BuildResponse immediately with status="queued"
@@ -265,13 +306,12 @@ async def trigger_build(
             detail="Strategy not found"
         )
 
-    # Server-side token balance validation — deduct tokens before starting build
-    await deduct_tokens(
-        db,
-        current_user.uuid,
-        ESTIMATED_TOKEN_COST,
-        f"Strategy build for '{strategy.name}'"
-    )
+    # Validate user has enough tokens for at least one iteration
+    if current_user.balance < settings.TOKENS_PER_ITERATION:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"Insufficient token balance. You need at least {settings.TOKENS_PER_ITERATION} tokens per iteration. Current balance: {current_user.balance}"
+        )
 
     # Create build record
     build = StrategyBuild(
@@ -337,7 +377,7 @@ async def get_build_status(
 ):
     """
     Get build status and progress.
-    
+
     Returns current phase, status, tokens consumed, and iteration count.
     """
     result = await db.execute(
@@ -346,13 +386,13 @@ async def get_build_status(
         )
     )
     build = result.scalar_one_or_none()
-    
+
     if not build:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Build not found"
         )
-    
+
     return BuildResponse(
         uuid=build.uuid,
         strategy_id=build.strategy_id,
@@ -383,11 +423,20 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
 
     try:
         # Connect to Redis and subscribe to progress channel
-        redis_client = await redis.from_url(settings.REDIS_URL)
-        pubsub = redis_client.pubsub()
+        try:
+            redis_client = await redis.from_url(settings.REDIS_URL)
+            pubsub = redis_client.pubsub()
 
-        progress_channel = f"oculus:training:progress:build:{build_id}"
-        await pubsub.subscribe(progress_channel)
+            progress_channel = f"oculus:training:progress:build:{build_id}"
+            await pubsub.subscribe(progress_channel)
+        except (RedisConnectionError, ConnectionRefusedError, OSError) as e:
+            logger.warning("Cannot connect to Redis for build %s WebSocket: %s", build_id, e)
+            await websocket.send_json({
+                "type": "error",
+                "message": "Build log streaming temporarily unavailable. Build is still running.",
+            })
+            await websocket.close()
+            return
 
         # Send connection confirmation
         await websocket.send_json({
@@ -462,3 +511,11 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
         except Exception:
             logger.debug("Unexpected error during client cleanup for build %s", build_id)
 
+
+
+@router.get("/api/builds/pricing")
+async def get_build_pricing():
+    """Return current build pricing configuration (public, no auth required)."""
+    return {
+        "tokens_per_iteration": settings.TOKENS_PER_ITERATION,
+    }
