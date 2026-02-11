@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { adminAPI } from '@/lib/api'
-import { Search, Edit2, Trash2 } from 'lucide-react'
+import { Search, Trash2 } from 'lucide-react'
 
 interface Strategy {
   uuid: string
@@ -127,12 +127,6 @@ export default function StrategyManagementTab() {
                     <td className="px-6 py-4 text-text">{strategy.subscribers || 0}</td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
-                        <button
-                          className="p-2 hover:bg-surface-hover rounded text-text-secondary hover:text-text"
-                          title="Edit"
-                        >
-                          <Edit2 size={16} />
-                        </button>
                         <button
                           onClick={() => handleDelete(strategy.uuid)}
                           className="p-2 hover:bg-red-900/20 rounded text-text-secondary hover:text-red-400"

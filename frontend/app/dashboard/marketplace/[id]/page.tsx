@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { strategyAPI, marketplaceAPI, ratingsAPI } from '@/lib/api'
+import { marketplaceAPI, ratingsAPI } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
@@ -51,9 +51,9 @@ export default function MarketplaceStrategyPage() {
     setLoading(true)
     setError('')
     try {
-      const data = await strategyAPI.getStrategy(strategyId)
+      const data = await marketplaceAPI.getMarketplaceStrategy(strategyId)
       setStrategy(data)
-      
+
       // Load ratings
       const ratingsData = await ratingsAPI.getStrategyRatings(strategyId)
       setRatings(ratingsData.ratings || [])
