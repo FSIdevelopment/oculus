@@ -239,7 +239,6 @@ export default function StrategiesPage() {
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           strategyName={selectedStrategy.name}
-          strategyId={selectedStrategy.uuid}
           dockerInfo={dockerInfo || undefined}
           licenses={licenses.filter(l => l.strategy_id === selectedStrategy.uuid)}
           onMarketplaceSubmit={handleMarketplaceSubmit}
