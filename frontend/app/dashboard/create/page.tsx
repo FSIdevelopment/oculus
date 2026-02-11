@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
@@ -38,8 +38,6 @@ const TIMEFRAME_OPTIONS = [
   { value: '1d', label: '1 Day' },
 ]
 
-const ESTIMATED_TOKEN_COST = 50
-
 export default function CreateStrategyPage() {
   const router = useRouter()
   const { user } = useAuth()
@@ -47,6 +45,21 @@ export default function CreateStrategyPage() {
   const [error, setError] = useState('')
   const [symbolInput, setSymbolInput] = useState('')
   const [symbols, setSymbols] = useState<string[]>([])
+  const [tokensPerIteration, setTokensPerIteration] = useState<number | null>(null)
+
+  // Fetch per-iteration pricing from the backend on page load
+  useEffect(() => {
+    const fetchPricing = async () => {
+      try {
+        const res = await api.get('/api/builds/pricing')
+        setTokensPerIteration(res.data.tokens_per_iteration)
+      } catch (err) {
+        console.error('Failed to fetch pricing:', err)
+        // Fallback — don't block the page
+      }
+    }
+    fetchPricing()
+  }, [])
 
   const [formData, setFormData] = useState({
     name: '',
@@ -87,10 +100,11 @@ export default function CreateStrategyPage() {
       return
     }
 
-    // Check token balance
-    if (!user || user.balance < ESTIMATED_TOKEN_COST) {
+    // Check token balance against per-iteration cost
+    const minRequired = tokensPerIteration || 10  // fallback default
+    if (!user || user.balance < minRequired) {
       setError(
-        `Insufficient tokens. You have ${user?.balance || 0}, but need at least ${ESTIMATED_TOKEN_COST}`
+        `Insufficient tokens. You need at least ${minRequired} tokens per iteration. Your balance: ${user?.balance || 0}`
       )
       return
     }
@@ -294,8 +308,17 @@ export default function CreateStrategyPage() {
 
         {/* Token Cost */}
         <div className="bg-surface border border-border rounded-lg p-4">
-          <p className="text-sm text-text-secondary mb-2">Estimated Token Cost</p>
-          <p className="text-2xl font-bold text-primary">~{ESTIMATED_TOKEN_COST} tokens</p>
+          <p className="text-sm text-text-secondary mb-2">Token Cost</p>
+          {tokensPerIteration !== null ? (
+            <>
+              <p className="text-2xl font-bold text-primary">{tokensPerIteration} tokens / iteration</p>
+              <p className="text-xs text-text-secondary mt-1">
+                Tokens are charged per iteration of the AI build process
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-text-secondary">Loading pricing...</p>
+          )}
           <p className="text-xs text-text-secondary mt-2">
             Your balance: <span className="text-primary font-medium">{user?.balance || 0}</span> tokens
           </p>
