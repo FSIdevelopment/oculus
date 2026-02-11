@@ -25,6 +25,7 @@ interface AuthContextType {
     password: string,
     phone?: string
   ) => Promise<void>
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -97,6 +98,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null)
   }
 
+  // Refresh user data from the server (e.g., after token purchase)
+  const refreshUser = async () => {
+    try {
+      const userData = await authAPI.getMe()
+      setUser(userData)
+    } catch (error) {
+      console.error('Failed to refresh user:', error)
+    }
+  }
+
   return (
     <AuthContext.Provider
       value={{
@@ -106,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         register,
+        refreshUser,
       }}
     >
       {children}

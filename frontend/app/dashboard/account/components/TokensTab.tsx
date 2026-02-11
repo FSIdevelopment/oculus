@@ -16,7 +16,7 @@ interface Product {
 }
 
 export default function TokensTab() {
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
@@ -41,7 +41,9 @@ export default function TokensTab() {
   }
 
   const handlePaymentSuccess = async () => {
-    // Refresh balance
+    // Refresh global user state (updates sidebar, strategy creation page, etc.)
+    await refreshUser()
+    // Update local balance display too
     try {
       const response = await api.get('/api/users/me/balance')
       setBalance(response.data.balance)
