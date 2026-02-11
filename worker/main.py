@@ -14,6 +14,7 @@ import json
 import logging
 import signal
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
@@ -56,7 +57,13 @@ class TrainingWorker:
         try:
             while self.running:
                 # Block and wait for job ID from queue (timeout=1 to allow graceful shutdown)
-                job_data = self.redis.blpop(config.job_queue, timeout=1)
+                # Wrap blpop in try/except to handle Redis connection errors gracefully
+                try:
+                    job_data = self.redis.blpop(config.job_queue, timeout=1)
+                except Exception as blpop_error:
+                    logger.warning(f"⚠️  blpop error (will retry): {blpop_error}")
+                    time.sleep(1)
+                    continue
 
                 if job_data is None:
                     continue
@@ -139,16 +146,11 @@ async def main():
                         key, value = line.split('=', 1)
                         os.environ[key.strip()] = value.strip()
 
-    # Connect to Redis
+    # Connect to Redis using URL-based connection
     try:
-        redis_client = redis.Redis(
-            host=config.redis_host,
-            port=config.redis_port,
-            db=config.redis_db,
-            decode_responses=True
-        )
+        redis_client = redis.Redis.from_url(config.redis_url, decode_responses=True)
         redis_client.ping()
-        logger.info(f"Connected to Redis: {config.redis_host}:{config.redis_port}")
+        logger.info(f"Connected to Redis: {config.redis_url}")
     except redis.ConnectionError as e:
         logger.error(f"Failed to connect to Redis: {e}")
         sys.exit(1)

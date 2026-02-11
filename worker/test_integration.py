@@ -24,16 +24,11 @@ logger = logging.getLogger(__name__)
 
 async def test_worker():
     """Test the training worker with a sample job."""
-    # Connect to Redis
+    # Connect to Redis using URL-based connection
     try:
-        redis_client = redis.Redis(
-            host=config.redis_host,
-            port=config.redis_port,
-            db=config.redis_db,
-            decode_responses=True
-        )
+        redis_client = redis.Redis.from_url(config.redis_url, decode_responses=True)
         redis_client.ping()
-        logger.info(f"Connected to Redis: {config.redis_host}:{config.redis_port}")
+        logger.info(f"Connected to Redis: {config.redis_url}")
     except redis.ConnectionError as e:
         logger.error(f"Failed to connect to Redis: {e}")
         return False
