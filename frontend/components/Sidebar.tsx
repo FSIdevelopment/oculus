@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -61,8 +62,15 @@ export default function Sidebar() {
         }`}
       >
         {/* Logo */}
-        <div className="p-6 border-b border-border">
-          <h1 className="text-2xl font-bold text-primary">OCULUS</h1>
+        <div className="p-6 border-b border-border flex items-center justify-center">
+          <Image
+            src="/logo.png"
+            alt="Oculus Logo"
+            width={160}
+            height={80}
+            priority
+            className="h-auto w-auto max-w-[160px]"
+          />
         </div>
 
         {/* Token Balance */}

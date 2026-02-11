@@ -305,7 +305,7 @@ export default function CreateStrategyPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-3 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+          className="w-full py-3 bg-gradient-to-r from-[#007cf0] to-[#00dfd8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all hover:shadow-lg flex items-center justify-center gap-2"
         >
           {loading && <Loader2 size={20} className="animate-spin" />}
           {loading ? 'Creating Strategy...' : 'Create & Build Strategy'}

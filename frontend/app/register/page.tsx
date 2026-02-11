@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useAuth } from '@/contexts/AuthContext'
 
 export default function RegisterPage() {
@@ -76,6 +77,17 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="bg-surface border border-border rounded-lg p-8 shadow-lg">
+          {/* Logo */}
+          <div className="flex justify-center mb-8">
+            <Image
+              src="/logo.png"
+              alt="Oculus Logo"
+              width={200}
+              height={100}
+              priority
+              className="h-auto w-auto max-w-[200px]"
+            />
+          </div>
           <h1 className="text-3xl font-bold text-text mb-2">Create Account</h1>
           <p className="text-text-secondary mb-8">Join Oculus to start building strategies</p>
 
@@ -175,7 +187,7 @@ export default function RegisterPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-primary hover:bg-primary-hover text-white font-medium py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-gradient-to-r from-[#007cf0] to-[#00dfd8] hover:shadow-lg text-white font-medium py-2 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Creating account...' : 'Create Account'}
             </button>

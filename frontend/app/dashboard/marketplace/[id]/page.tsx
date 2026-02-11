@@ -165,7 +165,7 @@ export default function MarketplaceStrategyPage() {
           <button
             onClick={handleSubscribe}
             disabled={subscribing}
-            className="bg-primary hover:bg-primary-hover text-white font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+            className="bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white font-medium px-6 py-2 rounded-lg transition-all hover:shadow-lg disabled:opacity-50 flex items-center gap-2"
           >
             {subscribing && <Loader2 size={18} className="animate-spin" />}
             Subscribe - $29/mo

@@ -9,8 +9,9 @@
   --surface: #f8fafc;
   --surface-hover: #f1f5f9;
   --border: #e2e8f0;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
+  --primary: #007cf0;
+  --primary-hover: #0066cc;
+  --primary-gradient: linear-gradient(90deg, #007cf0, #00dfd8);
   --text-secondary: #64748b;
 }
 
@@ -21,8 +22,9 @@ html.dark {
   --surface: #141414;
   --surface-hover: #1a1a1a;
   --border: #262626;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
+  --primary: #00dfd8;
+  --primary-hover: #00c4be;
+  --primary-gradient: linear-gradient(90deg, #007cf0, #00dfd8);
   --text-secondary: #a3a3a3;
 }
 

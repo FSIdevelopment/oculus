@@ -177,7 +177,7 @@ function CheckoutForm({
         <button
           type="submit"
           disabled={loading || !stripe}
-          className="flex-1 px-4 py-2 bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+          className="flex-1 px-4 py-2 bg-gradient-to-r from-[#007cf0] to-[#00dfd8] hover:shadow-lg text-white font-medium rounded-lg transition-all disabled:opacity-50"
         >
           {loading ? 'Processing...' : `Pay $${product.price.toFixed(2)}`}
         </button>

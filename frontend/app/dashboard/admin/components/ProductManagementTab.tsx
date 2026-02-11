@@ -68,7 +68,7 @@ export default function ProductManagementTab() {
       {/* Create Button */}
       <button
         onClick={() => handleOpenModal()}
-        className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
+        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white rounded-lg hover:shadow-lg transition-all"
       >
         <Plus size={20} />
         Create Product
@@ -94,7 +94,7 @@ export default function ProductManagementTab() {
 
                 <div className="space-y-1">
                   <p className="text-text">
-                    <span className="text-text-secondary">Price:</span> ${(product.price / 100).toFixed(2)}
+                    <span className="text-text-secondary">Price:</span> ${product.price.toFixed(2)}
                   </p>
                   <p className="text-text capitalize">
                     <span className="text-text-secondary">Type:</span> {product.product_type}

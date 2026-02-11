@@ -253,14 +253,14 @@ export default function StrategyActionModal({
                     <button
                       onClick={() => handleLicensePurchase('monthly')}
                       disabled={isSubmitting}
-                      className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-colors text-sm"
+                      className="bg-gradient-to-r from-[#007cf0] to-[#00dfd8] disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-all hover:shadow-lg text-sm"
                     >
                       Monthly
                     </button>
                     <button
                       onClick={() => handleLicensePurchase('annual')}
                       disabled={isSubmitting}
-                      className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-colors text-sm"
+                      className="bg-gradient-to-r from-[#007cf0] to-[#00dfd8] disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-all hover:shadow-lg text-sm"
                     >
                       Annual
                     </button>

@@ -160,7 +160,7 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50"
+              className="flex-1 px-4 py-2 bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white rounded-lg hover:shadow-lg transition-all disabled:opacity-50"
             >
               {loading ? 'Saving...' : 'Save Product'}
             </button>
