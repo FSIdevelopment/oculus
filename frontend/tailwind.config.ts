@@ -8,17 +8,18 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#0a0a0a',
-        surface: '#141414',
-        'surface-hover': '#1a1a1a',
-        border: '#262626',
-        primary: '#3b82f6',
-        'primary-hover': '#2563eb',
-        text: '#ededed',
-        'text-secondary': '#a3a3a3',
+        background: 'var(--background)',
+        surface: 'var(--surface)',
+        'surface-hover': 'var(--surface-hover)',
+        border: 'var(--border)',
+        primary: 'var(--primary)',
+        'primary-hover': 'var(--primary-hover)',
+        text: 'var(--foreground)',
+        'text-secondary': 'var(--text-secondary)',
       },
     },
   },
+  darkMode: 'class',
   plugins: [],
 }
 export default config

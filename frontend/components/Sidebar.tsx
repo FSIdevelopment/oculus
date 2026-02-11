@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useTheme } from '@/contexts/ThemeContext'
 import {
   Menu,
   X,
@@ -15,11 +16,14 @@ import {
   FileText,
   LogOut,
   Settings,
+  Sun,
+  Moon,
 } from 'lucide-react'
 
 export default function Sidebar() {
   const router = useRouter()
   const { user, logout } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const [isOpen, setIsOpen] = useState(false)
 
   const handleLogout = () => {
@@ -117,6 +121,14 @@ export default function Sidebar() {
             <p className="text-sm font-medium text-text">{user?.name}</p>
             <p className="text-xs text-text-secondary">{user?.email}</p>
           </div>
+          <button
+            onClick={toggleTheme}
+            className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-primary/10 text-text-secondary hover:text-primary transition-colors"
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+          </button>
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-red-900/20 text-text-secondary hover:text-red-400 transition-colors"

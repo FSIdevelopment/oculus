@@ -2,7 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Light theme (default) */
 :root {
+  --background: #ffffff;
+  --foreground: #111827;
+  --surface: #f8fafc;
+  --surface-hover: #f1f5f9;
+  --border: #e2e8f0;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --text-secondary: #64748b;
+}
+
+/* Dark theme */
+html.dark {
   --background: #0a0a0a;
   --foreground: #ededed;
   --surface: #141414;
