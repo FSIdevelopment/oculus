@@ -23,12 +23,15 @@ services:
       - key: SECRET_KEY
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: STRIPE_SECRET_KEY
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: STRIPE_PUBLISHABLE_KEY
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: STRIPE_WEBHOOK_SECRET
         scope: RUN_TIME
         type: SECRET
@@ -38,27 +41,34 @@ services:
       - key: ANTHROPIC_API_KEY
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: TUNNEL_URL
         scope: RUN_TIME
         type: SECRET
+        value: 5.tcp.ngrok.io:21752
       - key: REDIS_URL
         scope: RUN_TIME
         type: SECRET
       - key: DOCKER_HUB_USERNAME
         scope: RUN_TIME
         type: SECRET
+        value: forefrontsolutions
       - key: DOCKER_HUB_PAT
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: RESEND_API_KEY
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: POLYGON_API_KEY
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: ALPHAVANTAGE_API_KEY
         scope: RUN_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
       - key: CORS_ORIGINS
         scope: RUN_TIME
         value: https://oculusalgorithms.com,https://www.oculusalgorithms.com
@@ -98,4 +108,3 @@ databases:
     version: "16"
     size: db-s-1vcpu-1gb
     num_nodes: 1
-
