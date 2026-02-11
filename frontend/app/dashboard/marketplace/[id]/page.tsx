@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { marketplaceAPI, ratingsAPI } from '@/lib/api'
@@ -43,11 +43,7 @@ export default function MarketplaceStrategyPage() {
   const [ratingReview, setRatingReview] = useState('')
   const [submittingRating, setSubmittingRating] = useState(false)
 
-  useEffect(() => {
-    loadStrategy()
-  }, [strategyId])
-
-  const loadStrategy = async () => {
+  const loadStrategy = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
@@ -63,7 +59,11 @@ export default function MarketplaceStrategyPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [strategyId])
+
+  useEffect(() => {
+    loadStrategy()
+  }, [loadStrategy])
 
   const handleSubscribe = async () => {
     setSubscribing(true)

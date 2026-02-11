@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import api from '@/lib/api'
@@ -26,11 +26,7 @@ export default function PaymentForm({ product, onSuccess, onCancel }: PaymentFor
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    createPaymentIntent()
-  }, [product])
-
-  const createPaymentIntent = async () => {
+  const createPaymentIntent = useCallback(async () => {
     try {
       const response = await api.post('/api/payments/create-intent', {
         product_id: product.uuid,
@@ -41,7 +37,11 @@ export default function PaymentForm({ product, onSuccess, onCancel }: PaymentFor
     } finally {
       setLoading(false)
     }
-  }
+  }, [product.uuid])
+
+  useEffect(() => {
+    createPaymentIntent()
+  }, [createPaymentIntent])
 
   if (loading) {
     return (

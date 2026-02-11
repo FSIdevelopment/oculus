@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { marketplaceAPI } from '@/lib/api'
 import { Users, Search } from 'lucide-react'
@@ -54,7 +54,7 @@ export default function MarketplacePage() {
 
   const limit = 12
 
-  const loadStrategies = async () => {
+  const loadStrategies = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
@@ -73,11 +73,11 @@ export default function MarketplacePage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [skip, selectedType, sortBy, sortOrder])
 
   useEffect(() => {
     loadStrategies()
-  }, [skip, selectedType, sortBy, sortOrder])
+  }, [loadStrategies])
 
   const filteredStrategies = strategies.filter(s =>
     s.name.toLowerCase().includes(searchTerm.toLowerCase())
