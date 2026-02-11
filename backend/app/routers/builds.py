@@ -5,6 +5,8 @@ from sqlalchemy import select
 from datetime import datetime
 import json
 import asyncio
+import logging
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.database import get_db, AsyncSessionLocal
 from app.models.user import User
@@ -17,6 +19,8 @@ from app.services.build_orchestrator import BuildOrchestrator
 from app.services.docker_builder import DockerBuilder
 from app.services.balance import deduct_tokens
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Estimated token cost for a build — used for server-side balance validation
 ESTIMATED_TOKEN_COST = 50
@@ -404,8 +408,25 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
             except asyncio.TimeoutError:
                 pass
 
-            # Check for Redis messages
-            message = await pubsub.get_message()
+            # Check for Redis messages; catch mid-stream Redis disconnects
+            try:
+                message = await pubsub.get_message()
+            except RedisConnectionError:
+                logger.warning(
+                    "Redis connection lost while listening for build %s logs",
+                    build_id,
+                )
+                # Notify the client and close gracefully
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Lost connection to build log stream. Please reconnect.",
+                    })
+                    await websocket.close()
+                except Exception:
+                    pass
+                break
+
             if message and message["type"] == "message":
                 # Relay Redis message to client
                 try:
@@ -424,10 +445,20 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        # Clean up Redis connection
-        if pubsub:
-            await pubsub.unsubscribe()
-            await pubsub.close()
-        if redis_client:
-            await redis_client.close()
+        # Clean up Redis connection; handle cases where Redis already disconnected
+        try:
+            if pubsub:
+                await pubsub.unsubscribe()
+                await pubsub.close()
+        except RedisConnectionError:
+            logger.debug("Redis already disconnected during pub/sub cleanup for build %s", build_id)
+        except Exception:
+            logger.debug("Unexpected error during pub/sub cleanup for build %s", build_id)
+        try:
+            if redis_client:
+                await redis_client.close()
+        except RedisConnectionError:
+            logger.debug("Redis already disconnected during client cleanup for build %s", build_id)
+        except Exception:
+            logger.debug("Unexpected error during client cleanup for build %s", build_id)
 
