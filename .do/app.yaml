@@ -1,0 +1,101 @@
+name: oculus
+region: nyc
+services:
+  - name: api
+    github:
+      repo: FSIdevelopment/oculus
+      branch: main
+      deploy_on_push: true
+    source_dir: /backend
+    build_command: pip install -r requirements.txt
+    run_command: uvicorn main:app --host 0.0.0.0 --port 8080
+    http_port: 8080
+    instance_size_slug: professional-xs
+    instance_count: 1
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 30
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+      - key: SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: STRIPE_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: STRIPE_PUBLISHABLE_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: STRIPE_WEBHOOK_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: STRIPE_CONNECT_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: TUNNEL_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: REDIS_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: DOCKER_HUB_USERNAME
+        scope: RUN_TIME
+        type: SECRET
+      - key: DOCKER_HUB_PAT
+        scope: RUN_TIME
+        type: SECRET
+      - key: RESEND_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: POLYGON_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: ALPHAVANTAGE_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: CORS_ORIGINS
+        scope: RUN_TIME
+        value: https://oculusalgorithms.com,https://www.oculusalgorithms.com
+      - key: ENVIRONMENT
+        scope: RUN_TIME
+        value: production
+      - key: DEBUG
+        scope: RUN_TIME
+        value: "False"
+
+  - name: web
+    github:
+      repo: FSIdevelopment/oculus
+      branch: main
+      deploy_on_push: true
+    source_dir: /frontend
+    build_command: npm install && npm run build
+    run_command: npm start
+    http_port: 3000
+    instance_size_slug: professional-xs
+    instance_count: 1
+    health_check:
+      http_path: /
+      initial_delay_seconds: 15
+      period_seconds: 30
+    envs:
+      - key: NEXT_PUBLIC_API_URL
+        scope: BUILD_TIME
+        value: https://api.oculusalgorithms.com
+      - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        scope: BUILD_TIME
+        type: SECRET
+
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    size: db-s-1vcpu-1gb
+    num_nodes: 1
+
