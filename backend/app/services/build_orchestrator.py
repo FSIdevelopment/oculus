@@ -70,7 +70,7 @@ class BuildOrchestrator:
             response = self.client.messages.create(
                 model="claude-opus-4-6",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
-                thinking={"type": "enabled", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
+                thinking={"type": "adaptive", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
                 messages=[{"role": "user", "content": prompt}],
             )
             
@@ -147,7 +147,7 @@ class BuildOrchestrator:
             response = self.client.messages.create(
                 model="claude-opus-4-6",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
-                thinking={"type": "enabled", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
+                thinking={"type": "adaptive", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
                 messages=[{"role": "user", "content": prompt}],
             )
             
