@@ -94,6 +94,9 @@ export default function TermsPage() {
             <p className="text-text-secondary leading-relaxed mt-4">
               Revenue is calculated based on active subscriptions to your published strategies. Payments are processed monthly and subject to our payment terms.
             </p>
+            <p className="text-text-secondary leading-relaxed mt-4">
+              Marketplace payouts to strategy creators are processed via Stripe Connect. To receive payouts, you must complete Stripe Connect onboarding and provide the necessary banking and identity information required by Stripe.
+            </p>
           </section>
 
           {/* 6. Payment Terms */}
@@ -106,7 +109,7 @@ export default function TermsPage() {
               <strong>Subscription Billing:</strong> Subscription charges are recurring and will continue until you cancel your subscription. Cancellation must be requested through your account settings. Refunds for partial billing periods are not available.
             </p>
             <p className="text-text-secondary leading-relaxed">
-              <strong>Payment Methods:</strong> We accept payment via credit card and other methods as specified during checkout. All payments are processed securely through our payment processor.
+              <strong>Payment Methods:</strong> We accept payment via credit card and other methods as specified during checkout. All payments, subscriptions, and marketplace payouts are processed through Stripe. Personal and financial information provided during payment is shared with Stripe in accordance with their privacy policy.
             </p>
           </section>
 
@@ -127,6 +130,9 @@ export default function TermsPage() {
             </p>
             <p className="text-text-secondary leading-relaxed mt-4">
               <strong>Data Security:</strong> We implement industry-standard security measures to protect your data. However, no system is completely secure, and we cannot guarantee absolute security.
+            </p>
+            <p className="text-text-secondary leading-relaxed mt-4">
+              <strong>Personal Information for Marketplace Payouts:</strong> Users who publish strategies to the marketplace are required to provide personal information (including legal name, address, date of birth, and banking details) to set up payout accounts. This information is collected for internal use only — solely to process marketplace payouts. Payout processing is handled through Stripe Connect; personal information is shared with Stripe for this purpose. Oculus does not sell, rent, or share personal information collected for payout processing with any third parties other than Stripe.
             </p>
           </section>
 
