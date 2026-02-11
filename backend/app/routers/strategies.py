@@ -233,6 +233,64 @@ async def get_strategy_builds(
     }
 
 
+@router.get("/marketplace", response_model=StrategyListResponse)
+async def list_marketplace_strategies(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    strategy_type: str = Query("", min_length=0),
+    sort_by: str = Query("created_at", regex="^(created_at|rating|subscriber_count|target_return)$"),
+    sort_order: str = Query("desc", regex="^(asc|desc)$"),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all published strategies for the marketplace (public, no auth required)."""
+    # Build query for published strategies
+    query = select(Strategy).where(
+        Strategy.status == "complete",
+        Strategy.docker_image_url.isnot(None)  # Only strategies with built Docker images
+    )
+
+    # Filter by strategy type if provided
+    if strategy_type:
+        query = query.where(Strategy.strategy_type == strategy_type)
+
+    # Apply sorting
+    if sort_by == "created_at":
+        sort_column = Strategy.created_at
+    elif sort_by == "rating":
+        sort_column = Strategy.rating
+    elif sort_by == "subscriber_count":
+        sort_column = Strategy.subscriber_count
+    else:  # target_return
+        sort_column = Strategy.target_return
+
+    if sort_order == "asc":
+        query = query.order_by(sort_column.asc())
+    else:
+        query = query.order_by(sort_column.desc())
+
+    # Count total
+    count_result = await db.execute(
+        select(func.count(Strategy.uuid)).where(
+            Strategy.status == "complete",
+            Strategy.docker_image_url.isnot(None)
+        )
+    )
+    total = count_result.scalar()
+
+    # Fetch paginated
+    result = await db.execute(
+        query.offset(skip).limit(limit)
+    )
+    strategies = result.scalars().all()
+
+    return {
+        "items": strategies,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
+
+
 @router.get("/{strategy_id}/docker", response_model=DockerInfoResponse)
 async def get_docker_info(
     strategy_id: str,
