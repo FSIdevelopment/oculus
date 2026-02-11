@@ -158,7 +158,7 @@ export default function StrategyActionModal({
               <button
                 onClick={handleMarketplaceSubmit}
                 disabled={isSubmitting}
-                className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-colors"
+                className="w-full bg-gradient-to-r from-[#007cf0] to-[#00dfd8] disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-all hover:shadow-lg"
               >
                 {isSubmitting ? 'Listing...' : 'List on Marketplace'}
               </button>

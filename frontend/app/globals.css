@@ -40,6 +40,7 @@ body {
   @apply bg-background text-text antialiased;
   color: var(--foreground);
   background: var(--background);
+  font-family: 'Inter', 'Plus Jakarta Sans', sans-serif;
 }
 
 /* Smooth transitions for interactive elements */
