@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 import asyncio
 
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.models.user import User
 from app.models.strategy import Strategy
 from app.models.strategy_build import StrategyBuild
@@ -58,6 +58,172 @@ class BuildTriggerRequest:
     target_return: float = 10.0
 
 
+async def _run_build_loop(
+    build_id: str,
+    strategy_id: str,
+    user_id: str,
+    strategy_name: str,
+    strategy_symbols: list,
+    description: str,
+    target_return: float,
+):
+    """
+    Background task that runs the full build iteration loop.
+
+    Uses its own DB session since the request-scoped session will be closed
+    by the time this coroutine executes.
+    """
+    async with AsyncSessionLocal() as bg_db:
+        # Re-fetch build and user with the background session
+        result = await bg_db.execute(
+            select(StrategyBuild).where(StrategyBuild.uuid == build_id)
+        )
+        build = result.scalar_one_or_none()
+        if not build:
+            return
+
+        result = await bg_db.execute(
+            select(User).where(User.uuid == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            build.status = "failed"
+            build.logs = json.dumps({"error": "User not found"})
+            await bg_db.commit()
+            return
+
+        # Initialize orchestrator with background session
+        orchestrator = BuildOrchestrator(bg_db, user, build)
+        await orchestrator.initialize()
+
+        try:
+            # Configuration
+            max_iterations = getattr(settings, 'MAX_BUILD_ITERATIONS', 5)
+            design = None
+            training_results = None
+            iteration_logs = []
+
+            # Iteration loop: design → train → refine → repeat
+            for iteration in range(max_iterations):
+                build.iteration_count = iteration
+
+                if iteration == 0:
+                    # First iteration: initial design
+                    build.phase = "designing"
+                    build.status = "building"
+
+                    design = await orchestrator.design_strategy(
+                        strategy_name=strategy_name,
+                        symbols=strategy_symbols,
+                        description=description,
+                        timeframe="1d",  # TODO: Get from strategy
+                        target_return=target_return,
+                    )
+
+                    # Save initial design to ChatHistory
+                    await _save_chat_history(
+                        bg_db, user_id, strategy_id,
+                        orchestrator._build_design_prompt(
+                            strategy_name, strategy_symbols,
+                            description, "1d", target_return, ""
+                        ),
+                        json.dumps(design)
+                    )
+
+                    iteration_logs.append(f"Iteration {iteration}: Initial design created")
+                else:
+                    # Subsequent iterations: refine based on training results
+                    build.phase = "refining"
+
+                    design = await orchestrator.refine_strategy(
+                        previous_design=design,
+                        backtest_results=training_results,
+                        iteration=iteration,
+                    )
+
+                    # Save refinement to ChatHistory
+                    refinement_prompt = orchestrator._build_refinement_prompt(
+                        design, training_results, iteration
+                    )
+                    await _save_chat_history(
+                        bg_db, user_id, strategy_id,
+                        refinement_prompt,
+                        json.dumps(design)
+                    )
+
+                    iteration_logs.append(f"Iteration {iteration}: Strategy refined")
+
+                # Dispatch training job
+                build.phase = "training"
+                await bg_db.commit()
+
+                job_id = await orchestrator.dispatch_training_job(
+                    design, strategy_symbols, "1d"
+                )
+
+                # Listen for training results
+                training_results = await orchestrator.listen_for_results(job_id)
+                iteration_logs.append(f"Iteration {iteration}: Training completed")
+
+                # Check if target metrics are met
+                total_return = training_results.get('total_return', 0)
+                if total_return >= target_return:
+                    # Build Docker image before marking complete
+                    build.phase = "building_docker"
+                    await bg_db.commit()
+
+                    # Re-fetch strategy for Docker build
+                    strat_result = await bg_db.execute(
+                        select(Strategy).where(Strategy.uuid == strategy_id)
+                    )
+                    strategy_obj = strat_result.scalar_one_or_none()
+
+                    # TODO: Get strategy output directory from training results
+                    # For now, use a placeholder path
+                    strategy_output_dir = f"/tmp/strategy_{strategy_id}"
+
+                    docker_builder = DockerBuilder(bg_db)
+                    success = await docker_builder.build_and_push(
+                        strategy_obj, build, strategy_output_dir
+                    )
+
+                    if success:
+                        iteration_logs.append(f"Iteration {iteration}: Docker image built and pushed")
+                        build.phase = "completed"
+                    else:
+                        iteration_logs.append(f"Iteration {iteration}: Docker build failed")
+                        build.phase = "completed"
+
+                    build.status = "complete"
+                    iteration_logs.append(
+                        f"Iteration {iteration}: Target achieved ({total_return}% >= {target_return}%)"
+                    )
+                    break
+                elif iteration < max_iterations - 1:
+                    iteration_logs.append(
+                        f"Iteration {iteration}: Below target ({total_return}% < {target_return}%), refining..."
+                    )
+
+            # Final update
+            build.completed_at = datetime.utcnow()
+            build.logs = json.dumps({
+                "design": design,
+                "training_results": training_results,
+                "iteration_logs": iteration_logs,
+                "logs": orchestrator.logs,
+            })
+
+            await bg_db.commit()
+
+        except Exception as e:
+            # Mark build as failed — do NOT crash the background task
+            build.status = "failed"
+            build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs})
+            await bg_db.commit()
+        finally:
+            await orchestrator.cleanup()
+
+
 @router.post("/api/builds/trigger", response_model=BuildResponse)
 async def trigger_build(
     strategy_id: str,
@@ -70,11 +236,9 @@ async def trigger_build(
     Trigger a new strategy build with LLM iteration loop.
 
     - Validates strategy ownership
-    - Creates StrategyBuild record
-    - Initializes build orchestrator
-    - Runs iteration loop: design → train → refine → repeat
-    - Respects max_iterations (default 5)
-    - Returns build UUID for tracking
+    - Creates StrategyBuild record and commits it
+    - Launches the build loop as a background task
+    - Returns BuildResponse immediately with status="queued"
     """
     # Fetch strategy
     result = await db.execute(
@@ -100,140 +264,39 @@ async def trigger_build(
     )
 
     db.add(build)
-    await db.flush()
+    await db.commit()
 
-    # Initialize orchestrator
-    orchestrator = BuildOrchestrator(db, current_user, build)
-    await orchestrator.initialize()
+    # Capture values needed by the background task before the request session closes
+    build_id = build.uuid
+    user_id = current_user.uuid
+    strategy_name = strategy.name
+    strategy_symbols = strategy.symbols or []
+    strategy_description = description or strategy.description or ""
 
-    try:
-        # Configuration
-        max_iterations = getattr(settings, 'MAX_BUILD_ITERATIONS', 5)
-        design = None
-        training_results = None
-        iteration_logs = []
-
-        # Iteration loop: design → train → refine → repeat
-        for iteration in range(max_iterations):
-            build.iteration_count = iteration
-
-            if iteration == 0:
-                # First iteration: initial design
-                build.phase = "designing"
-                build.status = "building"
-
-                design = await orchestrator.design_strategy(
-                    strategy_name=strategy.name,
-                    symbols=strategy.symbols or [],
-                    description=description or strategy.description or "",
-                    timeframe="1d",  # TODO: Get from strategy
-                    target_return=target_return,
-                )
-
-                # Save initial design to ChatHistory
-                await _save_chat_history(
-                    db, current_user.uuid, strategy_id,
-                    orchestrator._build_design_prompt(
-                        strategy.name, strategy.symbols or [],
-                        description or strategy.description or "", "1d", target_return, ""
-                    ),
-                    json.dumps(design)
-                )
-
-                iteration_logs.append(f"Iteration {iteration}: Initial design created")
-            else:
-                # Subsequent iterations: refine based on training results
-                build.phase = "refining"
-
-                design = await orchestrator.refine_strategy(
-                    previous_design=design,
-                    backtest_results=training_results,
-                    iteration=iteration,
-                )
-
-                # Save refinement to ChatHistory
-                refinement_prompt = orchestrator._build_refinement_prompt(
-                    design, training_results, iteration
-                )
-                await _save_chat_history(
-                    db, current_user.uuid, strategy_id,
-                    refinement_prompt,
-                    json.dumps(design)
-                )
-
-                iteration_logs.append(f"Iteration {iteration}: Strategy refined")
-
-            # Dispatch training job
-            build.phase = "training"
-            job_id = await orchestrator.dispatch_training_job(
-                design, strategy.symbols or [], "1d"
-            )
-
-            # Listen for training results
-            training_results = await orchestrator.listen_for_results(job_id)
-            iteration_logs.append(f"Iteration {iteration}: Training completed")
-
-            # Check if target metrics are met
-            total_return = training_results.get('total_return', 0)
-            if total_return >= target_return:
-                # Build Docker image before marking complete
-                build.phase = "building_docker"
-                await db.commit()
-
-                # TODO: Get strategy output directory from training results
-                # For now, use a placeholder path
-                strategy_output_dir = f"/tmp/strategy_{strategy.uuid}"
-
-                docker_builder = DockerBuilder(db)
-                success = await docker_builder.build_and_push(
-                    strategy, build, strategy_output_dir
-                )
-
-                if success:
-                    iteration_logs.append(f"Iteration {iteration}: Docker image built and pushed")
-                    build.phase = "completed"
-                else:
-                    iteration_logs.append(f"Iteration {iteration}: Docker build failed")
-                    build.phase = "completed"
-
-                build.status = "complete"
-                iteration_logs.append(f"Iteration {iteration}: Target achieved ({total_return}% >= {target_return}%)")
-                break
-            elif iteration < max_iterations - 1:
-                iteration_logs.append(f"Iteration {iteration}: Below target ({total_return}% < {target_return}%), refining...")
-
-        # Final update
-        build.completed_at = datetime.utcnow()
-        build.logs = json.dumps({
-            "design": design,
-            "training_results": training_results,
-            "iteration_logs": iteration_logs,
-            "logs": orchestrator.logs,
-        })
-
-        await db.commit()
-
-        return BuildResponse(
-            uuid=build.uuid,
-            strategy_id=build.strategy_id,
-            status=build.status,
-            phase=build.phase,
-            tokens_consumed=build.tokens_consumed,
-            iteration_count=build.iteration_count,
-            started_at=build.started_at,
-            completed_at=build.completed_at,
+    # Launch the build loop as a background task
+    asyncio.create_task(
+        _run_build_loop(
+            build_id=build_id,
+            strategy_id=strategy_id,
+            user_id=user_id,
+            strategy_name=strategy_name,
+            strategy_symbols=strategy_symbols,
+            description=strategy_description,
+            target_return=target_return,
         )
+    )
 
-    except Exception as e:
-        build.status = "failed"
-        build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs})
-        await db.commit()
-        await orchestrator.cleanup()
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Build failed: {str(e)}"
-        )
+    # Return immediately so the frontend can redirect to the build tracking page
+    return BuildResponse(
+        uuid=build.uuid,
+        strategy_id=build.strategy_id,
+        status=build.status,
+        phase=build.phase,
+        tokens_consumed=build.tokens_consumed,
+        iteration_count=build.iteration_count,
+        started_at=build.started_at,
+        completed_at=build.completed_at,
+    )
 
 
 @router.get("/api/builds/{build_id}", response_model=BuildResponse)
@@ -290,7 +353,7 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
 
     try:
         # Connect to Redis and subscribe to progress channel
-        redis_client = await redis.from_url(settings.TUNNEL_URL)
+        redis_client = await redis.from_url(settings.REDIS_URL)
         pubsub = redis_client.pubsub()
 
         progress_channel = f"oculus:training:progress:build:{build_id}"

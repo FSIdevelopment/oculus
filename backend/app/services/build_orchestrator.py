@@ -27,7 +27,7 @@ class BuildOrchestrator:
     
     async def initialize(self):
         """Initialize Redis connection via Ngrok tunnel."""
-        self.redis_client = await redis.from_url(settings.TUNNEL_URL)
+        self.redis_client = await redis.from_url(settings.REDIS_URL)
     
     async def cleanup(self):
         """Clean up resources."""
@@ -89,7 +89,7 @@ class BuildOrchestrator:
         symbols: List[str],
         timeframe: str,
     ) -> str:
-        """Dispatch training job to Redis via TUNNEL_URL."""
+        """Dispatch training job to Redis via REDIS_URL."""
         self._log("Dispatching training job to Redis")
         
         job_payload = {
