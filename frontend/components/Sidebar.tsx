@@ -129,14 +129,28 @@ export default function Sidebar() {
             <p className="text-sm font-medium text-text">{user?.name}</p>
             <p className="text-xs text-text-secondary">{user?.email}</p>
           </div>
-          <button
-            onClick={toggleTheme}
-            className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-primary/10 text-text-secondary hover:text-primary transition-colors"
+          <div
+            className="w-full flex items-center justify-center gap-3 px-4 py-2"
             title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
           >
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
-          </button>
+            <Sun size={16} className={`transition-colors ${theme === 'light' ? 'text-yellow-500' : 'text-text-secondary'}`} />
+            <button
+              onClick={toggleTheme}
+              className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${
+                theme === 'dark' ? 'bg-primary' : 'bg-gray-300'
+              }`}
+              role="switch"
+              aria-checked={theme === 'dark'}
+              aria-label="Toggle dark mode"
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+                  theme === 'dark' ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+            <Moon size={16} className={`transition-colors ${theme === 'dark' ? 'text-primary' : 'text-text-secondary'}`} />
+          </div>
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-hover hover:bg-red-900/20 text-text-secondary hover:text-red-400 transition-colors"
