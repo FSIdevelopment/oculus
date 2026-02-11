@@ -33,11 +33,16 @@ async def create_product(
     
     if settings.STRIPE_SECRET_KEY:
         try:
-            stripe_product = stripe.Product.create(
-                name=product_data.name,
-                description=product_data.description or "",
-                type="service"
-            )
+            # Build Stripe kwargs dynamically - only include description if non-empty
+            # Stripe rejects empty strings for description
+            stripe_kwargs = {
+                "name": product_data.name,
+                "type": "service"
+            }
+            if product_data.description:
+                stripe_kwargs["description"] = product_data.description
+
+            stripe_product = stripe.Product.create(**stripe_kwargs)
             
             stripe_price = stripe.Price.create(
                 product=stripe_product.id,

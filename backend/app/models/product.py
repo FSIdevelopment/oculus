@@ -18,7 +18,7 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     price: Mapped[float] = mapped_column(Float, nullable=False)
-    product_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "tokens", "license"
+    product_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "token_package", "license"
     
     # Token info
     token_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -49,12 +49,12 @@ async def test_create_payment_intent_success(client, test_db):
     test_db.add(user)
     await test_db.commit()
     await test_db.refresh(user)
-    
+
     # Create product
     product = Product(
         name="100 Tokens",
         price=9.99,
-        product_type="tokens",
+        product_type="token_package",
         token_amount=100
     )
     test_db.add(product)
@@ -154,12 +154,12 @@ async def test_confirm_payment_success(client, test_db):
     test_db.add(user)
     await test_db.commit()
     await test_db.refresh(user)
-    
+
     # Create product
     product = Product(
         name="100 Tokens",
         price=9.99,
-        product_type="tokens",
+        product_type="token_package",
         token_amount=100
     )
     test_db.add(product)
@@ -209,18 +209,18 @@ async def test_confirm_payment_idempotency(client, test_db):
     product = Product(
         name="100 Tokens",
         price=9.99,
-        product_type="tokens",
+        product_type="token_package",
         token_amount=100
     )
     test_db.add(product)
     await test_db.commit()
     await test_db.refresh(product)
-    
+
     # Create existing purchase
     purchase = Purchase(
         user_id=user.uuid,
         product_id=product.uuid,
-        product_type="tokens",
+        product_type="token_package",
         stripe_id="pi_test123",
         purchased_at=None
     )
@@ -268,13 +268,13 @@ async def test_confirm_payment_not_succeeded(client, test_db):
     product = Product(
         name="100 Tokens",
         price=9.99,
-        product_type="tokens",
+        product_type="token_package",
         token_amount=100
     )
     test_db.add(product)
     await test_db.commit()
     await test_db.refresh(product)
-    
+
     with patch("stripe.PaymentIntent.retrieve") as mock_retrieve:
         mock_retrieve.return_value = MagicMock(
             status="processing",
@@ -313,13 +313,13 @@ async def test_webhook_payment_succeeded(client, test_db):
     product = Product(
         name="100 Tokens",
         price=9.99,
-        product_type="tokens",
+        product_type="token_package",
         token_amount=100
     )
     test_db.add(product)
     await test_db.commit()
     await test_db.refresh(product)
-    
+
     # Mock Stripe webhook verification
     with patch("stripe.Webhook.construct_event") as mock_event:
         mock_event.return_value = {

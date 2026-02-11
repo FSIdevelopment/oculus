@@ -11,6 +11,7 @@ interface Product {
   name: string
   price: number
   token_amount: number
+  product_type: string
   description?: string
 }
 
@@ -28,7 +29,10 @@ export default function TokensTab() {
   const fetchProducts = async () => {
     try {
       const response = await api.get('/api/products')
-      setProducts(response.data)
+      // Filter to only show token_package products, not licenses
+      const allProducts = Array.isArray(response.data) ? response.data : response.data.data || []
+      const tokenProducts = allProducts.filter((p: any) => p.product_type === 'token_package')
+      setProducts(tokenProducts)
     } catch (error) {
       console.error('Failed to fetch products:', error)
     } finally {
