@@ -40,11 +40,22 @@ async def create_strategy(
         suffix = current_user.uuid[-6:]
         name = f"{strategy_data.name}-{suffix}"
     
-    # Create strategy - store config in symbols field
+    # Extract strategy fields from config dict and store in proper columns
+    config = strategy_data.config or {}
+    strategy_type = config.get("strategy_type")
+    target_return = config.get("target_return")
+    symbols = config.get("symbols", [])
+
+    # Ensure symbols is stored as a JSON list, not the full config dict
+    if not isinstance(symbols, list):
+        symbols = []
+
     new_strategy = Strategy(
         name=name,
         description=strategy_data.description,
-        symbols=strategy_data.config,
+        strategy_type=strategy_type,
+        target_return=target_return,
+        symbols=symbols,
         user_id=current_user.uuid,
         status="draft"
     )

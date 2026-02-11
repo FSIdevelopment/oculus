@@ -15,7 +15,11 @@ from app.auth.dependencies import get_current_active_user
 from app.schemas.strategies import BuildResponse
 from app.services.build_orchestrator import BuildOrchestrator
 from app.services.docker_builder import DockerBuilder
+from app.services.balance import deduct_tokens
 from app.config import settings
+
+# Estimated token cost for a build — used for server-side balance validation
+ESTIMATED_TOKEN_COST = 50
 
 router = APIRouter()
 
@@ -66,6 +70,7 @@ async def _run_build_loop(
     strategy_symbols: list,
     description: str,
     target_return: float,
+    timeframe: str = "1d",
 ):
     """
     Background task that runs the full build iteration loop.
@@ -116,7 +121,7 @@ async def _run_build_loop(
                         strategy_name=strategy_name,
                         symbols=strategy_symbols,
                         description=description,
-                        timeframe="1d",  # TODO: Get from strategy
+                        timeframe=timeframe,
                         target_return=target_return,
                     )
 
@@ -125,7 +130,7 @@ async def _run_build_loop(
                         bg_db, user_id, strategy_id,
                         orchestrator._build_design_prompt(
                             strategy_name, strategy_symbols,
-                            description, "1d", target_return, ""
+                            description, timeframe, target_return, ""
                         ),
                         json.dumps(design)
                     )
@@ -158,7 +163,7 @@ async def _run_build_loop(
                 await bg_db.commit()
 
                 job_id = await orchestrator.dispatch_training_job(
-                    design, strategy_symbols, "1d"
+                    design, strategy_symbols, timeframe
                 )
 
                 # Listen for training results
@@ -229,6 +234,7 @@ async def trigger_build(
     strategy_id: str,
     description: str = "",
     target_return: float = 10.0,
+    timeframe: str = "1d",
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -236,6 +242,7 @@ async def trigger_build(
     Trigger a new strategy build with LLM iteration loop.
 
     - Validates strategy ownership
+    - Validates token balance (requires >= ESTIMATED_TOKEN_COST)
     - Creates StrategyBuild record and commits it
     - Launches the build loop as a background task
     - Returns BuildResponse immediately with status="queued"
@@ -254,6 +261,14 @@ async def trigger_build(
             detail="Strategy not found"
         )
 
+    # Server-side token balance validation — deduct tokens before starting build
+    await deduct_tokens(
+        db,
+        current_user.uuid,
+        ESTIMATED_TOKEN_COST,
+        f"Strategy build for '{strategy.name}'"
+    )
+
     # Create build record
     build = StrategyBuild(
         strategy_id=strategy_id,
@@ -270,7 +285,17 @@ async def trigger_build(
     build_id = build.uuid
     user_id = current_user.uuid
     strategy_name = strategy.name
-    strategy_symbols = strategy.symbols or []
+
+    # Backward-compatible symbols guard: if symbols is a dict (old data),
+    # extract the "symbols" list from it; if it's already a list, use as-is
+    raw_symbols = strategy.symbols
+    if isinstance(raw_symbols, dict):
+        strategy_symbols = raw_symbols.get("symbols", [])
+    elif isinstance(raw_symbols, list):
+        strategy_symbols = raw_symbols
+    else:
+        strategy_symbols = []
+
     strategy_description = description or strategy.description or ""
 
     # Launch the build loop as a background task
@@ -283,6 +308,7 @@ async def trigger_build(
             strategy_symbols=strategy_symbols,
             description=strategy_description,
             target_return=target_return,
+            timeframe=timeframe,
         )
     )
 

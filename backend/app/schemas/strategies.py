@@ -1,5 +1,5 @@
 """Pydantic schemas for strategy endpoints."""
-from typing import Optional, List
+from typing import Optional, List, Any, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -40,7 +40,7 @@ class StrategyResponse(BaseModel):
     description: Optional[str] = None
     status: str
     strategy_type: Optional[str] = None
-    symbols: Optional[dict] = None
+    symbols: Optional[Union[List, dict]] = None
     target_return: Optional[float] = None
     backtest_results: Optional[dict] = None
     docker_registry: Optional[str] = None
