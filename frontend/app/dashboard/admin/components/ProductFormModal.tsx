@@ -23,7 +23,7 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
   const [formData, setFormData] = useState({
     name: product?.name || '',
     description: product?.description || '',
-    price: product ? product.price / 100 : 0,
+    price: product?.price || 0,
     product_type: product?.product_type || 'token_package',
     token_amount: product?.token_amount || 0,
   })
@@ -45,8 +45,11 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
       setError(null)
 
       const submitData = {
-        ...formData,
-        price: Math.round(formData.price * 100), // Convert to cents
+        name: formData.name,
+        description: formData.description,
+        product_type: formData.product_type,
+        token_amount: formData.token_amount || undefined,
+        price_cents: Math.round(formData.price * 100),
       }
 
       if (product) {

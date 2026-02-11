@@ -29,7 +29,7 @@ export default function ProductManagementTab() {
     try {
       setLoading(true)
       const data = await adminAPI.listProducts()
-      setProducts(data.data || [])
+      setProducts(Array.isArray(data) ? data : data.data || [])
     } catch (err) {
       setError('Failed to load products')
       console.error(err)
