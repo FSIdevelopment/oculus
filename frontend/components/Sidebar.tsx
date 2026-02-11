@@ -33,7 +33,7 @@ export default function Sidebar() {
     { label: 'Strategies', icon: BarChart3, href: '/dashboard/strategies' },
     { label: 'Marketplace', icon: ShoppingBag, href: '/dashboard/marketplace' },
     { label: 'Account', icon: User, href: '/dashboard/account' },
-    { label: 'Terms of Use', icon: FileText, href: '/dashboard/terms' },
+    { label: 'Terms of Use', icon: FileText, href: '/terms' },
   ]
 
   const adminItems = user?.user_role === 'admin' ? [

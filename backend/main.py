@@ -24,6 +24,28 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Rate limiting middleware for auth endpoints
+@app.middleware("http")
+async def rate_limit_auth_endpoints(request: Request, call_next):
+    """Apply rate limiting to auth endpoints."""
+    path = request.url.path
+
+    # Apply rate limiting based on endpoint
+    if path == "/api/auth/login":
+        # 5 requests per minute for login
+        try:
+            await limiter.limit("5/minute")(request)
+        except RateLimitExceeded:
+            raise
+    elif path == "/api/auth/register":
+        # 3 requests per minute for register
+        try:
+            await limiter.limit("3/minute")(request)
+        except RateLimitExceeded:
+            raise
+
+    return await call_next(request)
+
 # Parse CORS origins from config
 cors_origins = (
     ["*"] if settings.CORS_ORIGINS == "*"

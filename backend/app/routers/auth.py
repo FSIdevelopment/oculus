@@ -21,7 +21,8 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     """
     Register a new user.
-    
+
+    - Rate limited to 3 requests per minute per IP
     - Validates input (password strength, email format)
     - Checks email uniqueness
     - Hashes password with bcrypt

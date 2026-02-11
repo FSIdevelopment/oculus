@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://user:password@postgres:5432/oculus_db"
     DATABASE_ECHO: bool = False
     
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    # CORS - can be "*" for all origins or comma-separated list
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
     
     # JWT
     SECRET_KEY: str = "your-secret-key-here"
