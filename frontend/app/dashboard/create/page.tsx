@@ -29,6 +29,15 @@ const STRATEGY_TYPES = [
   'Williams %R',
 ]
 
+const TIMEFRAME_OPTIONS = [
+  { value: '5m', label: '5 Minutes' },
+  { value: '15m', label: '15 Minutes' },
+  { value: '30m', label: '30 Minutes' },
+  { value: '1h', label: '1 Hour' },
+  { value: '4h', label: '4 Hours' },
+  { value: '1d', label: '1 Day' },
+]
+
 const ESTIMATED_TOKEN_COST = 50
 
 export default function CreateStrategyPage() {
@@ -42,6 +51,7 @@ export default function CreateStrategyPage() {
   const [formData, setFormData] = useState({
     name: '',
     strategy_type: '',
+    timeframe: '1d',
     target_return: 15,
     comments: '',
     llm_enabled: true,
@@ -94,6 +104,7 @@ export default function CreateStrategyPage() {
         description: formData.comments,
         config: {
           strategy_type: formData.strategy_type,
+          timeframe: formData.timeframe,
           symbols,
           target_return: formData.target_return,
           llm_enabled: formData.llm_enabled,
@@ -108,6 +119,7 @@ export default function CreateStrategyPage() {
           strategy_id: strategyId,
           description: formData.comments,
           target_return: formData.target_return,
+          timeframe: formData.timeframe,
         },
       })
 
@@ -170,6 +182,24 @@ export default function CreateStrategyPage() {
               {STRATEGY_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {type}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Timeframe */}
+          <div>
+            <label className="block text-sm font-medium text-text mb-2">
+              Timeframe *
+            </label>
+            <select
+              value={formData.timeframe}
+              onChange={(e) => setFormData({ ...formData, timeframe: e.target.value })}
+              className="w-full bg-background border border-border rounded px-3 py-2 text-text focus:outline-none focus:border-primary"
+            >
+              {TIMEFRAME_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
