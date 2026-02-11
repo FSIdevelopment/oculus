@@ -15,6 +15,7 @@ export default function RegisterPage() {
     password: '',
     confirmPassword: '',
     phone: '',
+    agreedToTerms: false,
   })
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -35,8 +36,8 @@ export default function RegisterPage() {
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
+    const { name, value, type, checked } = e.target
+    setFormData((prev) => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -56,6 +57,11 @@ export default function RegisterPage() {
 
     if (!validatePassword(formData.password)) {
       setError('Password must be at least 8 characters with uppercase, lowercase, and number')
+      return
+    }
+
+    if (!formData.agreedToTerms) {
+      setError('You must agree to the Terms and Conditions')
       return
     }
 
@@ -184,9 +190,31 @@ export default function RegisterPage() {
               />
             </div>
 
+            <div className="flex items-start gap-3">
+              <input
+                id="agreedToTerms"
+                name="agreedToTerms"
+                type="checkbox"
+                checked={formData.agreedToTerms}
+                onChange={handleChange}
+                className="mt-1 h-4 w-4 rounded border-border accent-primary focus:ring-2 focus:ring-primary"
+              />
+              <label htmlFor="agreedToTerms" className="text-sm text-text-secondary">
+                I agree to the{' '}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:text-primary-hover underline font-medium"
+                >
+                  Terms and Conditions
+                </a>
+              </label>
+            </div>
+
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || !formData.agreedToTerms}
               className="w-full bg-gradient-to-r from-[#007cf0] to-[#00dfd8] hover:shadow-lg text-white font-medium py-2 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Creating account...' : 'Create Account'}
