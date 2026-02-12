@@ -12,7 +12,7 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('dark')
+  const [theme, setTheme] = useState<Theme>('light')
   const [mounted, setMounted] = useState(false)
 
   // Initialize theme on mount
@@ -24,11 +24,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setTheme(savedTheme)
       applyTheme(savedTheme)
     } else {
-      // Fall back to system preference
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-      const systemTheme: Theme = prefersDark ? 'dark' : 'light'
-      setTheme(systemTheme)
-      applyTheme(systemTheme)
+      // Default to light theme when no saved preference
+      setTheme('light')
+      applyTheme('light')
     }
     
     setMounted(true)
