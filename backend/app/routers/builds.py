@@ -147,8 +147,6 @@ async def _run_build_loop(
 
             # Iteration loop: design → train → refine → repeat
             for iteration in range(max_iterations):
-                build.iteration_count = iteration
-
                 # Check for stop signal via Redis key
                 try:
                     stop_client = await redis_async.from_url(settings.REDIS_URL)
@@ -172,6 +170,9 @@ async def _run_build_loop(
                             "phase": "stopped",
                             "iteration": iteration,
                             "message": "Build stopped by user",
+                            "tokens_consumed": build.tokens_consumed,
+                            "iteration_count": build.iteration_count,
+                            "max_iterations": max_iterations,
                         })
                         logger.info("Build %s stopped by user at iteration %d", build_id, iteration)
                         return
@@ -205,6 +206,9 @@ async def _run_build_loop(
                             "phase": "stopped",
                             "status": "insufficient_tokens",
                             "message": f"Build stopped — insufficient token balance. {iteration} iterations completed.",
+                            "tokens_consumed": build.tokens_consumed,
+                            "iteration_count": build.iteration_count,
+                            "max_iterations": max_iterations,
                         })
                         logger.info("Build %s stopped at iteration %d due to insufficient tokens", build_id, iteration + 1)
                         return
@@ -233,6 +237,9 @@ async def _run_build_loop(
                         "phase": "designing",
                         "iteration": iteration,
                         "message": "Designing initial strategy...",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
                     })
 
                     llm_result = await orchestrator.design_strategy(
@@ -269,6 +276,9 @@ async def _run_build_loop(
                             "iteration": iteration,
                             "type": "thinking",
                             "thinking": thinking_text,
+                            "tokens_consumed": build.tokens_consumed,
+                            "iteration_count": build.iteration_count,
+                            "max_iterations": max_iterations,
                         })
 
                     iteration_logs.append(f"Iteration {iteration}: Initial design created")
@@ -281,6 +291,9 @@ async def _run_build_loop(
                         "phase": "refining",
                         "iteration": iteration,
                         "message": f"Refining strategy (iteration {iteration})...",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
                     })
 
                     llm_result = await orchestrator.refine_strategy(
@@ -315,6 +328,9 @@ async def _run_build_loop(
                             "iteration": iteration,
                             "type": "thinking",
                             "thinking": thinking_text,
+                            "tokens_consumed": build.tokens_consumed,
+                            "iteration_count": build.iteration_count,
+                            "max_iterations": max_iterations,
                         })
 
                     iteration_logs.append(f"Iteration {iteration}: Strategy refined")
@@ -327,6 +343,9 @@ async def _run_build_loop(
                     "phase": "training",
                     "iteration": iteration,
                     "message": f"Training model (iteration {iteration})...",
+                    "tokens_consumed": build.tokens_consumed,
+                    "iteration_count": build.iteration_count,
+                    "max_iterations": max_iterations,
                 })
 
                 job_id = await orchestrator.dispatch_training_job(
@@ -357,6 +376,10 @@ async def _run_build_loop(
 
                 await bg_db.commit()
 
+                # Mark iteration as complete (increment AFTER work is persisted)
+                build.iteration_count = iteration + 1
+                await bg_db.commit()
+
                 # Publish per-iteration training results via Redis
                 await _publish_progress(build_id, {
                     "phase": "training_complete",
@@ -372,6 +395,9 @@ async def _run_build_loop(
                         "model_metrics": training_results.get("model_metrics"),
                         "optimal_label_config": training_results.get("optimal_label_config"),
                     },
+                    "tokens_consumed": build.tokens_consumed,
+                    "iteration_count": build.iteration_count,
+                    "max_iterations": max_iterations,
                 })
 
                 # Check if target metrics are met
@@ -384,6 +410,9 @@ async def _run_build_loop(
                         "phase": "building_docker",
                         "iteration": iteration,
                         "message": "Building Docker image...",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
                     })
 
                     # Re-fetch strategy for Docker build
@@ -416,6 +445,9 @@ async def _run_build_loop(
                         "phase": "completed",
                         "iteration": iteration,
                         "message": f"Build complete — target achieved ({total_return}% >= {target_return}%)",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
                     })
                     break
                 elif iteration < max_iterations - 1:
