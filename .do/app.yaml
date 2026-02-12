@@ -7,15 +7,17 @@ services:
       branch: main
       deploy_on_push: true
     source_dir: /backend
-    build_command: pip install -r requirements.txt
-    run_command: uvicorn main:app --host 0.0.0.0 --port 8080
+    dockerfile_path: Dockerfile
     http_port: 8080
     instance_size_slug: professional-xs
     instance_count: 1
     health_check:
       http_path: /health
       initial_delay_seconds: 10
-      period_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 1
+      success_threshold: 1
+      failure_threshold: 3
     envs:
       - key: DATABASE_URL
         scope: RUN_TIME
@@ -94,15 +96,17 @@ services:
       branch: main
       deploy_on_push: true
     source_dir: /frontend
-    build_command: npm install && npm run build
-    run_command: npm start
+    dockerfile_path: Dockerfile
     http_port: 3000
     instance_size_slug: professional-xs
     instance_count: 1
     health_check:
       http_path: /
       initial_delay_seconds: 15
-      period_seconds: 30
+      period_seconds: 10
+      timeout_seconds: 1
+      success_threshold: 1
+      failure_threshold: 3
     envs:
       - key: NEXT_PUBLIC_API_URL
         scope: BUILD_TIME
@@ -111,6 +115,23 @@ services:
         scope: BUILD_TIME
         type: SECRET
         value: PLACEHOLDER_ROTATE_ME
+
+# Pre-deploy job to run database migrations
+jobs:
+  - name: migrate
+    kind: PRE_DEPLOY
+    github:
+      branch: main
+      deploy_on_push: false
+      repo: FSIdevelopment/oculus
+    dockerfile_path: Dockerfile
+    source_dir: /backend
+    instance_size_slug: professional-xs
+    envs:
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+        scope: RUN_TIME
+    run_command: alembic upgrade head
 
 databases:
   - name: db
