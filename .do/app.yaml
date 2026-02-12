@@ -112,7 +112,7 @@ services:
     envs:
       - key: NEXT_PUBLIC_API_URL
         scope: BUILD_TIME
-        value: https://api.oculusalgorithms.com
+        value: ""
       - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
         scope: BUILD_TIME
         type: SECRET
