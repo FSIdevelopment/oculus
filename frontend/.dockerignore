@@ -1,0 +1,15 @@
+node_modules
+.next
+.env
+.env.*
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+.DS_Store
+npm-debug.log
+yarn-error.log
+.eslintcache
+.vercel
+

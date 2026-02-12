@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light theme (default) */
+:root {
+  --background: #ffffff;
+  --foreground: #111827;
+  --surface: #f8fafc;
+  --surface-hover: #f1f5f9;
+  --border: #e2e8f0;
+  --primary: #007cf0;
+  --primary-hover: #0066cc;
+  --primary-gradient: linear-gradient(90deg, #007cf0, #00dfd8);
+  --text-secondary: #64748b;
+}
+
+/* Dark theme */
+html.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --surface: #141414;
+  --surface-hover: #1a1a1a;
+  --border: #262626;
+  --primary: #00dfd8;
+  --primary-hover: #00c4be;
+  --primary-gradient: linear-gradient(90deg, #007cf0, #00dfd8);
+  --text-secondary: #a3a3a3;
+}
+
+* {
+  @apply transition-colors duration-200;
+}
+
+html {
+  @apply scroll-smooth;
+}
+
+body {
+  @apply bg-background text-text antialiased;
+  color: var(--foreground);
+  background: var(--background);
+  font-family: 'Inter', 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Smooth transitions for interactive elements */
+button,
+a,
+input,
+textarea,
+select {
+  @apply transition-colors duration-200;
+}
+
+/* Focus styles for accessibility */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  @apply w-2 h-2;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-surface;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded hover:bg-text-secondary;
+}
+
