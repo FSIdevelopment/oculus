@@ -7,7 +7,7 @@ services:
       branch: main
       deploy_on_push: true
     source_dir: /backend
-    dockerfile_path: Dockerfile
+    dockerfile_path: backend/Dockerfile
     http_port: 8080
     instance_size_slug: professional-xs
     instance_count: 1
@@ -98,7 +98,7 @@ services:
       branch: main
       deploy_on_push: true
     source_dir: /frontend
-    dockerfile_path: Dockerfile
+    dockerfile_path: frontend/Dockerfile
     http_port: 3000
     instance_size_slug: professional-xs
     instance_count: 1
@@ -128,7 +128,7 @@ jobs:
       branch: main
       deploy_on_push: false
       repo: FSIdevelopment/oculus
-    dockerfile_path: Dockerfile
+    dockerfile_path: backend/Dockerfile
     source_dir: /backend
     instance_size_slug: professional-xs
     envs:
