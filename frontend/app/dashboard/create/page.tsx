@@ -66,6 +66,7 @@ export default function CreateStrategyPage() {
     strategy_type: '',
     timeframe: '1d',
     target_return: 15,
+    max_iterations: 5,
     comments: '',
     llm_enabled: true,
   })
@@ -134,6 +135,7 @@ export default function CreateStrategyPage() {
           description: formData.comments,
           target_return: formData.target_return,
           timeframe: formData.timeframe,
+          max_iterations: formData.max_iterations,
         },
       })
 
@@ -275,6 +277,24 @@ export default function CreateStrategyPage() {
               max="500"
               className="w-full bg-background border border-border rounded px-3 py-2 text-text focus:outline-none focus:border-primary"
             />
+          </div>
+
+          {/* Max Iterations */}
+          <div>
+            <label className="block text-sm font-medium text-text mb-2">
+              Max Iterations
+            </label>
+            <input
+              type="number"
+              value={formData.max_iterations}
+              onChange={(e) => setFormData({ ...formData, max_iterations: parseInt(e.target.value) || 1 })}
+              min="1"
+              max="20"
+              className="w-full bg-background border border-border rounded px-3 py-2 text-text focus:outline-none focus:border-primary"
+            />
+            <p className="text-xs text-text-secondary mt-1">
+              Maximum number of AI design-train-refine cycles
+            </p>
           </div>
 
           {/* Comments */}
