@@ -26,6 +26,9 @@ if config.config_file_name is not None:
 database_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@postgres:5432/oculus_db")
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+# asyncpg uses 'ssl' parameter, not 'sslmode' (psycopg2/libpq specific)
+if "sslmode=" in database_url:
+    database_url = database_url.replace("sslmode=", "ssl=")
 config.set_main_option("sqlalchemy.url", database_url)
 
 # add your model's MetaData object here

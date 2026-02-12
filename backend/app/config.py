@@ -17,6 +17,9 @@ class Settings(BaseSettings):
         """Convert standard postgresql:// URL to postgresql+asyncpg:// for async SQLAlchemy."""
         if v.startswith("postgresql://"):
             v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        # asyncpg uses 'ssl' parameter, not 'sslmode' (psycopg2/libpq specific)
+        if "sslmode=" in v:
+            v = v.replace("sslmode=", "ssl=")
         return v
     
     # CORS - can be "*" for all origins or comma-separated list
