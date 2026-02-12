@@ -76,7 +76,7 @@ services:
         value: PLACEHOLDER_ROTATE_ME
       - key: CORS_ORIGINS
         scope: RUN_TIME
-        value: https://oculusalgorithms.com,https://www.oculusalgorithms.com
+        value: https://oculusalgorithms.com,https://www.oculusalgorithms.com,https://app.oculusalgorithms.com,https://oculus-avvr7.ondigitalocean.app
       - key: ENVIRONMENT
         scope: RUN_TIME
         value: production
