@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import asyncio
 import logging
+import time
 import redis.asyncio as redis_async
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -13,6 +14,7 @@ from app.database import get_db, AsyncSessionLocal
 from app.models.user import User
 from app.models.strategy import Strategy
 from app.models.strategy_build import StrategyBuild
+from app.models.build_iteration import BuildIteration
 from app.models.chat_history import ChatHistory
 from app.auth.dependencies import get_current_active_user
 from app.schemas.strategies import BuildResponse
@@ -161,6 +163,10 @@ async def _run_build_loop(
                             "iterations_completed": iteration,
                             "iteration_logs": iteration_logs,
                         })
+                        # Mark current iteration as stopped if one exists
+                        if 'iteration_record' in locals() and iteration_record:
+                            iteration_record.status = "failed"
+                            iteration_record.duration_seconds = time.time() - iter_start_time
                         await bg_db.commit()
                         await _publish_progress(build_id, {
                             "phase": "stopped",
@@ -204,10 +210,24 @@ async def _run_build_loop(
                         return
                     raise  # Re-raise non-402 errors
 
+                # Create BuildIteration record for this iteration
+                iter_start_time = time.time()
+                iteration_record = BuildIteration(
+                    build_id=build_id,
+                    user_id=user_id,
+                    iteration_number=iteration,
+                    status="pending",
+                )
+                bg_db.add(iteration_record)
+                await bg_db.commit()
+                await bg_db.refresh(iteration_record)
+                iteration_uuid = iteration_record.uuid
+
                 if iteration == 0:
                     # First iteration: initial design
                     build.phase = "designing"
                     build.status = "building"
+                    iteration_record.status = "designing"
                     await bg_db.commit()
                     await _publish_progress(build_id, {
                         "phase": "designing",
@@ -224,6 +244,11 @@ async def _run_build_loop(
                     )
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
+
+                    # Store LLM context in iteration record
+                    iteration_record.llm_design = design
+                    iteration_record.llm_thinking = thinking_text
+                    await bg_db.commit()
 
                     # Save initial design to ChatHistory
                     await _save_chat_history(
@@ -250,6 +275,7 @@ async def _run_build_loop(
                 else:
                     # Subsequent iterations: refine based on training results
                     build.phase = "refining"
+                    iteration_record.status = "designing"
                     await bg_db.commit()
                     await _publish_progress(build_id, {
                         "phase": "refining",
@@ -264,6 +290,11 @@ async def _run_build_loop(
                     )
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
+
+                    # Store LLM context in iteration record
+                    iteration_record.llm_design = design
+                    iteration_record.llm_thinking = thinking_text
+                    await bg_db.commit()
 
                     # Save refinement to ChatHistory
                     refinement_prompt = orchestrator._build_refinement_prompt(
@@ -290,6 +321,7 @@ async def _run_build_loop(
 
                 # Dispatch training job
                 build.phase = "training"
+                iteration_record.status = "training"
                 await bg_db.commit()
                 await _publish_progress(build_id, {
                     "phase": "training",
@@ -298,23 +330,47 @@ async def _run_build_loop(
                 })
 
                 job_id = await orchestrator.dispatch_training_job(
-                    design, strategy_symbols, timeframe
+                    design, strategy_symbols, timeframe, iteration_uuid=iteration_uuid
                 )
 
                 # Listen for training results
                 training_results = await orchestrator.listen_for_results(job_id)
                 iteration_logs.append(f"Iteration {iteration}: Training completed")
 
+                # Persist training results to BuildIteration record
+                iteration_record.status = "complete" if training_results.get("status") == "success" else "failed"
+                iteration_record.duration_seconds = time.time() - iter_start_time
+                iteration_record.training_config = training_results.get("design_config")
+                iteration_record.optimal_label_config = training_results.get("optimal_label_config")
+                iteration_record.features = training_results.get("features")
+                iteration_record.hyperparameter_results = training_results.get("hyperparameter_results")
+                iteration_record.nn_training_results = training_results.get("nn_training_results")
+                iteration_record.lstm_training_results = training_results.get("lstm_training_results")
+                iteration_record.model_evaluations = training_results.get("model_evaluations")
+                iteration_record.best_model = training_results.get("best_model")
+                iteration_record.backtest_results = training_results.get("backtest_results")
+
+                # Extract rules from the result
+                extracted = training_results.get("extracted_rules", {})
+                iteration_record.entry_rules = extracted.get("entry_rules")
+                iteration_record.exit_rules = extracted.get("exit_rules")
+
+                await bg_db.commit()
+
                 # Publish per-iteration training results via Redis
                 await _publish_progress(build_id, {
                     "phase": "training_complete",
                     "iteration": iteration,
+                    "iteration_uuid": iteration_uuid,
                     "message": f"Training completed (iteration {iteration})",
                     "results": {
                         "total_return": training_results.get("total_return"),
                         "win_rate": training_results.get("win_rate"),
                         "sharpe_ratio": training_results.get("sharpe_ratio"),
                         "model": training_results.get("model"),
+                        "best_model": training_results.get("best_model"),
+                        "model_metrics": training_results.get("model_metrics"),
+                        "optimal_label_config": training_results.get("optimal_label_config"),
                     },
                 })
 
@@ -383,6 +439,11 @@ async def _run_build_loop(
             build.status = "failed"
             build.completed_at = datetime.utcnow()
             build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs})
+            # Mark current iteration as failed if one was in progress
+            if 'iteration_record' in locals() and iteration_record:
+                iteration_record.status = "failed"
+                if 'iter_start_time' in locals():
+                    iteration_record.duration_seconds = time.time() - iter_start_time
             await bg_db.commit()
         finally:
             await orchestrator.cleanup()

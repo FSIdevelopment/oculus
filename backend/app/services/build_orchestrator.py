@@ -94,10 +94,11 @@ class BuildOrchestrator:
         design: Dict[str, Any],
         symbols: List[str],
         timeframe: str,
+        iteration_uuid: str = None,
     ) -> str:
         """Dispatch training job to Redis via REDIS_URL."""
         self._log("Dispatching training job to Redis")
-        
+
         job_payload = {
             "build_id": self.build.uuid,
             "user_id": self.user.uuid,
@@ -105,6 +106,7 @@ class BuildOrchestrator:
             "symbols": symbols,
             "timeframe": timeframe,
             "timestamp": datetime.utcnow().isoformat(),
+            "iteration_uuid": iteration_uuid,
         }
         
         # Push to Redis queue
