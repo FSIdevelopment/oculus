@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_MAX_TOKENS: int = 10000  # Max tokens for Claude API responses (must be > thinking budget)
     TOKENS_PER_ITERATION: float = 10.0  # Tokens charged per build iteration (env var for quick pricing)
+    MAX_BUILD_ITERATIONS: int = 5  # Default max iterations per build
     TUNNEL_URL: str = "http://localhost:4040"  # Ngrok tunnel to local M3 Max
     REDIS_URL: str = "redis://localhost:6379"
 

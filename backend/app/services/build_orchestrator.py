@@ -49,23 +49,28 @@ class BuildOrchestrator:
         timeframe: str,
         target_return: float,
     ) -> Dict[str, Any]:
-        """Call Claude API to design strategy."""
+        """Call Claude API to design strategy.
+
+        Returns a dict with keys:
+        - "design": the parsed strategy design JSON
+        - "thinking": concatenated thinking block text
+        """
         self._log(f"Starting LLM strategy design for {strategy_name}")
-        
+
         # Get relevant past builds for context
         asset_class = self._infer_asset_class(symbols)
         relevant_builds = await BuildHistoryService.get_relevant_builds(
             self.db, self.user.uuid, symbols, asset_class, max_results=3
         )
-        
+
         # Build context from past builds
         context = self._format_build_context(relevant_builds)
-        
+
         # Create prompt
         prompt = self._build_design_prompt(
             strategy_name, symbols, description, timeframe, target_return, context
         )
-        
+
         try:
             response = self.client.messages.create(
                 model="claude-opus-4-6",
@@ -73,12 +78,13 @@ class BuildOrchestrator:
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
             )
-            
-            # Extract design from response
-            design = self._parse_design_response(response)
-            self._log(f"Strategy design completed: {design.get('strategy_description', 'N/A')[:100]}")
-            return design
-            
+
+            # Extract design and thinking from response
+            result = self._parse_design_response(response)
+            desc_preview = result["design"].get("strategy_description", "N/A")[:100]
+            self._log(f"Strategy design completed: {desc_preview}")
+            return result
+
         except anthropic.APIError as e:
             self._log(f"Claude API error: {e}")
             raise
@@ -136,13 +142,18 @@ class BuildOrchestrator:
         backtest_results: Dict[str, Any],
         iteration: int,
     ) -> Dict[str, Any]:
-        """Refine strategy based on backtest results."""
+        """Refine strategy based on backtest results.
+
+        Returns a dict with keys:
+        - "design": the parsed strategy design JSON
+        - "thinking": concatenated thinking block text
+        """
         self._log(f"Refining strategy (iteration {iteration})")
-        
+
         prompt = self._build_refinement_prompt(
             previous_design, backtest_results, iteration
         )
-        
+
         try:
             response = self.client.messages.create(
                 model="claude-opus-4-6",
@@ -150,11 +161,11 @@ class BuildOrchestrator:
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
             )
-            
-            design = self._parse_design_response(response)
+
+            result = self._parse_design_response(response)
             self._log(f"Strategy refined (iteration {iteration})")
-            return design
-            
+            return result
+
         except anthropic.APIError as e:
             self._log(f"Claude API error during refinement: {e}")
             raise
@@ -239,29 +250,43 @@ Backtest results (iteration {iteration}):
 Provide refined JSON with same structure as before."""
     
     def _parse_design_response(self, response) -> Dict[str, Any]:
-        """Parse Claude response to extract design JSON."""
-        # Extract text from response
+        """Parse Claude response to extract design JSON and thinking content.
+
+        Returns a dict with keys:
+        - "design": the parsed strategy design JSON
+        - "thinking": concatenated thinking block text (empty string if none)
+        """
+        # Extract text and thinking blocks from response
         text = ""
+        thinking_parts: List[str] = []
         for block in response.content:
-            if hasattr(block, "text"):
+            if block.type == "thinking" and hasattr(block, "thinking"):
+                thinking_parts.append(block.thinking)
+            elif hasattr(block, "text"):
                 text += block.text
-        
+
+        thinking_text = "\n".join(thinking_parts)
+
         # Find JSON in response
         import re
         json_match = re.search(r"\{.*\}", text, re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group())
+                design = json.loads(json_match.group())
+                return {"design": design, "thinking": thinking_text}
             except json.JSONDecodeError:
                 pass
-        
+
         # Return default design if parsing fails
         return {
-            "strategy_description": "Default design",
-            "strategy_rationale": "Could not parse Claude response",
-            "priority_features": [],
-            "entry_rules": [],
-            "exit_rules": [],
-            "recommended_n_iter_search": 50,
+            "design": {
+                "strategy_description": "Default design",
+                "strategy_rationale": "Could not parse Claude response",
+                "priority_features": [],
+                "entry_rules": [],
+                "exit_rules": [],
+                "recommended_n_iter_search": 50,
+            },
+            "thinking": thinking_text,
         }
 

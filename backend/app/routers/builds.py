@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import asyncio
 import logging
+import redis.asyncio as redis_async
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from app.database import get_db, AsyncSessionLocal
@@ -56,6 +57,39 @@ async def _save_chat_history(
     await db.flush()
 
 
+async def _publish_progress(build_id: str, data: dict) -> None:
+    """Publish a progress update to the Redis channel for a build (best-effort)."""
+    try:
+        redis_client = await redis_async.from_url(settings.REDIS_URL)
+        await redis_client.publish(
+            f"oculus:training:progress:build:{build_id}",
+            json.dumps(data),
+        )
+        await redis_client.close()
+    except Exception:
+        pass  # Redis notification is best-effort
+
+
+async def _save_thinking_history(
+    db: AsyncSession,
+    user_id: str,
+    strategy_id: str,
+    thinking_text: str,
+) -> None:
+    """Save Claude thinking content to ChatHistory as a 'thinking' message."""
+    if not thinking_text:
+        return
+    thinking_chat = ChatHistory(
+        message=thinking_text,
+        message_type="thinking",
+        content={"type": "thinking"},
+        strategy_id=strategy_id,
+        user_id=user_id,
+    )
+    db.add(thinking_chat)
+    await db.flush()
+
+
 class BuildTriggerRequest:
     """Request to trigger a strategy build."""
     strategy_id: str
@@ -72,6 +106,7 @@ async def _run_build_loop(
     description: str,
     target_return: float,
     timeframe: str = "1d",
+    max_iterations: int = 5,
 ):
     """
     Background task that runs the full build iteration loop.
@@ -94,6 +129,7 @@ async def _run_build_loop(
         user = result.scalar_one_or_none()
         if not user:
             build.status = "failed"
+            build.completed_at = datetime.utcnow()
             build.logs = json.dumps({"error": "User not found"})
             await bg_db.commit()
             return
@@ -103,8 +139,6 @@ async def _run_build_loop(
         await orchestrator.initialize()
 
         try:
-            # Configuration
-            max_iterations = getattr(settings, 'MAX_BUILD_ITERATIONS', 5)
             design = None
             training_results = None
             iteration_logs = []
@@ -112,6 +146,31 @@ async def _run_build_loop(
             # Iteration loop: design → train → refine → repeat
             for iteration in range(max_iterations):
                 build.iteration_count = iteration
+
+                # Check for stop signal via Redis key
+                try:
+                    stop_client = await redis_async.from_url(settings.REDIS_URL)
+                    stop_flag = await stop_client.get(f"oculus:build:stop:{build_id}")
+                    await stop_client.close()
+                    if stop_flag:
+                        build.status = "stopped"
+                        build.phase = "stopped"
+                        build.completed_at = datetime.utcnow()
+                        build.logs = json.dumps({
+                            "message": "Build stopped by user",
+                            "iterations_completed": iteration,
+                            "iteration_logs": iteration_logs,
+                        })
+                        await bg_db.commit()
+                        await _publish_progress(build_id, {
+                            "phase": "stopped",
+                            "iteration": iteration,
+                            "message": "Build stopped by user",
+                        })
+                        logger.info("Build %s stopped by user at iteration %d", build_id, iteration)
+                        return
+                except Exception:
+                    pass  # Redis check is best-effort
 
                 # Deduct tokens for this iteration
                 try:
@@ -136,23 +195,11 @@ async def _run_build_loop(
                             "tokens_consumed": build.tokens_consumed,
                         })
                         await bg_db.commit()
-
-                        # Notify via Redis progress channel
-                        try:
-                            import redis.asyncio as redis_async
-                            redis_client = await redis_async.from_url(settings.REDIS_URL)
-                            await redis_client.publish(
-                                f"oculus:training:progress:build:{build_id}",
-                                json.dumps({
-                                    "phase": "stopped",
-                                    "status": "insufficient_tokens",
-                                    "message": f"Build stopped — insufficient token balance. {iteration} iterations completed.",
-                                })
-                            )
-                            await redis_client.close()
-                        except Exception:
-                            pass  # Redis notification is best-effort
-
+                        await _publish_progress(build_id, {
+                            "phase": "stopped",
+                            "status": "insufficient_tokens",
+                            "message": f"Build stopped — insufficient token balance. {iteration} iterations completed.",
+                        })
                         logger.info("Build %s stopped at iteration %d due to insufficient tokens", build_id, iteration + 1)
                         return
                     raise  # Re-raise non-402 errors
@@ -161,14 +208,22 @@ async def _run_build_loop(
                     # First iteration: initial design
                     build.phase = "designing"
                     build.status = "building"
+                    await bg_db.commit()
+                    await _publish_progress(build_id, {
+                        "phase": "designing",
+                        "iteration": iteration,
+                        "message": "Designing initial strategy...",
+                    })
 
-                    design = await orchestrator.design_strategy(
+                    llm_result = await orchestrator.design_strategy(
                         strategy_name=strategy_name,
                         symbols=strategy_symbols,
                         description=description,
                         timeframe=timeframe,
                         target_return=target_return,
                     )
+                    design = llm_result["design"]
+                    thinking_text = llm_result.get("thinking", "")
 
                     # Save initial design to ChatHistory
                     await _save_chat_history(
@@ -179,17 +234,36 @@ async def _run_build_loop(
                         ),
                         json.dumps(design)
                     )
+                    # Save thinking content to ChatHistory
+                    await _save_thinking_history(bg_db, user_id, strategy_id, thinking_text)
+
+                    # Publish thinking via Redis
+                    if thinking_text:
+                        await _publish_progress(build_id, {
+                            "phase": "designing",
+                            "iteration": iteration,
+                            "type": "thinking",
+                            "thinking": thinking_text,
+                        })
 
                     iteration_logs.append(f"Iteration {iteration}: Initial design created")
                 else:
                     # Subsequent iterations: refine based on training results
                     build.phase = "refining"
+                    await bg_db.commit()
+                    await _publish_progress(build_id, {
+                        "phase": "refining",
+                        "iteration": iteration,
+                        "message": f"Refining strategy (iteration {iteration})...",
+                    })
 
-                    design = await orchestrator.refine_strategy(
+                    llm_result = await orchestrator.refine_strategy(
                         previous_design=design,
                         backtest_results=training_results,
                         iteration=iteration,
                     )
+                    design = llm_result["design"]
+                    thinking_text = llm_result.get("thinking", "")
 
                     # Save refinement to ChatHistory
                     refinement_prompt = orchestrator._build_refinement_prompt(
@@ -200,12 +274,28 @@ async def _run_build_loop(
                         refinement_prompt,
                         json.dumps(design)
                     )
+                    # Save thinking content to ChatHistory
+                    await _save_thinking_history(bg_db, user_id, strategy_id, thinking_text)
+
+                    # Publish thinking via Redis
+                    if thinking_text:
+                        await _publish_progress(build_id, {
+                            "phase": "refining",
+                            "iteration": iteration,
+                            "type": "thinking",
+                            "thinking": thinking_text,
+                        })
 
                     iteration_logs.append(f"Iteration {iteration}: Strategy refined")
 
                 # Dispatch training job
                 build.phase = "training"
                 await bg_db.commit()
+                await _publish_progress(build_id, {
+                    "phase": "training",
+                    "iteration": iteration,
+                    "message": f"Training model (iteration {iteration})...",
+                })
 
                 job_id = await orchestrator.dispatch_training_job(
                     design, strategy_symbols, timeframe
@@ -215,12 +305,30 @@ async def _run_build_loop(
                 training_results = await orchestrator.listen_for_results(job_id)
                 iteration_logs.append(f"Iteration {iteration}: Training completed")
 
+                # Publish per-iteration training results via Redis
+                await _publish_progress(build_id, {
+                    "phase": "training_complete",
+                    "iteration": iteration,
+                    "message": f"Training completed (iteration {iteration})",
+                    "results": {
+                        "total_return": training_results.get("total_return"),
+                        "win_rate": training_results.get("win_rate"),
+                        "sharpe_ratio": training_results.get("sharpe_ratio"),
+                        "model": training_results.get("model"),
+                    },
+                })
+
                 # Check if target metrics are met
                 total_return = training_results.get('total_return', 0)
                 if total_return >= target_return:
                     # Build Docker image before marking complete
                     build.phase = "building_docker"
                     await bg_db.commit()
+                    await _publish_progress(build_id, {
+                        "phase": "building_docker",
+                        "iteration": iteration,
+                        "message": "Building Docker image...",
+                    })
 
                     # Re-fetch strategy for Docker build
                     strat_result = await bg_db.execute(
@@ -248,6 +356,11 @@ async def _run_build_loop(
                     iteration_logs.append(
                         f"Iteration {iteration}: Target achieved ({total_return}% >= {target_return}%)"
                     )
+                    await _publish_progress(build_id, {
+                        "phase": "completed",
+                        "iteration": iteration,
+                        "message": f"Build complete — target achieved ({total_return}% >= {target_return}%)",
+                    })
                     break
                 elif iteration < max_iterations - 1:
                     iteration_logs.append(
@@ -268,6 +381,7 @@ async def _run_build_loop(
         except Exception as e:
             # Mark build as failed — do NOT crash the background task
             build.status = "failed"
+            build.completed_at = datetime.utcnow()
             build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs})
             await bg_db.commit()
         finally:
@@ -280,6 +394,7 @@ async def trigger_build(
     description: str = "",
     target_return: float = 10.0,
     timeframe: str = "1d",
+    max_iterations: int = 5,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -353,6 +468,7 @@ async def trigger_build(
             description=strategy_description,
             target_return=target_return,
             timeframe=timeframe,
+            max_iterations=max_iterations,
         )
     )
 
@@ -410,6 +526,170 @@ async def get_build_status(
         iteration_count=build.iteration_count,
         started_at=build.started_at,
         completed_at=build.completed_at,
+    )
+
+
+
+@router.post("/api/builds/{build_id}/stop", response_model=BuildResponse)
+async def stop_build(
+    build_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Stop an active build gracefully.
+
+    Sets a Redis stop key that the build loop checks at each iteration.
+    Only builds with status 'building' or 'queued' can be stopped.
+    """
+    # Fetch build and validate ownership
+    result = await db.execute(
+        select(StrategyBuild).where(
+            (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
+        )
+    )
+    build = result.scalar_one_or_none()
+
+    if not build:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Build not found"
+        )
+
+    if build.status not in ("building", "queued"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot stop build with status '{build.status}'. Only 'building' or 'queued' builds can be stopped."
+        )
+
+    # Set Redis stop key with 1-hour TTL
+    try:
+        redis_client = await redis_async.from_url(settings.REDIS_URL)
+        await redis_client.set(f"oculus:build:stop:{build_id}", "1", ex=3600)
+        await redis_client.close()
+    except Exception as e:
+        logger.warning("Failed to set Redis stop key for build %s: %s", build_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not signal build to stop. Please try again."
+        )
+
+    return BuildResponse(
+        uuid=build.uuid,
+        strategy_id=build.strategy_id,
+        status=build.status,
+        phase=build.phase,
+        tokens_consumed=build.tokens_consumed,
+        iteration_count=build.iteration_count,
+        started_at=build.started_at,
+        completed_at=build.completed_at,
+    )
+
+
+@router.post("/api/builds/{build_id}/restart", response_model=BuildResponse)
+async def restart_build(
+    build_id: str,
+    max_iterations: int = 5,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Restart a failed or stopped build by creating a new build record.
+
+    Creates a new StrategyBuild and launches a fresh build loop.
+    Only builds with status 'failed' or 'stopped' can be restarted.
+    """
+    # Fetch original build and validate ownership
+    result = await db.execute(
+        select(StrategyBuild).where(
+            (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
+        )
+    )
+    original_build = result.scalar_one_or_none()
+
+    if not original_build:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Build not found"
+        )
+
+    if original_build.status not in ("failed", "stopped"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot restart build with status '{original_build.status}'. Only 'failed' or 'stopped' builds can be restarted."
+        )
+
+    # Validate user has enough tokens for at least one iteration
+    if current_user.balance < settings.TOKENS_PER_ITERATION:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"Insufficient token balance. You need at least {settings.TOKENS_PER_ITERATION} tokens per iteration. Current balance: {current_user.balance}"
+        )
+
+    # Fetch the strategy for the build
+    strat_result = await db.execute(
+        select(Strategy).where(
+            (Strategy.uuid == original_build.strategy_id) & (Strategy.user_id == current_user.uuid)
+        )
+    )
+    strategy = strat_result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found"
+        )
+
+    # Create a NEW build record (don't reuse the failed/stopped one)
+    new_build = StrategyBuild(
+        strategy_id=original_build.strategy_id,
+        user_id=current_user.uuid,
+        status="queued",
+        phase="initializing",
+        started_at=datetime.utcnow(),
+    )
+    db.add(new_build)
+    await db.commit()
+
+    # Capture values for background task
+    new_build_id = new_build.uuid
+    user_id = current_user.uuid
+    strategy_name = strategy.name
+
+    raw_symbols = strategy.symbols
+    if isinstance(raw_symbols, dict):
+        strategy_symbols = raw_symbols.get("symbols", [])
+    elif isinstance(raw_symbols, list):
+        strategy_symbols = raw_symbols
+    else:
+        strategy_symbols = []
+
+    strategy_description = strategy.description or ""
+
+    # Launch the build loop as a background task
+    asyncio.create_task(
+        _run_build_loop(
+            build_id=new_build_id,
+            strategy_id=original_build.strategy_id,
+            user_id=user_id,
+            strategy_name=strategy_name,
+            strategy_symbols=strategy_symbols,
+            description=strategy_description,
+            target_return=strategy.target_return or 10.0,
+            timeframe="1d",
+            max_iterations=max_iterations,
+        )
+    )
+
+    return BuildResponse(
+        uuid=new_build.uuid,
+        strategy_id=new_build.strategy_id,
+        status=new_build.status,
+        phase=new_build.phase,
+        tokens_consumed=new_build.tokens_consumed,
+        iteration_count=new_build.iteration_count,
+        started_at=new_build.started_at,
+        completed_at=new_build.completed_at,
     )
 
 

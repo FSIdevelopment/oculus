@@ -210,24 +210,33 @@ async def test_build_orchestrator_infer_asset_class(test_db, test_user, test_bui
 
 @pytest.mark.asyncio
 async def test_build_orchestrator_parse_design_response(test_db, test_user, test_build):
-    """Test parsing Claude response."""
+    """Test parsing Claude response with text and thinking blocks."""
     orchestrator = BuildOrchestrator(test_db, test_user, test_build)
 
-    # Mock response with JSON
-    class MockContent:
+    # Mock response blocks with type attribute
+    class MockTextBlock:
         def __init__(self, text):
+            self.type = "text"
             self.text = text
+
+    class MockThinkingBlock:
+        def __init__(self, thinking):
+            self.type = "thinking"
+            self.thinking = thinking
 
     class MockResponse:
         def __init__(self):
             self.content = [
-                MockContent('Some text before\n{"strategy_description": "Test", "priority_features": ["RSI"]}\nSome text after')
+                MockThinkingBlock("I should design a momentum strategy using RSI."),
+                MockTextBlock('Some text before\n{"strategy_description": "Test", "priority_features": ["RSI"]}\nSome text after'),
             ]
 
-    design = orchestrator._parse_design_response(MockResponse())
+    result = orchestrator._parse_design_response(MockResponse())
 
-    assert design["strategy_description"] == "Test"
-    assert "RSI" in design["priority_features"]
+    # Result now returns {"design": ..., "thinking": ...}
+    assert result["design"]["strategy_description"] == "Test"
+    assert "RSI" in result["design"]["priority_features"]
+    assert "momentum strategy" in result["thinking"]
 
 
 @pytest.mark.asyncio
