@@ -1,7 +1,7 @@
 """Application configuration loaded from environment variables."""
 from typing import List
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://user:password@postgres:5432/oculus_db"
     DATABASE_ECHO: bool = False
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def ensure_async_driver(cls, v: str) -> str:
+        """Convert standard postgresql:// URL to postgresql+asyncpg:// for async SQLAlchemy."""
+        if v.startswith("postgresql://"):
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
     
     # CORS - can be "*" for all origins or comma-separated list
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://localhost:8000"
