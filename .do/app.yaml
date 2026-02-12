@@ -85,10 +85,10 @@ services:
         value: "False"
       - key: CLAUDE_MAX_TOKENS
         scope: RUN_TIME
-        value: 10000
+        value: "10000"
       - key: TOKENS_PER_ITERATION
         scope: RUN_TIME
-        value: 10
+        value: "10"
 
   - name: web
     github:
