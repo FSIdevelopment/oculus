@@ -203,9 +203,18 @@ export default function BuildDetailPage() {
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const wsUrl = apiUrl.replace('http', 'ws')
-      const wsEndpoint = `${wsUrl}/ws/builds/${buildUuid}/logs`
+      // Derive WebSocket URL from the API URL or current window location
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      let wsBase: string
+      if (apiUrl) {
+        // Absolute API URL provided — swap protocol from http(s) to ws(s)
+        wsBase = apiUrl.replace(/^http/, 'ws')
+      } else {
+        // Relative/empty API URL — derive from current browser location
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        wsBase = `${protocol}//${window.location.host}`
+      }
+      const wsEndpoint = `${wsBase}/ws/builds/${buildUuid}/logs`
 
       const ws = new WebSocket(wsEndpoint)
 
