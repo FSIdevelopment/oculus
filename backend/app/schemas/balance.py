@@ -33,6 +33,7 @@ class BalanceResponse(BaseModel):
     
     user_id: str
     balance: float
+    currency: str = "USD"
     
     class Config:
         from_attributes = True
