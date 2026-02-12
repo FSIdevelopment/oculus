@@ -35,6 +35,7 @@ services:
       - key: STRIPE_WEBHOOK_SECRET
         scope: RUN_TIME
         type: SECRET
+        value: PENDING
       - key: STRIPE_CONNECT_CLIENT_ID
         scope: RUN_TIME
         type: SECRET
@@ -47,7 +48,6 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: PLACEHOLDER_ROTATE_ME
-        value: 5.tcp.ngrok.io:21752
       - key: REDIS_URL
         scope: RUN_TIME
         type: SECRET
@@ -81,6 +81,12 @@ services:
       - key: DEBUG
         scope: RUN_TIME
         value: "False"
+      - key: CLAUDE_MAX_TOKENS
+        scope: RUN_TIME
+        value: 10000
+      - key: TOKENS_PER_ITERATION
+        scope: RUN_TIME
+        value: 10
 
   - name: web
     github:
@@ -104,6 +110,7 @@ services:
       - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
         scope: BUILD_TIME
         type: SECRET
+        value: PLACEHOLDER_ROTATE_ME
 
 databases:
   - name: db
