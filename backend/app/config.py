@@ -23,7 +23,7 @@ class Settings(BaseSettings):
         return v
     
     # CORS - can be "*" for all origins or comma-separated list
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://localhost:8000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://localhost:8000,https://app.oculusalgorithms.com,https://oculus-avvr7.ondigitalocean.app"
     
     # JWT
     SECRET_KEY: str = "your-secret-key-here"
