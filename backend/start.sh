@@ -13,6 +13,10 @@ if [ -z "$DATABASE_URL" ]; then
 fi
 echo "✓ DATABASE_URL is configured"
 
+# Grant CREATE permission on public schema (PostgreSQL 15+ revoked this by default)
+echo "Ensuring database schema permissions..."
+psql "${DATABASE_URL}" -c "GRANT ALL ON SCHEMA public TO CURRENT_USER;" 2>&1 || echo "⚠ Schema grant skipped (may already have permissions)"
+
 # Run Alembic database migrations
 echo "Running database migrations..."
 cd /app
