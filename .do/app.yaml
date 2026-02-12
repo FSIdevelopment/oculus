@@ -35,7 +35,7 @@ services:
       - key: STRIPE_WEBHOOK_SECRET
         scope: RUN_TIME
         type: SECRET
-        value: PENDING
+        value: PLACEHOLDER_ROTATE_ME
       - key: STRIPE_CONNECT_CLIENT_ID
         scope: RUN_TIME
         type: SECRET
@@ -55,7 +55,7 @@ services:
       - key: DOCKER_HUB_USERNAME
         scope: RUN_TIME
         type: SECRET
-        value: forefrontsolutions
+        value: PLACEHOLDER_ROTATE_ME
       - key: DOCKER_HUB_PAT
         scope: RUN_TIME
         type: SECRET
