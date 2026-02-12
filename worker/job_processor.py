@@ -76,6 +76,7 @@ class JobProcessor:
             design = job_data.get('design', {})
             build_id = job_data.get('build_id', 'unknown')
             user_id = job_data.get('user_id', 'unknown')
+            iteration_uuid = job_data.get('iteration_uuid')  # For BuildIteration DB persistence
 
             # Extract basic parameters (backward compatible with old job format)
             years = design.get('years', 2) if design else 2
@@ -145,7 +146,9 @@ class JobProcessor:
                 config=ml_training_config,
             )
 
-            training_results = await trainer.run_full_pipeline()
+            # Skip disk writes — worker sends results via Redis, and hardcoded
+            # file paths (model .pkl, strategy config .json) don't exist here.
+            training_results = await trainer.run_full_pipeline(skip_disk_writes=True)
             reporter.report_phase("training", "complete")
 
             # Extract model metrics
@@ -183,11 +186,58 @@ class JobProcessor:
             # For now, we report completion without full optimization
             reporter.report_phase("optimization", "complete")
 
+            # Collect comprehensive training data from trainer for BuildIteration persistence
+            # Label configuration results (optimal forward_days + profit_threshold from search)
+            optimal_label_config = None
+            if trainer.best_config:
+                optimal_label_config = {
+                    "forward_days": trainer.best_config.get("forward_days"),
+                    "profit_threshold": trainer.best_config.get("profit_threshold"),
+                    "f1_score": trainer.best_config.get("f1", 0),
+                }
+
+            # Feature data (names + importances from best model)
+            features_data = {
+                "feature_names": trainer.feature_names if trainer.feature_names else [],
+                "count": len(trainer.feature_names) if trainer.feature_names else 0,
+            }
+            if trainer.best_model and hasattr(trainer.best_model, 'feature_importances_'):
+                importances = trainer.best_model.feature_importances_
+                feature_importance = {}
+                for i, name in enumerate(trainer.feature_names):
+                    feature_importance[name] = float(importances[i])
+                # Sort by importance descending, keep top 20
+                sorted_features = sorted(
+                    feature_importance.items(), key=lambda x: x[1], reverse=True
+                )[:20]
+                features_data["top_features"] = [
+                    {"name": n, "importance": v} for n, v in sorted_features
+                ]
+
+            # All model evaluations (metrics for every model that was trained)
+            model_evaluations = {}
+            if isinstance(trainer.all_results, dict):
+                for name, data in trainer.all_results.items():
+                    if isinstance(data, dict):
+                        model_evaluations[name] = data.get('metrics', {})
+
+            # Best model info
+            best_model_info = {
+                "name": best_model_name,
+                "metrics": metrics,
+                "type": type(trainer.best_model).__name__ if trainer.best_model else "unknown",
+            }
+
             # Build result matching backend expectations
+            # Existing fields are preserved for backward compatibility;
+            # new fields are additive — old consumers simply ignore them.
             result = {
                 "build_id": build_id,
+                "iteration_uuid": iteration_uuid,  # For BuildIteration DB persistence
                 "status": "success",
                 "phase": "complete",
+
+                # --- Existing fields (backward compatible) ---
                 "model_metrics": {
                     "model_name": best_model_name,
                     "f1": metrics.get('f1', 0),
@@ -232,6 +282,43 @@ class JobProcessor:
                     "train_neural_networks": ml_training_config.train_neural_networks,
                     "train_lstm": ml_training_config.train_lstm,
                 },
+
+                # --- NEW comprehensive fields for BuildIteration persistence ---
+                # Optimal label configuration found during config search
+                "optimal_label_config": optimal_label_config,
+
+                # Feature names and top importances from the best model
+                "features": features_data,
+
+                # Hyperparameter tuning results for tree-based / sklearn models
+                "hyperparameter_results": {
+                    name: {
+                        "best_f1_cv": data.get('metrics', {}).get('f1', 0),
+                        "params": data.get('params', {}),
+                    }
+                    for name, data in (trainer.all_results or {}).items()
+                    if isinstance(data, dict) and not name.startswith(('MLP_', 'LSTM_'))
+                } if isinstance(trainer.all_results, dict) else {},
+
+                # Neural network (MLP) training results
+                "nn_training_results": {
+                    name: data.get('metrics', {})
+                    for name, data in (trainer.all_results or {}).items()
+                    if isinstance(data, dict) and name.startswith('MLP_')
+                } if isinstance(trainer.all_results, dict) else {},
+
+                # LSTM training results
+                "lstm_training_results": {
+                    name: data.get('metrics', {})
+                    for name, data in (trainer.all_results or {}).items()
+                    if isinstance(data, dict) and name.startswith('LSTM_')
+                } if isinstance(trainer.all_results, dict) else {},
+
+                # All model evaluations (every model's metrics)
+                "model_evaluations": model_evaluations,
+
+                # Best model summary
+                "best_model": best_model_info,
             }
 
             logger.info(f"[{job_id}] Job complete")
@@ -242,6 +329,7 @@ class JobProcessor:
             reporter.report_error("processing", str(e))
             return {
                 "build_id": build_id,
+                "iteration_uuid": job_data.get('iteration_uuid'),  # For BuildIteration DB persistence
                 "status": "error",
                 "phase": "failed",
                 "error": str(e)
