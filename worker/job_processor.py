@@ -77,31 +77,72 @@ class JobProcessor:
             build_id = job_data.get('build_id', 'unknown')
             user_id = job_data.get('user_id', 'unknown')
 
-            # Extract ML parameters from design or use defaults
+            # Extract basic parameters (backward compatible with old job format)
             years = design.get('years', 2) if design else 2
-            hp_iterations = design.get('hp_iterations', 30) if design else 30
             strategy_type = design.get('strategy_type', 'momentum') if design else 'momentum'
+
+            # Build ML config dynamically from LLM design
+            # Top-level fields come directly from the design dict
+            # Nested ML training fields come from the 'ml_training_config' sub-object
+            ml_config = design.get('ml_training_config', {}) if design else {}
+
+            ml_training_config = EnhancedMLConfig(
+                # Label generation — from LLM design top-level fields
+                forward_returns_days_options=design.get(
+                    'forward_returns_days_options', [3, 5, 7, 10, 15, 20]
+                ),
+                profit_threshold_options=design.get(
+                    'profit_threshold_options', [1.5, 2.0, 3.0, 5.0]
+                ),
+
+                # Hyperparameter search — top-level or fall back to old 'hp_iterations' key
+                n_iter_search=design.get(
+                    'recommended_n_iter_search',
+                    design.get('hp_iterations', 50) if design else 50
+                ),
+                cv_folds=ml_config.get('cv_folds', 3),
+
+                # Model selection — from nested ml_training_config
+                config_search_model=ml_config.get('config_search_model', 'LightGBM'),
+                train_neural_networks=ml_config.get('train_neural_networks', True),
+                train_lstm=ml_config.get('train_lstm', True),
+
+                # Neural network architecture
+                nn_epochs=ml_config.get('nn_epochs', 100),
+                nn_batch_size=ml_config.get('nn_batch_size', 64),
+                nn_learning_rate=ml_config.get('nn_learning_rate', 0.001),
+
+                # LSTM architecture
+                lstm_hidden_size=ml_config.get('lstm_hidden_size', 128),
+                lstm_num_layers=ml_config.get('lstm_num_layers', 2),
+                lstm_dropout=ml_config.get('lstm_dropout', 0.2),
+                lstm_sequence_length=ml_config.get('lstm_sequence_length', 100),
+                lstm_epochs=ml_config.get('lstm_epochs', 250),
+                lstm_batch_size=ml_config.get('lstm_batch_size', 32),
+            )
 
             if not symbols:
                 raise ValueError("No symbols provided in job")
 
-            logger.info(f"[{job_id}] Processing job: {symbols}, {years}y, {hp_iterations} HP iters")
+            # Log the active ML configuration for visibility
+            logger.info(f"[{job_id}] Processing job: {symbols}, {years}y, "
+                        f"{ml_training_config.n_iter_search} HP iters")
             logger.info(f"[{job_id}] Build: {build_id}, User: {user_id}")
+            logger.info(f"[{job_id}] ML Config from design:")
+            logger.info(f"[{job_id}]   Forward days: {ml_training_config.forward_returns_days_options}")
+            logger.info(f"[{job_id}]   Profit thresholds: {ml_training_config.profit_threshold_options}")
+            logger.info(f"[{job_id}]   HP search iters: {ml_training_config.n_iter_search}")
+            logger.info(f"[{job_id}]   Models: MLP={'ON' if ml_training_config.train_neural_networks else 'OFF'}, "
+                        f"LSTM={'ON' if ml_training_config.train_lstm else 'OFF'}")
+            logger.info(f"[{job_id}]   Config search model: {ml_training_config.config_search_model}")
             reporter.report_phase("job_received", "complete")
 
-            # Step 1: Train ML models
+            # Step 1: Train ML models using the design-driven config
             reporter.report_phase("training", "in_progress")
             trainer = EnhancedMLTrainer(
                 symbols=symbols,
                 period_years=years,
-                config=EnhancedMLConfig(
-                    forward_returns_days_options=[3, 5, 7, 10, 15, 20],
-                    profit_threshold_options=[1.5, 2.0, 3.0, 5.0],
-                    n_iter_search=hp_iterations,
-                    cv_folds=3,
-                    train_neural_networks=False,  # Faster training
-                    train_lstm=True,
-                )
+                config=ml_training_config,
             )
 
             training_results = await trainer.run_full_pipeline()
@@ -180,7 +221,17 @@ class JobProcessor:
                 "backtest_results": {
                     "status": "pending",
                     "note": "Backtesting requires full strategy deployment"
-                }
+                },
+                # Include the LLM's design config so the backend can display what was chosen
+                "design_config": {
+                    "forward_returns_days_options": ml_training_config.forward_returns_days_options,
+                    "profit_threshold_options": ml_training_config.profit_threshold_options,
+                    "n_iter_search": ml_training_config.n_iter_search,
+                    "cv_folds": ml_training_config.cv_folds,
+                    "config_search_model": ml_training_config.config_search_model,
+                    "train_neural_networks": ml_training_config.train_neural_networks,
+                    "train_lstm": ml_training_config.train_lstm,
+                },
             }
 
             logger.info(f"[{job_id}] Job complete")
