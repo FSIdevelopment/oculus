@@ -120,23 +120,6 @@ services:
     routes:
       - path: /
 
-# Pre-deploy job to run database migrations
-jobs:
-  - name: migrate
-    kind: PRE_DEPLOY
-    github:
-      branch: main
-      deploy_on_push: false
-      repo: FSIdevelopment/oculus
-    dockerfile_path: backend/Dockerfile
-    source_dir: /backend
-    instance_size_slug: professional-xs
-    envs:
-      - key: DATABASE_URL
-        value: ${db.DATABASE_URL}
-        scope: RUN_TIME
-    run_command: alembic upgrade head
-
 databases:
   - name: db
     engine: PG
