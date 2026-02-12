@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     DATABASE_ECHO: bool = False
     
     # CORS - can be "*" for all origins or comma-separated list
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:3001,http://localhost:8000"
     
     # JWT
     SECRET_KEY: str = "your-secret-key-here"
