@@ -14,7 +14,7 @@ import json
 import logging
 import signal
 import sys
-import time
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
@@ -59,10 +59,10 @@ class TrainingWorker:
                 # Block and wait for job ID from queue (timeout=1 to allow graceful shutdown)
                 # Wrap blpop in try/except to handle Redis connection errors gracefully
                 try:
-                    job_data = self.redis.blpop(config.job_queue, timeout=1)
+                    job_data = await asyncio.to_thread(self.redis.blpop, config.job_queue, 1)
                 except Exception as blpop_error:
                     logger.warning(f"⚠️  blpop error (will retry): {blpop_error}")
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     continue
 
                 if job_data is None:
