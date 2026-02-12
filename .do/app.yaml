@@ -89,6 +89,15 @@ services:
       - key: TOKENS_PER_ITERATION
         scope: RUN_TIME
         value: "10"
+      - key: ADMIN_NAME
+        scope: RUN_TIME
+        value: Admin
+      - key: ADMIN_EMAIL
+        scope: RUN_TIME
+        value: admin@oculusalgorithms.com
+      - key: ADMIN_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
     routes:
       - path: /api
 
