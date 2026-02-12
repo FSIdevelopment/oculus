@@ -22,7 +22,10 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Set sqlalchemy.url from environment variable
+# Convert standard postgresql:// URL to postgresql+asyncpg:// for async SQLAlchemy
 database_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@postgres:5432/oculus_db")
+if database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 config.set_main_option("sqlalchemy.url", database_url)
 
 # add your model's MetaData object here
