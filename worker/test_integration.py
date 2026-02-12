@@ -33,7 +33,7 @@ async def test_worker():
         logger.error(f"Failed to connect to Redis: {e}")
         return False
 
-    # Create test job matching backend format
+    # Create test job matching backend format with full LLM-style design payload
     build_id = f"build:{uuid.uuid4()}"
     job_id = build_id
     job = {
@@ -42,16 +42,56 @@ async def test_worker():
         "symbols": ["NVDA", "AMD"],  # Semiconductor stocks
         "timeframe": "1d",
         "design": {
+            # Backward-compatible fields
             "years": 2,
-            "hp_iterations": 10,  # Reduced for faster testing
-            "strategy_type": "momentum"
+            "strategy_type": "momentum",
+
+            # LLM design guidance fields
+            "strategy_description": "Momentum strategy using RSI and MACD crossovers",
+            "strategy_rationale": "Test strategy for integration verification",
+            "forward_returns_days_options": [5, 10, 15],
+            "profit_threshold_options": [2.0, 3.0, 5.0],
+            "recommended_n_iter_search": 10,  # Low for faster testing
+            "priority_features": ["RSI_14", "MACD_HIST", "ADX", "EMA_CROSS_8_21"],
+
+            # Entry and exit rules from LLM
+            "entry_rules": [
+                {"feature": "RSI_14", "operator": "<=", "threshold": 35.0,
+                 "description": "Oversold entry"},
+                {"feature": "MACD_HIST", "operator": ">", "threshold": 0,
+                 "description": "MACD bullish"}
+            ],
+            "exit_rules": [
+                {"feature": "RSI_14", "operator": ">=", "threshold": 70.0,
+                 "description": "Overbought exit"}
+            ],
+            "entry_score_threshold": 2,
+            "exit_score_threshold": 1,
+
+            # ML training configuration — controls model selection and architecture
+            "ml_training_config": {
+                "config_search_model": "LightGBM",
+                "train_neural_networks": False,  # OFF for faster testing
+                "train_lstm": False,              # OFF for faster testing
+                "cv_folds": 3,
+                "nn_epochs": 10,
+                "nn_batch_size": 64,
+                "nn_learning_rate": 0.001,
+                "lstm_hidden_size": 64,
+                "lstm_num_layers": 1,
+                "lstm_dropout": 0.2,
+                "lstm_sequence_length": 50,
+                "lstm_epochs": 10,
+                "lstm_batch_size": 32
+            }
         }
     }
 
     logger.info(f"Sending test job: {job_id}")
     logger.info(f"  Symbols: {job['symbols']}")
-    logger.info(f"  Years: {job['design']['years']}")
-    logger.info(f"  HP Iterations: {job['design']['hp_iterations']}")
+    logger.info(f"  Design: {job['design']['strategy_description']}")
+    logger.info(f"  HP Iterations: {job['design']['recommended_n_iter_search']}")
+    logger.info(f"  Neural nets: OFF, LSTM: OFF (fast test mode)")
 
     # Store job in Redis and queue it
     redis_client.set(job_id, json.dumps(job), ex=86400)  # 24h TTL
