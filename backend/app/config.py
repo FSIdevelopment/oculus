@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "Admin123!"
     ADMIN_NAME: str = "Admin"
 
+    # Default User Seed
+    DEFAULT_USER_EMAIL: str = "user@oculusalgorithms.com"
+    DEFAULT_USER_PASSWORD: str = "User123!"
+    DEFAULT_USER_NAME: str = "Default User"
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = True

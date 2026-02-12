@@ -47,9 +47,44 @@ async def seed_admin():
         logger.info(f"Admin user created: {settings.ADMIN_EMAIL}")
 
 
+async def seed_default_user():
+    """Create default test user if it doesn't exist."""
+    async with AsyncSessionLocal() as session:
+        # Check if default user already exists
+        result = await session.execute(
+            select(User).where(User.email == settings.DEFAULT_USER_EMAIL)
+        )
+        existing_user = result.scalar_one_or_none()
+
+        if existing_user:
+            logger.info(f"Default user already exists, skipping")
+            return
+
+        # Create new default user
+        default_user = User(
+            name=settings.DEFAULT_USER_NAME,
+            email=settings.DEFAULT_USER_EMAIL,
+            password_hash=hash_password(settings.DEFAULT_USER_PASSWORD),
+            user_role="user",
+            status="active",
+            balance=0.0
+        )
+
+        session.add(default_user)
+        await session.commit()
+
+        logger.info(f"Default user created: {settings.DEFAULT_USER_EMAIL}")
+
+
+async def seed_all():
+    """Run all seed functions."""
+    await seed_admin()
+    await seed_default_user()
+
+
 def main():
     """Entry point for the seed script."""
-    asyncio.run(seed_admin())
+    asyncio.run(seed_all())
 
 
 if __name__ == "__main__":
