@@ -1,4 +1,6 @@
 """Router for strategy build orchestration endpoints."""
+import os
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -383,6 +385,19 @@ async def _run_build_loop(
                 build.iteration_count = iteration + 1
                 await bg_db.commit()
 
+                # Non-blocking: update creation guide with lessons from this iteration
+                try:
+                    await orchestrator.update_creation_guide(
+                        db=bg_db,
+                        strategy_type=strategy_type,
+                        design=design,
+                        training_results=training_results,
+                        backtest_results=training_results.get("backtest_results", {}),
+                    )
+                    await bg_db.commit()
+                except Exception:
+                    pass  # update_creation_guide already logs warnings internally
+
                 # Publish per-iteration training results via Redis
                 await _publish_progress(build_id, {
                     "phase": "training_complete",
@@ -424,10 +439,45 @@ async def _run_build_loop(
                     )
                     strategy_obj = strat_result.scalar_one_or_none()
 
-                    # TODO: Get strategy output directory from training results
-                    # For now, use a placeholder path
-                    strategy_output_dir = f"/tmp/strategy_{strategy_id}"
+                    # --- Persist strategy files from worker to disk ---
+                    strategy_output_dir = str(
+                        Path(__file__).resolve().parent.parent.parent
+                        / "strategy_outputs"
+                        / build_id
+                    )
+                    strategy_files = training_results.get("strategy_files", {})
+                    try:
+                        output_path = Path(strategy_output_dir)
+                        await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
+                        for filename, content in strategy_files.items():
+                            file_path = output_path / filename
+                            await asyncio.to_thread(file_path.write_text, content)
+                        iteration_logs.append(
+                            f"Iteration {iteration}: Persisted {len(strategy_files)} strategy file(s) to {strategy_output_dir}"
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to persist strategy files for build %s: %s", build_id, e)
+                        iteration_logs.append(f"Iteration {iteration}: Strategy file persistence failed: {e}")
 
+                    # --- Generate README via Claude ---
+                    try:
+                        readme_content = await orchestrator.generate_strategy_readme(
+                            strategy_name=strategy_name,
+                            symbols=strategy_symbols,
+                            design=design,
+                            backtest_results=training_results.get("backtest_results", {}),
+                            model_metrics=training_results.get("model_metrics", {}),
+                            config=design,
+                        )
+                        # Write README to strategy output directory
+                        readme_path = Path(strategy_output_dir) / "README.md"
+                        await asyncio.to_thread(readme_path.write_text, readme_content)
+                        iteration_logs.append(f"Iteration {iteration}: README generated ({len(readme_content)} chars)")
+                    except Exception as e:
+                        logger.warning("README generation failed for build %s: %s", build_id, e)
+                        iteration_logs.append(f"Iteration {iteration}: README generation failed: {e}")
+
+                    # --- Docker build ---
                     docker_builder = DockerBuilder(bg_db)
                     success = await docker_builder.build_and_push(
                         strategy_obj, build, strategy_output_dir

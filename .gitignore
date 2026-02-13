@@ -226,3 +226,6 @@ out/
 # Environment variables (already covered above, but being explicit)
 .env.local
 .env.*.local
+
+# Strategy build outputs (generated at runtime)
+backend/strategy_outputs/

@@ -1,6 +1,8 @@
 """Build orchestrator service for strategy design and training."""
 import json
+import re
 import asyncio
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -8,6 +10,8 @@ import anthropic
 import redis.asyncio as redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.models.strategy_build import StrategyBuild
@@ -19,7 +23,7 @@ from app.services.build_history_service import BuildHistoryService, FeatureTrack
 
 class BuildOrchestrator:
     """Orchestrates strategy build process: LLM design, training, and iteration."""
-    
+
     def __init__(self, db: AsyncSession, user: User, build: StrategyBuild):
         self.db = db
         self.user = user
@@ -27,23 +31,23 @@ class BuildOrchestrator:
         self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.redis_client: Optional[redis.Redis] = None
         self.logs: List[str] = []
-    
+
     async def initialize(self):
         """Initialize Redis connection via Ngrok tunnel."""
         self.redis_client = await redis.from_url(settings.REDIS_URL)
-    
+
     async def cleanup(self):
         """Clean up resources."""
         if self.redis_client:
             await self.redis_client.close()
-    
+
     def _log(self, message: str):
         """Add message to logs."""
         timestamp = datetime.utcnow().isoformat()
         log_entry = f"[{timestamp}] {message}"
         self.logs.append(log_entry)
         print(log_entry)
-    
+
     async def design_strategy(
         self,
         strategy_name: str,
@@ -96,7 +100,7 @@ class BuildOrchestrator:
         except anthropic.APIError as e:
             self._log(f"Claude API error: {e}")
             raise
-    
+
     async def dispatch_training_job(
         self,
         design: Dict[str, Any],
@@ -116,36 +120,36 @@ class BuildOrchestrator:
             "timestamp": datetime.utcnow().isoformat(),
             "iteration_uuid": iteration_uuid,
         }
-        
+
         # Push to Redis queue
         job_id = f"build:{self.build.uuid}"
         await self.redis_client.set(job_id, json.dumps(job_payload), ex=86400)  # 24h TTL
         await self.redis_client.lpush("training_queue", job_id)
-        
+
         self._log(f"Job dispatched with ID: {job_id}")
         return job_id
-    
+
     async def listen_for_results(self, job_id: str, timeout: int = 3600) -> Dict[str, Any]:
         """Listen for training results from Redis."""
         self._log(f"Listening for results on {job_id}")
-        
+
         result_key = f"result:{job_id}"
         start_time = datetime.utcnow()
-        
+
         while True:
             result_data = await self.redis_client.get(result_key)
             if result_data:
                 result = json.loads(result_data)
                 self._log(f"Results received: {result.get('status', 'unknown')}")
                 return result
-            
+
             # Check timeout
             elapsed = (datetime.utcnow() - start_time).total_seconds()
             if elapsed > timeout:
                 raise TimeoutError(f"Training job {job_id} timed out after {timeout}s")
-            
+
             await asyncio.sleep(5)  # Poll every 5 seconds
-    
+
     async def refine_strategy(
         self,
         previous_design: Dict[str, Any],
@@ -183,12 +187,12 @@ class BuildOrchestrator:
         except anthropic.APIError as e:
             self._log(f"Claude API error during refinement: {e}")
             raise
-    
+
     async def deduct_tokens(self, amount: float, description: str):
         """Deduct tokens from user balance."""
         await deduct_tokens(self.db, self.user.uuid, amount, description)
         self._log(f"Deducted {amount} tokens: {description}")
-    
+
     def _infer_asset_class(self, symbols: List[str]) -> str:
         """Infer asset class from symbols."""
         asset_class_map = {
@@ -197,26 +201,26 @@ class BuildOrchestrator:
             "energy": {"XLE", "XOP", "CVX", "XOM"},
             "index": {"SPY", "QQQ", "IWM", "DIA"},
         }
-        
+
         symbol_set = set(s.upper() for s in symbols)
         for asset_class, class_symbols in asset_class_map.items():
             if symbol_set & class_symbols:
                 return asset_class
         return "mixed"
-    
+
     def _format_build_context(self, builds: List) -> str:
         """Format past builds as context for Claude."""
         if not builds:
             return "No previous builds available."
-        
+
         lines = []
         for b in builds:
             lines.append(f"- {b.strategy_name}: {b.asset_class}, symbols={b.symbols}")
             if b.backtest_results:
                 lines.append(f"  Return: {b.backtest_results.get('total_return', 'N/A')}%")
-        
+
         return "\n".join(lines)
-    
+
     # Path to the default creation guide markdown (sections 1-5 seed the "general" row)
     _GUIDE_MD_PATH = Path(__file__).resolve().parent.parent.parent.parent / "strategy_designer_ai" / "STRATEGY_CREATION_GUIDE.md"
 
@@ -468,7 +472,7 @@ The JSON must follow this exact schema:
 - The ML pipeline will find the optimal weights - you provide the structure and rules
 - Think deeply about what indicators work best for the specific symbols and strategy type
 {creation_guide}"""
-    
+
     def _build_refinement_prompt(
         self,
         previous_design: Dict[str, Any],
@@ -544,7 +548,7 @@ The JSON must follow this exact schema:
 
 Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETELY REVISED strategy design.
 {creation_guide}"""
-    
+
     def _parse_design_response(self, response) -> Dict[str, Any]:
         """Parse Claude response to extract design JSON and thinking content.
 
@@ -564,7 +568,6 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
         thinking_text = "\n".join(thinking_parts)
 
         # Find JSON in response
-        import re
         json_match = re.search(r"\{.*\}", text, re.DOTALL)
         if json_match:
             try:
@@ -612,3 +615,230 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
             "thinking": thinking_text,
         }
 
+
+    async def update_creation_guide(
+        self,
+        db: AsyncSession,
+        strategy_type: Optional[str],
+        design: Dict[str, Any],
+        training_results: Dict[str, Any],
+        backtest_results: Dict[str, Any],
+    ) -> None:
+        """Update creation guide rows with lessons learned from the latest iteration.
+
+        Loads TWO rows: "general" + strategy-type specific. Calls Claude to produce
+        updated content for both. Creates the strategy-type row on-demand if it doesn't
+        exist yet. Increments `version` on each saved row.
+
+        This method is non-blocking: failures are logged as warnings and never crash
+        the build loop.
+        """
+        try:
+            # --- Load "general" guide row ---
+            result = await db.execute(
+                select(StrategyCreationGuide).where(
+                    StrategyCreationGuide.strategy_type == "general"
+                )
+            )
+            general_row = result.scalar_one_or_none()
+            general_content = general_row.content if general_row else ""
+
+            # --- Load or prepare strategy-type row ---
+            effective_type = strategy_type if strategy_type and strategy_type != "general" else None
+            type_row = None
+            type_content = ""
+            if effective_type:
+                result = await db.execute(
+                    select(StrategyCreationGuide).where(
+                        StrategyCreationGuide.strategy_type == effective_type
+                    )
+                )
+                type_row = result.scalar_one_or_none()
+                type_content = type_row.content if type_row else ""
+
+            # --- Build Claude prompt ---
+            bt = backtest_results or {}
+            entry_rules_str = json.dumps(design.get("entry_rules", []), indent=2)
+            exit_rules_str = json.dumps(design.get("exit_rules", []), indent=2)
+
+            prompt = f"""You are maintaining a Strategy Creation Guide that helps an AI design winning trading strategies.
+This guide is referenced BEFORE starting any new strategy build, so it must contain actionable lessons.
+
+## Current General Guide
+{general_content if general_content else "(empty — first entry)"}
+
+## Current Strategy-Type Guide ({effective_type or "N/A"})
+{type_content if type_content else "(empty — first entry for this type)"}
+
+## New Iteration Results to Incorporate
+
+Strategy Type: {strategy_type or "general"}
+Design Description: {design.get("strategy_description", "N/A")}
+Priority Features: {design.get("priority_features", [])}
+Entry Rules: {entry_rules_str}
+Exit Rules: {exit_rules_str}
+Total Return: {bt.get("total_return", 0)}%
+Win Rate: {bt.get("win_rate", 0)}%
+Max Drawdown: {bt.get("max_drawdown", 0)}%
+Best Model: {training_results.get("best_model", "Unknown")}
+
+ML Config: {json.dumps(design.get("ml_training_config", {}), indent=2)}
+
+## Instructions
+Update BOTH guides with lessons from this iteration. Return your response with exactly two sections:
+
+<GENERAL>
+(Complete updated general guide content — cross-cutting lessons for all strategy types)
+</GENERAL>
+
+<SPECIFIC>
+(Complete updated strategy-type-specific guide content for "{effective_type or "general"}")
+</SPECIFIC>
+
+Keep content concise and actionable. Each lesson should be directly applicable."""
+
+            # --- Call Claude ---
+            response = self.client.messages.create(
+                model="claude-opus-4-6",
+                max_tokens=4000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text_blocks = [b for b in response.content if hasattr(b, "text")]
+            raw_text = "\n".join(b.text for b in text_blocks)
+
+            # --- Parse structured output ---
+            general_match = re.search(r"<GENERAL>(.*?)</GENERAL>", raw_text, re.DOTALL)
+            specific_match = re.search(r"<SPECIFIC>(.*?)</SPECIFIC>", raw_text, re.DOTALL)
+
+            new_general = general_match.group(1).strip() if general_match else None
+            new_specific = specific_match.group(1).strip() if specific_match else None
+
+            # --- Persist general row ---
+            if new_general:
+                if general_row:
+                    general_row.content = new_general
+                    general_row.version += 1
+                else:
+                    general_row = StrategyCreationGuide(
+                        strategy_type="general",
+                        content=new_general,
+                        version=1,
+                    )
+                    db.add(general_row)
+
+            # --- Persist strategy-type row ---
+            if new_specific and effective_type:
+                if type_row:
+                    type_row.content = new_specific
+                    type_row.version += 1
+                else:
+                    # Create on-demand
+                    type_row = StrategyCreationGuide(
+                        strategy_type=effective_type,
+                        content=new_specific,
+                        version=1,
+                    )
+                    db.add(type_row)
+
+            await db.flush()
+            self._log("Creation guide updated successfully")
+
+        except Exception as e:
+            # Non-blocking — log warning but never crash the build
+            logger.warning("Creation guide update failed (non-blocking): %s", e)
+            self._log(f"Warning: Creation guide update failed: {e}")
+
+    async def generate_strategy_readme(
+        self,
+        strategy_name: str,
+        symbols: List[str],
+        design: Dict[str, Any],
+        backtest_results: Dict[str, Any],
+        model_metrics: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> str:
+        """Generate a comprehensive README markdown for a completed strategy.
+
+        Calls Claude to produce a human-readable README summarising the strategy,
+        its design, performance metrics, and usage instructions.
+
+        Returns the README markdown string, or a minimal fallback on failure.
+        """
+        # Unpack design fields with safe defaults
+        ml_config = design.get("ml_training_config", {})
+        entry_rules = json.dumps(design.get("entry_rules", []), indent=2)
+        exit_rules = json.dumps(design.get("exit_rules", []), indent=2)
+        bt = backtest_results or {}
+
+        prompt = f"""Write a comprehensive README.md for a trading strategy. Include these sections:
+1. Strategy name, description, and rationale
+2. How the strategy works (entry/exit logic explained in plain English)
+3. Technical indicators used and why
+4. ML models used to discover optimal settings
+5. Key parameters and their values
+6. Backtest performance results
+7. Risk management settings
+8. How to run the strategy
+
+Strategy: {strategy_name}
+Symbols: {', '.join(symbols)}
+Description: {design.get("strategy_description", "N/A")}
+Rationale: {design.get("strategy_rationale", "N/A")}
+
+Entry Rules:
+{entry_rules}
+Entry Score Threshold: {design.get("entry_score_threshold", "N/A")}
+
+Exit Rules:
+{exit_rules}
+Exit Score Threshold: {design.get("exit_score_threshold", "N/A")}
+
+Priority Features: {design.get("priority_features", [])}
+
+ML Training Config:
+- Neural Networks (MLP): {'Enabled' if ml_config.get('train_neural_networks') else 'Disabled'}
+  - Architectures: {ml_config.get('nn_hidden_layers', 'N/A')}
+  - Epochs: {ml_config.get('nn_epochs', 'N/A')}, Batch Size: {ml_config.get('nn_batch_size', 'N/A')}, LR: {ml_config.get('nn_learning_rate', 'N/A')}
+- LSTM: {'Enabled' if ml_config.get('train_lstm') else 'Disabled'}
+  - Hidden: {ml_config.get('lstm_hidden_size', 'N/A')}, Layers: {ml_config.get('lstm_num_layers', 'N/A')}
+  - Epochs: {ml_config.get('lstm_epochs', 'N/A')}, Seq Length: {ml_config.get('lstm_sequence_length', 'N/A')}
+- Cross-Validation Folds: {ml_config.get('cv_folds', 'N/A')}
+- Forward Return Days: {design.get('forward_returns_days_options', 'N/A')}
+- Profit Thresholds: {design.get('profit_threshold_options', 'N/A')}
+
+Best Model: {model_metrics.get('model_name', 'Unknown')}
+Model F1: {model_metrics.get('f1', 0):.4f}
+Precision: {model_metrics.get('precision', 0):.4f}
+Recall: {model_metrics.get('recall', 0):.4f}
+
+Backtest Results:
+- Total Return: {bt.get('total_return', 0):.2f}%
+- Win Rate: {bt.get('win_rate', 0):.1f}%
+- Max Drawdown: {bt.get('max_drawdown', 0):.2f}%
+- Sharpe Ratio: {bt.get('sharpe_ratio', 'N/A')}
+
+Risk Management:
+- Stop Loss: {design.get('recommended_stop_loss', 0) * 100:.1f}%
+- Trailing Stop: {design.get('recommended_trailing_stop', 0) * 100:.1f}%
+- Max Positions: {design.get('recommended_max_positions', 'N/A')}
+- Position Size: {design.get('recommended_position_size', 0) * 100:.1f}%
+
+Config:
+{json.dumps(config, indent=2)[:2000]}
+
+Return ONLY the markdown content, no code fences wrapping it."""
+
+        try:
+            response = self.client.messages.create(
+                model="claude-opus-4-6",
+                max_tokens=4000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text_blocks = [b for b in response.content if hasattr(b, "text")]
+            readme = "\n".join(b.text for b in text_blocks)
+            self._log(f"README generated ({len(readme)} chars)")
+            return readme
+        except Exception as e:
+            logger.warning("README generation failed: %s", e)
+            self._log(f"Warning: README generation failed: {e}")
+            return f"# {strategy_name}\n\nAuto-generated strategy for {', '.join(symbols)}.\n"
