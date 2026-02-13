@@ -510,133 +510,135 @@ async def _run_build_loop(
                     )
 
             # --- Best iteration selection (target not met after all iterations) ---
-            # Query all completed BuildIteration records for this build
-            iter_result = await bg_db.execute(
-                sa_select(BuildIteration)
-                .where(BuildIteration.build_id == build_id, BuildIteration.status == "complete")
-                .order_by(BuildIteration.iteration_number)
-            )
-            completed_iterations = iter_result.scalars().all()
-
-            if completed_iterations:
-                # Find the best iteration by total_return (from backtest_results)
-                best_iter = max(
-                    completed_iterations,
-                    key=lambda it: (it.backtest_results or {}).get("total_return", float("-inf"))
+            # Only run if the target was NOT met (build.status != "complete")
+            if build.status != "complete":
+                # Query all completed BuildIteration records for this build
+                iter_result = await bg_db.execute(
+                    sa_select(BuildIteration)
+                    .where(BuildIteration.build_id == build_id, BuildIteration.status == "complete")
+                    .order_by(BuildIteration.iteration_number)
                 )
-                best_return = (best_iter.backtest_results or {}).get("total_return", 0)
-                best_iter_num = best_iter.iteration_number
+                completed_iterations = iter_result.scalars().all()
 
-                iteration_logs.append(
-                    f"All {len(completed_iterations)} iterations complete. Best: iteration {best_iter_num} ({best_return}% return)"
-                )
-
-                # Publish selection decision via WebSocket
-                await _publish_progress(build_id, {
-                    "phase": "selecting_best",
-                    "message": f"Selecting best iteration: #{best_iter_num} with {best_return}% return",
-                    "best_iteration": best_iter_num,
-                    "best_return": best_return,
-                    "tokens_consumed": build.tokens_consumed,
-                    "iteration_count": build.iteration_count,
-                    "max_iterations": max_iterations,
-                })
-
-                # Generate selection thinking via Claude
-                try:
-                    selection_thinking = await orchestrator.generate_selection_thinking(
-                        completed_iterations=completed_iterations,
-                        best_iteration=best_iter,
-                        target_return=target_return,
+                if completed_iterations:
+                    # Find the best iteration by total_return (from backtest_results)
+                    best_iter = max(
+                        completed_iterations,
+                        key=lambda it: (it.backtest_results or {}).get("total_return", float("-inf"))
                     )
+                    best_return = (best_iter.backtest_results or {}).get("total_return", 0)
+                    best_iter_num = best_iter.iteration_number
+
+                    iteration_logs.append(
+                        f"All {len(completed_iterations)} iterations complete. Best: iteration {best_iter_num} ({best_return}% return)"
+                    )
+
+                    # Publish selection decision via WebSocket
                     await _publish_progress(build_id, {
                         "phase": "selecting_best",
-                        "message": "Design thinking: iteration selection",
-                        "thinking": selection_thinking,
+                        "message": f"Selecting best iteration: #{best_iter_num} with {best_return}% return",
+                        "best_iteration": best_iter_num,
+                        "best_return": best_return,
                         "tokens_consumed": build.tokens_consumed,
                         "iteration_count": build.iteration_count,
                         "max_iterations": max_iterations,
                     })
-                except Exception as e:
-                    logger.warning("Selection thinking failed for build %s: %s", build_id, e)
 
-                # Use the best iteration's design and training results for Docker build
-                design = best_iter.llm_design or design
-                training_results = best_iter.backtest_results or training_results
+                    # Generate selection thinking via Claude
+                    try:
+                        selection_thinking = await orchestrator.generate_selection_thinking(
+                            completed_iterations=completed_iterations,
+                            best_iteration=best_iter,
+                            target_return=target_return,
+                        )
+                        await _publish_progress(build_id, {
+                            "phase": "selecting_best",
+                            "message": "Design thinking: iteration selection",
+                            "thinking": selection_thinking,
+                            "tokens_consumed": build.tokens_consumed,
+                            "iteration_count": build.iteration_count,
+                            "max_iterations": max_iterations,
+                        })
+                    except Exception as e:
+                        logger.warning("Selection thinking failed for build %s: %s", build_id, e)
 
-                # --- Persist strategy files, generate README, build Docker ---
-                # (Same logic as the target-met path at lines 442-504)
-                build.phase = "building_docker"
-                await bg_db.commit()
-                await _publish_progress(build_id, {
-                    "phase": "building_docker",
-                    "iteration": best_iter_num,
-                    "message": "Building Docker image for best iteration...",
-                    "tokens_consumed": build.tokens_consumed,
-                    "iteration_count": build.iteration_count,
-                    "max_iterations": max_iterations,
-                })
+                    # Use the best iteration's design and training results for Docker build
+                    design = best_iter.llm_design or design
+                    training_results = best_iter.backtest_results or training_results
 
-                # Persist strategy files from best iteration's training result
-                strategy_output_dir = str(
-                    Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id
-                )
-                # Get strategy files: prefer from the best iteration's stored data
-                strategy_files = (best_iter.training_config or {}).get("strategy_files", {})
-                if not strategy_files:
-                    strategy_files = (training_results or {}).get("strategy_files", {})
-                try:
-                    output_path = Path(strategy_output_dir)
-                    await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
-                    for filename, content in strategy_files.items():
-                        file_path = output_path / filename
-                        await asyncio.to_thread(file_path.write_text, content)
-                    iteration_logs.append(f"Persisted {len(strategy_files)} strategy file(s)")
-                except Exception as e:
-                    logger.warning("Failed to persist strategy files: %s", e)
+                    # --- Persist strategy files, generate README, build Docker ---
+                    # (Same logic as the target-met path at lines 442-504)
+                    build.phase = "building_docker"
+                    await bg_db.commit()
+                    await _publish_progress(build_id, {
+                        "phase": "building_docker",
+                        "iteration": best_iter_num,
+                        "message": "Building Docker image for best iteration...",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
+                    })
 
-                # Generate README
-                try:
-                    readme_content = await orchestrator.generate_strategy_readme(
-                        strategy_name=strategy_name,
-                        symbols=strategy_symbols,
-                        design=design,
-                        backtest_results=best_iter.backtest_results or {},
-                        model_metrics=(best_iter.best_model or {}),
-                        config=design,
+                    # Persist strategy files from best iteration's training result
+                    strategy_output_dir = str(
+                        Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id
                     )
-                    readme_path = Path(strategy_output_dir) / "README.md"
-                    await asyncio.to_thread(readme_path.write_text, readme_content)
-                except Exception as e:
-                    logger.warning("README generation failed: %s", e)
+                    # Get strategy files: prefer from the best iteration's stored data
+                    strategy_files = (best_iter.training_config or {}).get("strategy_files", {})
+                    if not strategy_files:
+                        strategy_files = (training_results or {}).get("strategy_files", {})
+                    try:
+                        output_path = Path(strategy_output_dir)
+                        await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
+                        for filename, content in strategy_files.items():
+                            file_path = output_path / filename
+                            await asyncio.to_thread(file_path.write_text, content)
+                        iteration_logs.append(f"Persisted {len(strategy_files)} strategy file(s)")
+                    except Exception as e:
+                        logger.warning("Failed to persist strategy files: %s", e)
 
-                # Docker build
-                strat_result = await bg_db.execute(
-                    select(Strategy).where(Strategy.uuid == strategy_id)
-                )
-                strategy_obj = strat_result.scalar_one_or_none()
-                docker_builder = DockerBuilder(bg_db)
-                success = await docker_builder.build_and_push(strategy_obj, build, strategy_output_dir)
+                    # Generate README
+                    try:
+                        readme_content = await orchestrator.generate_strategy_readme(
+                            strategy_name=strategy_name,
+                            symbols=strategy_symbols,
+                            design=design,
+                            backtest_results=best_iter.backtest_results or {},
+                            model_metrics=(best_iter.best_model or {}),
+                            config=design,
+                        )
+                        readme_path = Path(strategy_output_dir) / "README.md"
+                        await asyncio.to_thread(readme_path.write_text, readme_content)
+                    except Exception as e:
+                        logger.warning("README generation failed: %s", e)
 
-                if success:
-                    iteration_logs.append("Docker image built and pushed for best iteration")
+                    # Docker build
+                    strat_result = await bg_db.execute(
+                        select(Strategy).where(Strategy.uuid == strategy_id)
+                    )
+                    strategy_obj = strat_result.scalar_one_or_none()
+                    docker_builder = DockerBuilder(bg_db)
+                    success = await docker_builder.build_and_push(strategy_obj, build, strategy_output_dir)
+
+                    if success:
+                        iteration_logs.append("Docker image built and pushed for best iteration")
+                    else:
+                        iteration_logs.append("Docker build failed for best iteration")
+
+                    build.status = "complete"
+                    build.phase = "complete"
+                    await _publish_progress(build_id, {
+                        "phase": "complete",
+                        "message": f"Build complete — best iteration: #{best_iter_num} ({best_return}% return, target was {target_return}%)",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
+                    })
                 else:
-                    iteration_logs.append("Docker build failed for best iteration")
-
-                build.status = "complete"
-                build.phase = "complete"
-                await _publish_progress(build_id, {
-                    "phase": "complete",
-                    "message": f"Build complete — best iteration: #{best_iter_num} ({best_return}% return, target was {target_return}%)",
-                    "tokens_consumed": build.tokens_consumed,
-                    "iteration_count": build.iteration_count,
-                    "max_iterations": max_iterations,
-                })
-            else:
-                # No completed iterations at all — mark as failed
-                build.status = "failed"
-                build.phase = "complete"
-                iteration_logs.append("No iterations completed successfully")
+                    # No completed iterations at all — mark as failed
+                    build.status = "failed"
+                    build.phase = "complete"
+                    iteration_logs.append("No iterations completed successfully")
 
             # Final update
             build.completed_at = datetime.utcnow()
