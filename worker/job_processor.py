@@ -20,6 +20,7 @@ from strategy_designer_ai.rule_extractor import RuleExtractor
 from strategy_optimizer_ai.optimizer import StrategyOptimizer
 from worker.config import config
 from worker.progress_reporter import ProgressReporter
+from worker.strategy_file_generator import StrategyFileGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +181,52 @@ class JobProcessor:
             )
             reporter.report_phase("rule_extraction", "complete")
 
-            # Step 3: Optimize strategy parameters (optional)
+            # Step 3: Generate strategy files
+            # Wrapped in try/except — file generation failure should NOT crash the build
+            strategy_files = {}
+            try:
+                reporter.report_phase("file_generation", "in_progress")
+
+                # Serialise extracted rules to a dict for the file generator
+                rules_dict = rule_extractor.to_dict(strategy_rules)
+
+                # Build model metrics dict matching the format expected by the generator
+                file_gen_metrics = {
+                    "model_name": best_model_name,
+                    "f1": metrics.get("f1", 0),
+                    "precision": metrics.get("precision", 0),
+                    "recall": metrics.get("recall", 0),
+                    "auc": metrics.get("auc", 0),
+                }
+
+                generator = StrategyFileGenerator(
+                    strategy_name=f"{strategy_type}_{job_id}",
+                    symbols=symbols,
+                    timeframe=timeframe,
+                    model_metrics=file_gen_metrics,
+                    extracted_rules=rules_dict,
+                    design=design,
+                )
+
+                strategy_files = generator.generate_all()
+                logger.info(
+                    f"[{job_id}] Generated {len(strategy_files)} strategy files: "
+                    f"{list(strategy_files.keys())}"
+                )
+                reporter.report_phase("file_generation", "complete")
+
+            except Exception as file_gen_err:
+                # Log the error but do NOT re-raise — the build continues
+                logger.warning(
+                    f"[{job_id}] Strategy file generation failed (non-fatal): "
+                    f"{file_gen_err}"
+                )
+                reporter.report_phase(
+                    "file_generation", "error",
+                    details={"error": str(file_gen_err)},
+                )
+
+            # Step 4: Optimize strategy parameters (optional)
             reporter.report_phase("optimization", "in_progress")
             # Note: Full optimization requires backtesting infrastructure
             # For now, we report completion without full optimization
@@ -319,6 +365,11 @@ class JobProcessor:
 
                 # Best model summary
                 "best_model": best_model_info,
+
+                # --- Generated strategy files (filename → content string) ---
+                # Backend will persist these to the strategy directory on disk.
+                # Empty dict if file generation failed (non-fatal).
+                "strategy_files": strategy_files,
             }
 
             logger.info(f"[{job_id}] Job complete")
