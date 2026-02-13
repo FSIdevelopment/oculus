@@ -44,7 +44,7 @@ class JobProcessor:
         """Setup environment for ML pipeline."""
         # Set Polygon API key if available
         if config.polygon_api_key:
-            os.environ['POLYGON_MASSIVE_API_KEY'] = config.polygon_api_key
+            os.environ['POLYGON_API_KEY'] = config.polygon_api_key
 
         # Enable GPU acceleration if available
         if config.gpu_enabled:

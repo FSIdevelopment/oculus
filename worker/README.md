@@ -55,7 +55,7 @@ Key environment variables:
 - `RESULT_KEY_PREFIX` — Prefix for result keys (default: result)
 - `WORKER_CONCURRENCY` — Number of concurrent jobs (default: 2)
 - `GPU_ENABLED` — Enable GPU acceleration (default: true)
-- `POLYGON_MASSIVE_API_KEY` — Polygon API key for market data
+- `POLYGON_API_KEY` — Polygon API key for market data
 - `LOG_LEVEL` — Logging level (default: INFO)
 
 ## Usage
@@ -215,7 +215,7 @@ Logs are printed to stdout with timestamps. Set `LOG_LEVEL` to control verbosity
 - Ensure `GPU_ENABLED=true` in `.env`
 
 ### Polygon API errors
-- Set `POLYGON_MASSIVE_API_KEY` in `.env`
+- Set `POLYGON_API_KEY` in `.env`
 - Check API key validity at https://polygon.io
 
 ## Development
