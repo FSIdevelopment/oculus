@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
-import { Clock, Wifi, WifiOff, ArrowLeft, Zap, Repeat2, AlertCircle, CheckCircle2, Loader, Square, RotateCcw, Brain, Trophy } from 'lucide-react'
+import { Clock, Wifi, WifiOff, ArrowLeft, Zap, Repeat2, AlertCircle, CheckCircle2, Loader, Square, RotateCcw, Brain, Trophy, ChevronDown, ChevronUp } from 'lucide-react'
 
 // WebSocket reconnection constants
 const WS_INITIAL_BACKOFF_MS = 2000
@@ -37,6 +37,62 @@ interface IterationResult {
   win_rate: number | null
   sharpe_ratio: number | null
   model: string | null
+}
+
+// Full iteration data from API
+interface BuildIteration {
+  uuid: string
+  build_id: string
+  user_id: string
+  iteration_number: number
+  status: string
+  duration_seconds: number | null
+  llm_design: any
+  llm_thinking: string | null
+  training_config: any
+  optimal_label_config: any
+  features: any
+  hyperparameter_results: any
+  nn_training_results: any
+  lstm_training_results: any
+  model_evaluations: any
+  best_model: {
+    name: string
+    metrics: {
+      f1: number
+      precision: number
+      recall: number
+      auc: number
+    }
+  } | null
+  entry_rules: {
+    rules: Array<{
+      feature: string
+      operator: string
+      threshold: number
+      description?: string
+    }>
+    score_threshold: number
+  } | null
+  exit_rules: {
+    rules: Array<{
+      feature: string
+      operator: string
+      threshold: number
+      description?: string
+    }>
+    score_threshold: number
+  } | null
+  backtest_results: {
+    total_return: number
+    win_rate: number
+    sharpe_ratio: number
+    max_drawdown: number
+    total_trades: number
+    profit_factor: number
+  } | null
+  created_at: string
+  updated_at: string
 }
 
 interface ChatMessage {
@@ -308,7 +364,232 @@ function DesignPromptBubbles({ msg }: { msg: ChatMessage }) {
   )
 }
 
+/**
+ * IterationCard component - displays detailed iteration results
+ */
+interface IterationCardProps {
+  iteration: BuildIteration
+  isBest: boolean
+  isCurrent: boolean
+  isRunning: boolean
+}
 
+function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCardProps) {
+  const [configExpanded, setConfigExpanded] = useState(false)
+
+  const getStatusBadge = (status: string) => {
+    const statusLower = status.toLowerCase()
+    if (statusLower === 'complete') {
+      return <span className="px-2 py-1 text-xs font-medium bg-green-500/20 text-green-600 dark:text-green-400 rounded">Complete</span>
+    }
+    if (statusLower === 'training') {
+      return <span className="px-2 py-1 text-xs font-medium bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">Training</span>
+    }
+    if (statusLower === 'designing') {
+      return <span className="px-2 py-1 text-xs font-medium bg-purple-500/20 text-purple-600 dark:text-purple-400 rounded">Designing</span>
+    }
+    if (statusLower === 'failed') {
+      return <span className="px-2 py-1 text-xs font-medium bg-red-500/20 text-red-600 dark:text-red-400 rounded">Failed</span>
+    }
+    return <span className="px-2 py-1 text-xs font-medium bg-surface-hover text-text-secondary rounded">{status}</span>
+  }
+
+  return (
+    <div
+      className={`rounded-lg p-6 border ${
+        isBest
+          ? 'bg-primary/5 border-primary/40'
+          : 'bg-surface border-border'
+      } ${isCurrent && isRunning ? 'animate-pulse-subtle' : ''}`}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <h3 className="text-lg font-semibold text-text">Iteration #{iteration.iteration_number}</h3>
+          {getStatusBadge(iteration.status)}
+        </div>
+        <div className="flex items-center gap-2">
+          {isBest && (
+            <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary bg-primary/10 rounded">
+              <Trophy size={14} />
+              Best
+            </span>
+          )}
+          {isCurrent && (
+            <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-text-secondary bg-surface-hover rounded">
+              🔄 Current
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Backtest Results */}
+      {iteration.backtest_results && (
+        <div className="mb-6">
+          <h4 className="text-sm font-semibold text-text mb-3">Backtest Results</h4>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="bg-surface-hover rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary mb-1">Total Return</p>
+              <p className={`text-lg font-bold ${
+                iteration.backtest_results.total_return >= 0
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-600 dark:text-red-400'
+              }`}>
+                {iteration.backtest_results.total_return.toFixed(2)}%
+              </p>
+            </div>
+            <div className="bg-surface-hover rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary mb-1">Win Rate</p>
+              <p className="text-sm font-semibold text-text">
+                {(iteration.backtest_results.win_rate * 100).toFixed(1)}%
+              </p>
+            </div>
+            <div className="bg-surface-hover rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary mb-1">Sharpe Ratio</p>
+              <p className="text-sm font-semibold text-text">
+                {iteration.backtest_results.sharpe_ratio.toFixed(2)}
+              </p>
+            </div>
+            <div className="bg-surface-hover rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary mb-1">Max Drawdown</p>
+              <p className="text-sm font-semibold text-red-600 dark:text-red-400">
+                {iteration.backtest_results.max_drawdown.toFixed(2)}%
+              </p>
+            </div>
+            <div className="bg-surface-hover rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary mb-1">Total Trades</p>
+              <p className="text-sm font-semibold text-text">
+                {iteration.backtest_results.total_trades}
+              </p>
+            </div>
+            <div className="bg-surface-hover rounded-lg p-3 border border-border">
+              <p className="text-xs text-text-secondary mb-1">Profit Factor</p>
+              <p className="text-sm font-semibold text-text">
+                {iteration.backtest_results.profit_factor.toFixed(2)}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Best Model */}
+      {iteration.best_model && (
+        <div className="mb-6">
+          <h4 className="text-sm font-semibold text-text mb-3">Best Model</h4>
+          <div className="bg-surface-hover rounded-lg p-4 border border-border">
+            <p className="text-sm font-medium text-text mb-3">{iteration.best_model.name}</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <p className="text-xs text-text-secondary mb-1">F1 Score</p>
+                <p className="text-sm font-semibold text-text">
+                  {iteration.best_model.metrics.f1.toFixed(3)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-text-secondary mb-1">Precision</p>
+                <p className="text-sm font-semibold text-text">
+                  {iteration.best_model.metrics.precision.toFixed(3)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-text-secondary mb-1">Recall</p>
+                <p className="text-sm font-semibold text-text">
+                  {iteration.best_model.metrics.recall.toFixed(3)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-text-secondary mb-1">AUC</p>
+                <p className="text-sm font-semibold text-text">
+                  {iteration.best_model.metrics.auc.toFixed(3)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Entry/Exit Rules */}
+      {(iteration.entry_rules || iteration.exit_rules) && (
+        <div className="mb-6">
+          <h4 className="text-sm font-semibold text-text mb-3">Trading Rules</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {iteration.entry_rules && (
+              <div className="bg-surface-hover rounded-lg p-4 border border-border">
+                <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
+                  Entry Rules (Score ≥ {iteration.entry_rules.score_threshold})
+                </p>
+                <div className="space-y-2">
+                  {iteration.entry_rules.rules.map((rule, idx) => (
+                    <div key={idx} className="text-xs text-text">
+                      <span className="font-mono">{rule.feature} {rule.operator} {rule.threshold}</span>
+                      {rule.description && (
+                        <span className="text-text-secondary ml-2">— {rule.description}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {iteration.exit_rules && (
+              <div className="bg-surface-hover rounded-lg p-4 border border-border">
+                <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
+                  Exit Rules (Score ≥ {iteration.exit_rules.score_threshold})
+                </p>
+                <div className="space-y-2">
+                  {iteration.exit_rules.rules.map((rule, idx) => (
+                    <div key={idx} className="text-xs text-text">
+                      <span className="font-mono">{rule.feature} {rule.operator} {rule.threshold}</span>
+                      {rule.description && (
+                        <span className="text-text-secondary ml-2">— {rule.description}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Training Config (Collapsed) */}
+      <div>
+        <button
+          onClick={() => setConfigExpanded(!configExpanded)}
+          className="flex items-center justify-between w-full text-left text-sm font-semibold text-text hover:text-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded px-2 py-1"
+          aria-expanded={configExpanded}
+          aria-label="Toggle training configuration"
+        >
+          <span>Training Configuration</span>
+          {configExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+        {configExpanded && (
+          <div className="mt-3 bg-surface-hover rounded-lg p-4 border border-border">
+            <div className="space-y-3 text-xs">
+              {iteration.features && (
+                <div>
+                  <p className="font-medium text-text-secondary uppercase tracking-wide mb-1">Features</p>
+                  <p className="text-text font-mono">{JSON.stringify(iteration.features, null, 2)}</p>
+                </div>
+              )}
+              {iteration.optimal_label_config && (
+                <div>
+                  <p className="font-medium text-text-secondary uppercase tracking-wide mb-1">Label Config</p>
+                  <p className="text-text font-mono">{JSON.stringify(iteration.optimal_label_config, null, 2)}</p>
+                </div>
+              )}
+              {iteration.hyperparameter_results && (
+                <div>
+                  <p className="font-medium text-text-secondary uppercase tracking-wide mb-1">Hyperparameter Results</p>
+                  <p className="text-text font-mono">{JSON.stringify(iteration.hyperparameter_results, null, 2)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function BuildDetailPage() {
   const params = useParams()
@@ -329,9 +610,14 @@ export default function BuildDetailPage() {
   const [stopping, setStopping] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [thinkingContent, setThinkingContent] = useState<string[]>([])
-  const [iterationResults, setIterationResults] = useState<IterationResult[]>([])
+  // Keep for backward compatibility with WebSocket data (prefixed with _ to indicate intentionally unused)
+  const [_iterationResults, setIterationResults] = useState<IterationResult[]>([])
   const [maxIterations, setMaxIterations] = useState<number | null>(null)
   const [tokensPerIteration, setTokensPerIteration] = useState<number | null>(null)
+
+  // State for rich iteration cards from API
+  const [buildIterations, setBuildIterations] = useState<BuildIteration[]>([])
+  const [_loadingIterations, setLoadingIterations] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const statusIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -340,6 +626,7 @@ export default function BuildDetailPage() {
   const seenChatUuidsRef = useRef<Set<string>>(new Set())
   // Track the build UUID separately so WebSocket doesn't re-trigger on every poll update
   const [buildUuid, setBuildUuid] = useState<string | null>(null)
+  const iterationsIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Fetch per-iteration pricing from the backend on page load
   useEffect(() => {
@@ -407,6 +694,32 @@ export default function BuildDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, isLoading, buildUuid])
 
+  // Fetch iterations initially and poll every 10 seconds while build is running
+  useEffect(() => {
+    if (!buildUuid) return
+
+    // Fetch immediately
+    fetchBuildIterations()
+
+    // Poll every 10 seconds if build is not terminal
+    const terminalStatuses = ['complete', 'failed', 'stopped']
+    const isTerminal = build?.status ? terminalStatuses.includes(build.status.toLowerCase()) : false
+
+    if (!isTerminal) {
+      iterationsIntervalRef.current = setInterval(() => {
+        fetchBuildIterations()
+      }, 10000)
+    }
+
+    return () => {
+      if (iterationsIntervalRef.current) {
+        clearInterval(iterationsIntervalRef.current)
+        iterationsIntervalRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildUuid, build?.status])
+
   const fetchLatestBuild = async () => {
     try {
       const response = await api.get(`/api/strategies/${strategyId}/builds?limit=1`)
@@ -444,6 +757,20 @@ export default function BuildDetailPage() {
     } catch (err) {
       console.error('Failed to fetch chat history:', err)
       setLoadingChat(false)
+    }
+  }
+
+  const fetchBuildIterations = async () => {
+    if (!buildUuid) return
+
+    try {
+      setLoadingIterations(true)
+      const response = await api.get(`/api/builds/${buildUuid}/iterations`)
+      setBuildIterations(response.data.iterations || [])
+      setLoadingIterations(false)
+    } catch (err) {
+      console.error('Failed to fetch build iterations:', err)
+      setLoadingIterations(false)
     }
   }
 
@@ -1182,73 +1509,71 @@ export default function BuildDetailPage() {
             )}
           </div>
 
-          {/* Per-Iteration Result Cards (Change 5) */}
-          {iterationResults.length > 0 && (
-            <div className="bg-surface border border-border rounded-lg p-6">
-              <h2 className="text-lg font-semibold text-text mb-4">Iteration Results</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {iterationResults.map((result) => {
-                  // Determine if this is the best iteration (highest total_return)
-                  const bestIteration = iterationResults.reduce((best, r) =>
-                    (r.total_return ?? -Infinity) > (best.total_return ?? -Infinity) ? r : best
-                  , iterationResults[0])
-                  const isBest = result.iteration === bestIteration.iteration && iterationResults.length > 1
+          {/* Rich Iteration Cards - Best and Current Only */}
+          {buildIterations.length > 0 && (() => {
+            // Calculate best iteration (highest total_return)
+            const bestIteration = buildIterations.reduce((best, iter) => {
+              const bestReturn = best.backtest_results?.total_return ?? -Infinity
+              const iterReturn = iter.backtest_results?.total_return ?? -Infinity
+              return iterReturn > bestReturn ? iter : best
+            }, buildIterations[0])
 
-                  return (
-                    <div
-                      key={result.iteration}
-                      className={`rounded-lg p-4 border ${
-                        isBest
-                          ? 'bg-primary/10 border-primary/40'
-                          : 'bg-surface-hover border-border'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-semibold text-text">
-                          Iteration {result.iteration + 1}
-                        </span>
-                        {isBest && (
-                          <span className="flex items-center gap-1 text-xs font-medium text-primary">
-                            <Trophy size={14} />
-                            Best
-                          </span>
-                        )}
-                      </div>
-                      {result.model && (
-                        <p className="text-xs text-text-secondary mb-2">Model: {result.model}</p>
-                      )}
-                      <div className="grid grid-cols-2 gap-2">
-                        {result.total_return != null && (
-                          <div className="bg-surface rounded p-2">
-                            <p className="text-xs text-text-secondary">Total Return</p>
-                            <p className={`text-sm font-semibold ${(result.total_return ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                              {typeof result.total_return === 'number' ? `${result.total_return.toFixed(2)}%` : String(result.total_return)}
-                            </p>
-                          </div>
-                        )}
-                        {result.win_rate != null && (
-                          <div className="bg-surface rounded p-2">
-                            <p className="text-xs text-text-secondary">Win Rate</p>
-                            <p className="text-sm font-semibold text-text">
-                              {typeof result.win_rate === 'number' ? `${(result.win_rate * 100).toFixed(1)}%` : String(result.win_rate)}
-                            </p>
-                          </div>
-                        )}
-                        {result.sharpe_ratio != null && (
-                          <div className="bg-surface rounded p-2">
-                            <p className="text-xs text-text-secondary">Sharpe Ratio</p>
-                            <p className="text-sm font-semibold text-text">
-                              {typeof result.sharpe_ratio === 'number' ? result.sharpe_ratio.toFixed(2) : String(result.sharpe_ratio)}
-                            </p>
-                          </div>
-                        )}
-                      </div>
+            // Calculate current iteration (highest iteration_number)
+            const currentIteration = buildIterations.reduce((current, iter) => {
+              return iter.iteration_number > current.iteration_number ? iter : current
+            }, buildIterations[0])
+
+            // Check if best and current are the same
+            const isSameIteration = bestIteration.uuid === currentIteration.uuid
+
+            // Check if build is running
+            const terminalStatuses = ['complete', 'failed', 'stopped']
+            const isRunning = build?.status ? !terminalStatuses.includes(build.status.toLowerCase()) : false
+
+            // If only 1 iteration, show it as Current only
+            const showBest = buildIterations.length > 1 && !isSameIteration
+            const showCurrent = true
+
+            return (
+              <div className="bg-surface border border-border rounded-lg p-6">
+                <h2 className="text-lg font-semibold text-text mb-6">Iteration Results</h2>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Show single card with both badges if best === current */}
+                  {isSameIteration ? (
+                    <div className="lg:col-span-2">
+                      <IterationCard
+                        iteration={currentIteration}
+                        isBest={buildIterations.length > 1}
+                        isCurrent={true}
+                        isRunning={isRunning}
+                      />
                     </div>
-                  )
-                })}
+                  ) : (
+                    <>
+                      {/* Best Iteration Card */}
+                      {showBest && (
+                        <IterationCard
+                          iteration={bestIteration}
+                          isBest={true}
+                          isCurrent={false}
+                          isRunning={false}
+                        />
+                      )}
+                      {/* Current Iteration Card */}
+                      {showCurrent && (
+                        <IterationCard
+                          iteration={currentIteration}
+                          isBest={false}
+                          isCurrent={true}
+                          isRunning={isRunning}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* AI Chat Section — renamed heading (Change 1) */}
           <div className="bg-surface border border-border rounded-lg p-6">

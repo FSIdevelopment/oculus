@@ -113,6 +113,11 @@ class JobProcessor:
                 train_lstm=ml_config.get('train_lstm', True),
 
                 # Neural network architecture
+                nn_hidden_layers=[
+                    tuple(layer) for layer in ml_config.get(
+                        'nn_hidden_layers', [(128, 64), (256, 128, 64), (512, 256, 128)]
+                    )
+                ],
                 nn_epochs=ml_config.get('nn_epochs', 100),
                 nn_batch_size=ml_config.get('nn_batch_size', 64),
                 nn_learning_rate=ml_config.get('nn_learning_rate', 0.001),

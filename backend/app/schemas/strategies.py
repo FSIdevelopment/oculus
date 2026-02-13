@@ -75,3 +75,31 @@ class DockerInfoResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class BuildIterationResponse(BaseModel):
+    """Schema for build iteration details."""
+    uuid: str
+    build_id: str
+    user_id: str
+    iteration_number: int
+    status: str
+    duration_seconds: Optional[float] = None
+    llm_design: Optional[dict] = None
+    llm_thinking: Optional[str] = None
+    training_config: Optional[dict] = None
+    optimal_label_config: Optional[dict] = None
+    features: Optional[dict] = None
+    hyperparameter_results: Optional[dict] = None
+    nn_training_results: Optional[dict] = None
+    lstm_training_results: Optional[dict] = None
+    model_evaluations: Optional[dict] = None
+    best_model: Optional[dict] = None
+    entry_rules: Optional[dict] = None
+    exit_rules: Optional[dict] = None
+    backtest_results: Optional[dict] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+

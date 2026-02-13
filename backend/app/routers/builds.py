@@ -19,7 +19,7 @@ from app.models.strategy_build import StrategyBuild
 from app.models.build_iteration import BuildIteration
 from app.models.chat_history import ChatHistory
 from app.auth.dependencies import get_current_active_user
-from app.schemas.strategies import BuildResponse
+from app.schemas.strategies import BuildResponse, BuildIterationResponse
 from app.services.build_orchestrator import BuildOrchestrator
 from app.services.docker_builder import DockerBuilder
 from app.services.balance import deduct_tokens
@@ -770,6 +770,64 @@ async def get_build_pricing():
     """Return current build pricing configuration (public, no auth required)."""
     return {
         "tokens_per_iteration": settings.TOKENS_PER_ITERATION,
+    }
+
+
+@router.get("/api/builds/{build_id}/iterations")
+async def get_build_iterations(
+    build_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get all BuildIteration records for a build.
+
+    Returns iterations ordered by iteration_number ascending.
+    Requires authentication and verifies user owns the build.
+    """
+    # Fetch build with strategy relationship to check ownership
+    result = await db.execute(
+        select(StrategyBuild)
+        .where(StrategyBuild.uuid == build_id)
+    )
+    build = result.scalar_one_or_none()
+
+    if not build:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Build not found"
+        )
+
+    # Fetch strategy to verify ownership
+    strat_result = await db.execute(
+        select(Strategy).where(Strategy.uuid == build.strategy_id)
+    )
+    strategy = strat_result.scalar_one_or_none()
+
+    if not strategy or strategy.user_id != current_user.uuid:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Build not found"
+        )
+
+    # Fetch all iterations for this build, ordered by iteration_number
+    iterations_result = await db.execute(
+        select(BuildIteration)
+        .where(BuildIteration.build_id == build_id)
+        .order_by(BuildIteration.iteration_number.asc())
+    )
+    iterations = iterations_result.scalars().all()
+
+    # Convert to response schema
+    iteration_responses = [
+        BuildIterationResponse.model_validate(iteration)
+        for iteration in iterations
+    ]
+
+    return {
+        "iterations": iteration_responses,
+        "total": len(iteration_responses),
+        "build_id": build_id,
     }
 
 
