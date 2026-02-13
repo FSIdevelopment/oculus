@@ -3,10 +3,13 @@ Job processor - deserializes training jobs and invokes the ML pipeline.
 """
 
 import asyncio
+import importlib.util
 import json
 import logging
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 import redis
@@ -17,7 +20,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from strategy_designer_ai.ml_enhanced_trainer import EnhancedMLTrainer, EnhancedMLConfig
 from strategy_designer_ai.rule_extractor import RuleExtractor
-from strategy_optimizer_ai.optimizer import StrategyOptimizer
+from strategy_designer_ai.strategy_optimizer import StrategyOptimizer
 from worker.config import config
 from worker.progress_reporter import ProgressReporter
 from worker.strategy_file_generator import StrategyFileGenerator
@@ -226,11 +229,227 @@ class JobProcessor:
                     details={"error": str(file_gen_err)},
                 )
 
-            # Step 4: Optimize strategy parameters (optional)
-            reporter.report_phase("optimization", "in_progress")
-            # Note: Full optimization requires backtesting infrastructure
-            # For now, we report completion without full optimization
-            reporter.report_phase("optimization", "complete")
+            # Write generated strategy files to a temp directory so the optimizer
+            # and backtester can import and execute them as real Python modules.
+            strategy_temp_dir = None
+            optimization_results = {}
+            backtest_results = {
+                "status": "pending",
+                "note": "Backtesting requires generated strategy files",
+            }
+
+            try:
+                if strategy_files:
+                    strategy_temp_dir = tempfile.mkdtemp(prefix="oculus_strategy_")
+                    for filename, content in strategy_files.items():
+                        file_path = Path(strategy_temp_dir) / filename
+                        file_path.write_text(content)
+                    logger.info(
+                        f"[{job_id}] Wrote {len(strategy_files)} files to "
+                        f"{strategy_temp_dir}"
+                    )
+
+                    # Step 4: Optimize strategy parameters
+                    try:
+                        reporter.report_phase("optimization", "in_progress")
+
+                        optimizer = StrategyOptimizer(strategy_temp_dir)
+
+                        # Build LLM-guided optimization ranges (mirrors strategy_builder.py)
+                        sl = design.get("recommended_stop_loss", 0.05)
+                        ts = design.get("recommended_trailing_stop", 0.03)
+                        mp = design.get("recommended_max_positions", 3)
+                        est = design.get("entry_score_threshold", 3)
+
+                        # Clamp helpers for realistic bounds
+                        def clamp_sl(v):
+                            return max(0.02, min(0.15, round(v, 3)))
+
+                        def clamp_ts(v):
+                            return max(0.01, min(0.10, round(v, 3)))
+
+                        stop_loss_range = sorted(set([
+                            clamp_sl(sl * 0.5), clamp_sl(sl * 0.75),
+                            clamp_sl(sl), clamp_sl(sl * 1.25), clamp_sl(sl * 1.5),
+                        ]))
+                        trailing_stop_range = sorted(set([
+                            clamp_ts(ts * 0.5), clamp_ts(ts * 0.75),
+                            clamp_ts(ts), clamp_ts(ts * 1.25), clamp_ts(ts * 1.5),
+                        ]))
+                        max_positions_range = sorted(set([
+                            max(1, mp - 1), mp, min(5, mp + 1),
+                        ]))
+                        min_entry_score_range = [
+                            max(1, est - 1), est, est + 1, est + 2,
+                        ]
+
+                        logger.info(
+                            f"[{job_id}] Optimization ranges — "
+                            f"SL: {stop_loss_range}, TS: {trailing_stop_range}, "
+                            f"MaxPos: {max_positions_range}, MinScore: {min_entry_score_range}"
+                        )
+
+                        best = optimizer.optimize(
+                            stop_loss_range=stop_loss_range,
+                            trailing_stop_range=trailing_stop_range,
+                            max_positions_range=max_positions_range,
+                            min_entry_score_range=min_entry_score_range,
+                            n_iterations=50,
+                        )
+
+                        if best:
+                            optimizer.apply_best_params(best)
+                            optimization_results = {
+                                "status": "success",
+                                "best_params": best.params,
+                                "best_return": best.total_return,
+                                "best_drawdown": best.max_drawdown,
+                                "best_score": best.score,
+                                "total_trials": len(optimizer.results),
+                            }
+                            logger.info(
+                                f"[{job_id}] Optimization complete — "
+                                f"Return: {best.total_return:.2f}%, "
+                                f"Drawdown: {best.max_drawdown:.2f}%"
+                            )
+                        else:
+                            optimization_results = {
+                                "status": "no_results",
+                                "note": "Optimizer did not find valid results",
+                            }
+                            logger.warning(
+                                f"[{job_id}] Optimization found no valid results"
+                            )
+
+                        reporter.report_phase("optimization", "complete")
+
+                    except Exception as opt_err:
+                        logger.warning(
+                            f"[{job_id}] Optimization failed (non-fatal): {opt_err}"
+                        )
+                        optimization_results = {
+                            "status": "error",
+                            "error": str(opt_err),
+                        }
+                        reporter.report_phase(
+                            "optimization", "error",
+                            details={"error": str(opt_err)},
+                        )
+
+                    # Step 5: Run backtest with real PortfolioBacktester
+                    try:
+                        reporter.report_phase("backtesting", "in_progress")
+
+                        # Clear cached modules so we import from the temp dir
+                        modules_to_remove = [
+                            m for m in sys.modules
+                            if "backtest" in m or "strategy" in m.lower()
+                            or "data_provider" in m.lower()
+                            or "risk_manager" in m.lower()
+                        ]
+                        for m in modules_to_remove:
+                            del sys.modules[m]
+
+                        # Import PortfolioBacktester from the generated backtest.py
+                        backtest_path = Path(strategy_temp_dir) / "backtest.py"
+                        spec = importlib.util.spec_from_file_location(
+                            "backtest", str(backtest_path)
+                        )
+                        backtest_mod = importlib.util.module_from_spec(spec)
+                        sys.modules["backtest"] = backtest_mod
+
+                        # Ensure the temp dir is on sys.path so intra-strategy
+                        # imports (strategy, data_provider, etc.) resolve correctly
+                        if strategy_temp_dir not in sys.path:
+                            sys.path.insert(0, strategy_temp_dir)
+
+                        spec.loader.exec_module(backtest_mod)
+                        PortfolioBacktester = backtest_mod.PortfolioBacktester
+
+                        backtester = PortfolioBacktester(initial_capital=100000.0)
+                        bt_results = backtester.run()
+
+                        # Remove temp dir from sys.path
+                        if strategy_temp_dir in sys.path:
+                            sys.path.remove(strategy_temp_dir)
+
+                        if bt_results:
+                            backtest_results = {
+                                "status": "success",
+                                "total_return": bt_results.get("total_return", 0),
+                                "max_drawdown": bt_results.get("max_drawdown", 0),
+                                "win_rate": bt_results.get("win_rate", 0),
+                                "total_trades": bt_results.get("total_trades", 0),
+                                "sharpe_ratio": bt_results.get("sharpe_ratio", 0),
+                                "profit_factor": bt_results.get("profit_factor", 0),
+                                "avg_trade_return": bt_results.get("avg_trade_return", 0),
+                                "buy_hold_avg": bt_results.get("buy_hold_avg", 0),
+                                "max_potential": bt_results.get("max_potential", 0),
+                            }
+                            # Calculate capture rate
+                            max_potential = bt_results.get("max_potential", 1)
+                            total_return = bt_results.get("total_return", 0)
+                            if max_potential > 0:
+                                backtest_results["capture_rate"] = (
+                                    total_return / max_potential
+                                ) * 100
+                            else:
+                                backtest_results["capture_rate"] = 0
+
+                            logger.info(
+                                f"[{job_id}] Backtest complete — "
+                                f"Return: {total_return:.2f}%, "
+                                f"Trades: {bt_results.get('total_trades', 0)}"
+                            )
+                        else:
+                            backtest_results = {
+                                "status": "no_results",
+                                "note": "Backtester returned no results",
+                            }
+
+                        reporter.report_phase("backtesting", "complete")
+
+                    except Exception as bt_err:
+                        logger.warning(
+                            f"[{job_id}] Backtest failed (non-fatal): {bt_err}"
+                        )
+                        backtest_results = {
+                            "status": "error",
+                            "error": str(bt_err),
+                        }
+                        reporter.report_phase(
+                            "backtesting", "error",
+                            details={"error": str(bt_err)},
+                        )
+
+                    # Re-read files from temp dir — config.json may have been
+                    # updated by the optimizer's apply_best_params()
+                    for filename in list(strategy_files.keys()):
+                        file_path = Path(strategy_temp_dir) / filename
+                        if file_path.exists():
+                            strategy_files[filename] = file_path.read_text()
+
+                else:
+                    # No strategy files generated — skip optimization & backtest
+                    reporter.report_phase("optimization", "complete")
+                    reporter.report_phase("backtesting", "complete")
+                    logger.info(
+                        f"[{job_id}] Skipping optimization/backtest — "
+                        f"no strategy files generated"
+                    )
+
+            finally:
+                # Clean up temp directory
+                if strategy_temp_dir and Path(strategy_temp_dir).exists():
+                    try:
+                        shutil.rmtree(strategy_temp_dir)
+                        logger.info(
+                            f"[{job_id}] Cleaned up temp dir: {strategy_temp_dir}"
+                        )
+                    except Exception as cleanup_err:
+                        logger.warning(
+                            f"[{job_id}] Temp dir cleanup failed: {cleanup_err}"
+                        )
 
             # Collect comprehensive training data from trainer for BuildIteration persistence
             # Label configuration results (optimal forward_days + profit_threshold from search)
@@ -314,10 +533,8 @@ class JobProcessor:
                     ],
                     "top_features": strategy_rules.top_features,
                 },
-                "backtest_results": {
-                    "status": "pending",
-                    "note": "Backtesting requires full strategy deployment"
-                },
+                "backtest_results": backtest_results,
+                "optimization_results": optimization_results,
                 # Include the LLM's design config so the backend can display what was chosen
                 "design_config": {
                     "forward_returns_days_options": ml_training_config.forward_returns_days_options,
