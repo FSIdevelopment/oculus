@@ -79,7 +79,7 @@ class BuildOrchestrator:
 
         # Create prompt
         prompt = self._build_design_prompt(
-            strategy_name, symbols, description, timeframe, target_return, context,
+            strategy_name, strategy_type, symbols, description, timeframe, target_return, context,
             creation_guide
         )
 
@@ -399,6 +399,7 @@ class BuildOrchestrator:
     def _build_design_prompt(
         self,
         strategy_name: str,
+        strategy_type: str,
         symbols: List[str],
         description: str,
         timeframe: str,
@@ -415,6 +416,7 @@ highly profitable algorithmic trading strategies using technical indicators and 
 ## Task
 Design a trading strategy with these specifications:
 - Name: {strategy_name}
+- Strategy Type: {strategy_type}
 - Symbols: {', '.join(symbols)}
 - Description: {description}
 - Timeframe: {timeframe}
@@ -534,7 +536,7 @@ The JSON must follow this exact schema:
 ## Rules for entry/exit:
 - Valid operators: "<=", ">=", "<", ">", "=="
 - Feature names MUST match exactly from the available features list
-- Design 6-10 entry rules and 4-8 exit rules
+- Design 2-10 entry rules and 3-8 exit rules
 - entry_score_threshold = how many entry rules must be true simultaneously to trigger entry
 - exit_score_threshold = how many exit rules must be true simultaneously to trigger exit
 - Keep risk parameters AS DECIMALS (not percentages): stop_loss 0.02-0.15, trailing_stop 0.01-0.10, position_size 0.05-0.50
