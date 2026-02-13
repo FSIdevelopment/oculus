@@ -73,6 +73,10 @@ export default function BuildListPage() {
     switch (phase) {
       case 'designing':
         return <Zap className="text-blue-400" size={16} />
+      case 'refining':
+        return <Zap className="text-purple-400" size={16} />
+      case 'selecting_best':
+        return <Zap className="text-yellow-400" size={16} />
       case 'training':
         return <Zap className="text-purple-400" size={16} />
       case 'optimizing':
@@ -80,6 +84,8 @@ export default function BuildListPage() {
       case 'building_docker':
         return <Zap className="text-green-400" size={16} />
       case 'complete':
+        return <CheckCircle className="text-green-500" size={16} />
+      case 'completed':
         return <CheckCircle className="text-green-500" size={16} />
       default:
         return <Clock className="text-gray-400" size={16} />
@@ -93,11 +99,14 @@ export default function BuildListPage() {
         return 'bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300'
       case 'building':
       case 'designing':
+      case 'refining':
+      case 'selecting_best':
       case 'training':
       case 'optimizing':
       case 'building_docker':
         return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
       case 'complete':
+      case 'completed':
         return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
       case 'failed':
         return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
