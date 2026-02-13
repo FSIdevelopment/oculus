@@ -24,11 +24,16 @@ import redis
 from worker.config import config
 from worker.job_processor import JobProcessor
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Force-configure logging (overrides any pre-existing handlers from library imports)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+# Remove any pre-existing handlers (e.g., from strategy_optimizer.py import)
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+# Add our handler with proper formatting
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+root_logger.addHandler(handler)
 logger = logging.getLogger(__name__)
 
 
