@@ -256,7 +256,7 @@ AVAILABLE_FEATURES = [
     "WILLIAMS_R",
     "MACD", "MACD_SIGNAL", "MACD_HIST",
     "ROC_5", "ROC_10", "ROC_20",
-    "MFI", "CCI"
+    "MFI", "CCI",
 
     # Trend indicators
     "EMA_8", "EMA_13", "EMA_21", "EMA_50", "EMA_100", "EMA_200",
