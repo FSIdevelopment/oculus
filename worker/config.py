@@ -84,7 +84,7 @@ class WorkerConfig:
     @property
     def polygon_api_key(self) -> Optional[str]:
         """Polygon API key for market data."""
-        return os.getenv('POLYGON_MASSIVE_API_KEY')
+        return os.getenv('POLYGON_API_KEY')
 
     @property
     def log_level(self) -> str:

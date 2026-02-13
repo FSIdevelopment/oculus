@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
-import { Clock, Wifi, WifiOff, ArrowLeft, Zap, Repeat2, AlertCircle, CheckCircle2, Loader } from 'lucide-react'
+import { Clock, Wifi, WifiOff, ArrowLeft, Zap, Repeat2, AlertCircle, CheckCircle2, Loader, Square, RotateCcw, Brain, Trophy } from 'lucide-react'
 
 // WebSocket reconnection constants
 const WS_INITIAL_BACKOFF_MS = 2000
@@ -30,6 +30,15 @@ interface LogMessage {
   timestamp?: string
 }
 
+// Per-iteration training result from WebSocket
+interface IterationResult {
+  iteration: number
+  total_return: number | null
+  win_rate: number | null
+  sharpe_ratio: number | null
+  model: string | null
+}
+
 interface ChatMessage {
   uuid: string
   role: string
@@ -39,8 +48,271 @@ interface ChatMessage {
 
 const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Building Docker', 'Complete']
 
+// --- Parsed prompt section types and helpers ---
+
+interface PromptSection {
+  type: string
+  title: string
+  content: string
+}
+
+/**
+ * Parse a raw LLM design prompt into structured sections by splitting on ## headings.
+ * Returns an array of { type, title, content } objects for rendering as chat bubbles.
+ */
+function parseDesignPrompt(content: string): PromptSection[] {
+  const sections: PromptSection[] = []
+  const parts = content.split(/^## /m)
+
+  // Text before the first ## heading is the role/system intro
+  if (parts[0]?.trim()) {
+    sections.push({ type: 'role', title: 'System', content: parts[0].trim() })
+  }
+
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i]
+    const newlineIdx = part.indexOf('\n')
+    const heading = (newlineIdx >= 0 ? part.slice(0, newlineIdx) : part).trim()
+    const body = newlineIdx >= 0 ? part.slice(newlineIdx + 1).trim() : ''
+
+    // Map heading text to a section type
+    const h = heading.toLowerCase().replace(/:$/, '')
+    let type: string
+    if (h === 'task') {
+      type = 'task'
+    } else if (h.includes('available feature')) {
+      type = 'features'
+    } else if (h.includes('previous builds context')) {
+      type = 'context'
+    } else if (h.includes('important') || h.includes('critical instructions')) {
+      type = 'important'
+    } else if (h.includes('previous design')) {
+      type = 'previous-design'
+    } else if (h.includes('backtest results')) {
+      type = 'backtest-results'
+    } else if (
+      h.includes('output format') ||
+      h.includes('rules for entry') ||
+      h.includes('ml training configuration') ||
+      h.includes('analysis questions')
+    ) {
+      type = 'hidden'
+    } else {
+      type = 'other'
+    }
+
+    sections.push({ type, title: heading, content: body })
+  }
+
+  return sections
+}
+
+/** Extract labeled fields (e.g. "- Name: value") from the Task section content. */
+function parseTaskFields(content: string): Record<string, string> {
+  const fields: Record<string, string> = {}
+  for (const line of content.split('\n')) {
+    const match = line.match(/^-\s+(.+?):\s*(.*)$/)
+    if (match) {
+      fields[match[1].trim()] = match[2].trim()
+    }
+  }
+  return fields
+}
+
+/** Extract feature names from indented list lines (e.g. "  - feature_name"). */
+function parseFeatureNames(content: string): string[] {
+  const features: string[] = []
+  for (const line of content.split('\n')) {
+    const match = line.match(/^\s+-\s+(.+)$/)
+    if (match && match[1].trim()) {
+      features.push(match[1].trim())
+    }
+  }
+  return features
+}
+
+/**
+ * Renders a user chat message by parsing the raw LLM prompt into
+ * distinct, readable message bubbles. Falls back to original rendering
+ * if the prompt cannot be meaningfully parsed.
+ */
+function DesignPromptBubbles({ msg }: { msg: ChatMessage }) {
+  const [featuresExpanded, setFeaturesExpanded] = useState(false)
+  const sections = parseDesignPrompt(msg.content)
+
+  // Fallback: if parsing found ≤1 section, render as a single bubble
+  if (sections.length <= 1) {
+    return (
+      <div className="flex gap-3 flex-row-reverse">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-primary/20 text-primary">
+          👤
+        </div>
+        <div className="flex-1 text-right">
+          <div className="inline-block max-w-md px-4 py-2 rounded-lg bg-primary/20 text-primary border border-primary/30">
+            <p className="text-sm break-words">{msg.content}</p>
+          </div>
+          <p className="text-xs text-text-secondary mt-1">
+            {new Date(msg.created_at).toLocaleTimeString()}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  const isRefinement = sections.some(s => s.type === 'previous-design' || s.type === 'backtest-results')
+
+  return (
+    <div className="space-y-3">
+      {/* User avatar + timestamp shown once at the top */}
+      <div className="flex items-center gap-2 justify-end">
+        <span className="text-xs text-text-secondary">
+          {new Date(msg.created_at).toLocaleTimeString()}
+        </span>
+        <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-primary/20 text-primary text-xs">
+          👤
+        </div>
+      </div>
+
+      {sections.filter(s => s.type !== 'hidden').map((section, idx) => {
+        // Role intro — brief system message
+        if (section.type === 'role') {
+          const briefIntro = isRefinement
+            ? 'Refining strategy based on previous iteration results...'
+            : section.content.split('\n')[0]
+          return (
+            <div key={idx} className="text-center">
+              <p className="text-xs text-text-secondary italic">{briefIntro}</p>
+            </div>
+          )
+        }
+
+        // Task section — card with labeled fields
+        if (section.type === 'task') {
+          const fields = parseTaskFields(section.content)
+          return (
+            <div key={idx} className="bg-surface-hover border border-border rounded-lg p-4">
+              <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-3">Strategy Task</p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                {fields['Name'] && (
+                  <div><span className="text-text-secondary">Name:</span> <span className="text-text font-medium">{fields['Name']}</span></div>
+                )}
+                {fields['Symbols'] && (
+                  <div><span className="text-text-secondary">Symbols:</span> <span className="text-text font-medium">{fields['Symbols']}</span></div>
+                )}
+                {fields['Timeframe'] && (
+                  <div><span className="text-text-secondary">Timeframe:</span> <span className="text-text font-medium">{fields['Timeframe']}</span></div>
+                )}
+                {fields['Target Return'] && (
+                  <div><span className="text-text-secondary">Target Return:</span> <span className="text-text font-medium">{fields['Target Return']}</span></div>
+                )}
+                {fields['Description'] && (
+                  <div className="col-span-2"><span className="text-text-secondary">Description:</span> <span className="text-text">{fields['Description']}</span></div>
+                )}
+              </div>
+            </div>
+          )
+        }
+
+        // Features section — collapsible tag chips
+        if (section.type === 'features') {
+          const features = parseFeatureNames(section.content)
+          if (features.length === 0) return null
+          return (
+            <div key={idx} className="bg-surface-hover border border-border rounded-lg p-3">
+              <button
+                onClick={() => setFeaturesExpanded(!featuresExpanded)}
+                className="flex items-center gap-2 text-xs font-medium text-text-secondary uppercase tracking-wide hover:text-text transition-colors w-full text-left"
+              >
+                <span>Available Features ({features.length})</span>
+                <span>{featuresExpanded ? '▾' : '▸'}</span>
+              </button>
+              {featuresExpanded && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {features.map(f => (
+                    <span key={f} className="px-2 py-0.5 bg-surface rounded text-xs text-text-secondary">{f}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        }
+
+        // Context section — show only if non-empty
+        if (section.type === 'context') {
+          if (!section.content.trim()) return null
+          return (
+            <div key={idx} className="bg-surface-hover border border-border rounded-lg p-3">
+              <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">Previous Builds Context</p>
+              <p className="text-sm text-text whitespace-pre-wrap">{section.content}</p>
+            </div>
+          )
+        }
+
+        // Important / Critical Instructions — highlighted callout
+        if (section.type === 'important') {
+          return (
+            <div key={idx} className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+              <p className="text-xs font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wide mb-1">Important</p>
+              <p className="text-sm text-text">{section.content}</p>
+            </div>
+          )
+        }
+
+        // Previous design JSON (refinement prompts) — collapsed by default
+        if (section.type === 'previous-design') {
+          return (
+            <div key={idx} className="bg-surface-hover border border-border rounded-lg p-3">
+              <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">{section.title}</p>
+              <pre className="text-xs text-text-secondary overflow-x-auto max-h-32 overflow-y-auto"><code>{section.content}</code></pre>
+            </div>
+          )
+        }
+
+        // Backtest results (refinement prompts) — structured metrics
+        if (section.type === 'backtest-results') {
+          const metricsLines = section.content.split('\n').filter(l => l.startsWith('- '))
+          return (
+            <div key={idx} className="bg-surface-hover border border-border rounded-lg p-3">
+              <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">{section.title}</p>
+              {metricsLines.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {metricsLines.map((line, i) => {
+                    const m = line.match(/^-\s+(.+?):\s+(.+)$/)
+                    if (!m) return null
+                    return (
+                      <div key={i}>
+                        <span className="text-text-secondary">{m[1]}:</span>{' '}
+                        <span className="text-text font-medium">{m[2]}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        }
+
+        // Catch-all for any unrecognized section
+        if (section.type === 'other') {
+          return (
+            <div key={idx} className="bg-surface-hover border border-border rounded-lg p-3">
+              <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">{section.title}</p>
+              <p className="text-sm text-text whitespace-pre-wrap">{section.content}</p>
+            </div>
+          )
+        }
+
+        return null
+      })}
+    </div>
+  )
+}
+
+
+
 export default function BuildDetailPage() {
   const params = useParams()
+  const router = useRouter()
   const strategyId = params.id as string
   const { isAuthenticated, isLoading } = useAuth()
 
@@ -53,6 +325,14 @@ export default function BuildDetailPage() {
   const [loadingChat, setLoadingChat] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // New state for stop/restart, thinking, iteration results, and max iterations
+  const [stopping, setStopping] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const [thinkingContent, setThinkingContent] = useState<string[]>([])
+  const [iterationResults, setIterationResults] = useState<IterationResult[]>([])
+  const [maxIterations, setMaxIterations] = useState<number | null>(null)
+  const [tokensPerIteration, setTokensPerIteration] = useState<number | null>(null)
+
   const wsRef = useRef<WebSocket | null>(null)
   const statusIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -60,6 +340,19 @@ export default function BuildDetailPage() {
   const seenChatUuidsRef = useRef<Set<string>>(new Set())
   // Track the build UUID separately so WebSocket doesn't re-trigger on every poll update
   const [buildUuid, setBuildUuid] = useState<string | null>(null)
+
+  // Fetch per-iteration pricing from the backend on page load
+  useEffect(() => {
+    const fetchPricing = async () => {
+      try {
+        const res = await api.get('/api/builds/pricing')
+        setTokensPerIteration(res.data.tokens_per_iteration)
+      } catch (err) {
+        console.error('Failed to fetch pricing:', err)
+      }
+    }
+    fetchPricing()
+  }, [])
 
   // Fetch initial build status and chat history
   useEffect(() => {
@@ -238,6 +531,44 @@ export default function BuildDetailPage() {
           if (newLog.type === 'progress') {
             // Update progress in-place (replace previous, don't append)
             setLatestProgress(newLog)
+
+            const progressData = newLog.data || {}
+
+            // Track max_iterations from progress messages
+            if (progressData.max_iterations != null) {
+              setMaxIterations(progressData.max_iterations)
+            }
+
+            // Update tokens_consumed from WebSocket progress (real-time, no 5s delay)
+            if (progressData.tokens_consumed != null) {
+              setBuild(prev => prev ? { ...prev, tokens_consumed: progressData.tokens_consumed } : prev)
+            }
+
+            // Update iteration_count from WebSocket progress (real-time, no 5s delay)
+            if (progressData.iteration_count != null) {
+              setBuild(prev => prev ? { ...prev, iteration_count: progressData.iteration_count } : prev)
+            }
+
+            // Handle LLM thinking content
+            if (progressData.type === 'thinking' && progressData.thinking) {
+              setThinkingContent((prev) => [...prev, progressData.thinking])
+            }
+
+            // Handle per-iteration training results
+            if (progressData.phase === 'training_complete' && progressData.results) {
+              const result: IterationResult = {
+                iteration: progressData.iteration ?? 0,
+                total_return: progressData.results.total_return ?? null,
+                win_rate: progressData.results.win_rate ?? null,
+                sharpe_ratio: progressData.results.sharpe_ratio ?? null,
+                model: progressData.results.model ?? null,
+              }
+              setIterationResults((prev) => {
+                // Avoid duplicates for the same iteration
+                if (prev.some((r) => r.iteration === result.iteration)) return prev
+                return [...prev, result]
+              })
+            }
           } else if (newLog.type === 'error') {
             // Show error in progress card
             setLatestProgress(newLog)
@@ -279,10 +610,13 @@ export default function BuildDetailPage() {
     const phaseMap: { [key: string]: number } = {
       'queued': 0,
       'designing': 1,
+      'refining': 1,        // NEW: refining is same phase as designing (LLM design step)
+      'selecting_best': 1,  // NEW: selecting best iteration (still in design phase)
       'training': 2,
       'optimizing': 3,
       'building_docker': 4,
       'complete': 5,
+      'completed': 5,       // NEW: backward compat alias
     }
     return phaseMap[build.phase] || 0
   }
@@ -294,17 +628,50 @@ export default function BuildDetailPage() {
     return 'pending'
   }
 
-  // Helper: Calculate elapsed time
+  // Helper: Calculate elapsed time — never show negative, stop counting on terminal states
   const getElapsedTime = () => {
     if (!build) return '0s'
     const start = new Date(build.started_at).getTime()
     const end = build.completed_at ? new Date(build.completed_at).getTime() : Date.now()
-    const seconds = Math.floor((end - start) / 1000)
+    const seconds = Math.max(0, Math.floor((end - start) / 1000))
     if (seconds < 60) return `${seconds}s`
     const minutes = Math.floor(seconds / 60)
     if (minutes < 60) return `${minutes}m ${seconds % 60}s`
     const hours = Math.floor(minutes / 60)
     return `${hours}h ${minutes % 60}m`
+  }
+
+  // Stop an active build
+  const handleStopBuild = async () => {
+    if (!build) return
+    setStopping(true)
+    try {
+      await api.post(`/api/builds/${build.uuid}/stop`)
+      // Refresh build status immediately
+      await fetchLatestBuild()
+    } catch (err: any) {
+      console.error('Failed to stop build:', err)
+      setError(err.response?.data?.detail || 'Failed to stop build')
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  // Restart a failed/stopped build — redirects to the new build page
+  const handleRestartBuild = async () => {
+    if (!build) return
+    setRestarting(true)
+    try {
+      const response = await api.post(`/api/builds/${build.uuid}/restart`)
+      const newBuild = response.data
+      // The new build belongs to the same strategy — redirect to the strategy build page
+      // which will pick up the latest build
+      router.push(`/dashboard/build/${newBuild.strategy_id}`)
+    } catch (err: any) {
+      console.error('Failed to restart build:', err)
+      setError(err.response?.data?.detail || 'Failed to restart build')
+      setRestarting(false)
+    }
   }
 
   // Helper: Get status badge color (light/dark theme compatible)
@@ -316,6 +683,8 @@ export default function BuildDetailPage() {
         return 'bg-red-500/20 text-red-700 dark:text-red-400 border-red-500/30'
       case 'building':
         return 'bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30'
+      case 'stopped':
+        return 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/30'
       default:
         return 'bg-gray-500/20 text-gray-600 dark:text-gray-400 border-gray-500/30'
     }
@@ -326,10 +695,13 @@ export default function BuildDetailPage() {
     const descriptions: { [key: string]: string } = {
       'queued': 'Queued for processing',
       'designing': 'Designing strategy with Claude AI...',
+      'refining': 'Refining strategy based on previous results...',     // NEW
+      'selecting_best': 'Selecting the best iteration...',               // NEW
       'training': 'Training ML models...',
       'optimizing': 'Optimizing parameters...',
       'building_docker': 'Building Docker container...',
       'complete': 'Build complete',
+      'completed': 'Build complete',                                     // NEW alias
     }
     return descriptions[phase?.toLowerCase() || ''] || 'Processing...'
   }
@@ -339,10 +711,13 @@ export default function BuildDetailPage() {
     const emojis: { [key: string]: string } = {
       'queued': '⏳',
       'designing': '🧠',
+      'refining': '🔄',          // NEW
+      'selecting_best': '🏆',    // NEW
       'training': '🤖',
       'optimizing': '⚙️',
       'building_docker': '🐳',
       'complete': '✅',
+      'completed': '✅',          // NEW alias
     }
     return emojis[phase?.toLowerCase() || ''] || '⏳'
   }
@@ -562,18 +937,44 @@ export default function BuildDetailPage() {
           <p className="text-text-secondary text-sm ml-11">Build ID: {build.uuid}</p>
         </div>
 
-        {/* Connection status indicator */}
-        <div
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface border border-border"
-          title={wsConnected ? 'Connected to real-time logs' : wsRetriesExhausted ? 'Live updates unavailable — polling for status' : 'Polling for updates'}
-        >
-          {wsConnected ? (
-            <Wifi size={16} className="text-green-400" />
-          ) : wsRetriesExhausted ? (
-            <WifiOff size={16} className="text-red-400" />
-          ) : (
-            <WifiOff size={16} className="text-yellow-400" />
+        <div className="flex items-center gap-3">
+          {/* Stop button — visible only when build is active */}
+          {build.status.toLowerCase() === 'building' && (
+            <button
+              onClick={handleStopBuild}
+              disabled={stopping}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/20 text-red-700 dark:text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {stopping ? <Loader size={16} className="animate-spin" /> : <Square size={16} />}
+              <span className="text-sm font-medium">{stopping ? 'Stopping...' : 'Stop Build'}</span>
+            </button>
           )}
+
+          {/* Restart button — visible when build is failed or stopped */}
+          {(build.status.toLowerCase() === 'failed' || build.status.toLowerCase() === 'stopped') && (
+            <button
+              onClick={handleRestartBuild}
+              disabled={restarting}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-500/30 hover:bg-blue-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {restarting ? <Loader size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+              <span className="text-sm font-medium">{restarting ? 'Restarting...' : 'Restart Build'}</span>
+            </button>
+          )}
+
+          {/* Connection status indicator */}
+          <div
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface border border-border"
+            title={wsConnected ? 'Connected to real-time logs' : wsRetriesExhausted ? 'Live updates unavailable — polling for status' : 'Polling for updates'}
+          >
+            {wsConnected ? (
+              <Wifi size={16} className="text-green-400" />
+            ) : wsRetriesExhausted ? (
+              <WifiOff size={16} className="text-red-400" />
+            ) : (
+              <WifiOff size={16} className="text-yellow-400" />
+            )}
+          </div>
         </div>
       </div>
 
@@ -602,31 +1003,49 @@ export default function BuildDetailPage() {
             {build.status.toLowerCase() === 'complete' && <CheckCircle2 size={16} />}
             {build.status.toLowerCase() === 'building' && <Loader size={16} className="animate-spin" />}
             {build.status.toLowerCase() === 'failed' && <AlertCircle size={16} />}
+            {build.status.toLowerCase() === 'stopped' && <Square size={16} />}
             <span className="capitalize">{build.status}</span>
           </div>
         </div>
 
-        {/* Tokens Used */}
+        {/* Tokens Used — shows total consumed with per-iteration cost breakdown */}
         <div className="bg-surface border border-border rounded-lg p-4">
           <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Tokens Used</p>
           <div className="flex items-center gap-2">
             <Zap size={18} className="text-primary" />
-            <p className="text-lg font-semibold text-text">{build.tokens_consumed.toFixed(0)}</p>
+            <p className="text-lg font-semibold text-text">{build.tokens_consumed.toFixed(0)} tokens</p>
           </div>
+          {/* Cost breakdown: iterations × tokens per iteration */}
+          {tokensPerIteration != null && build.iteration_count > 0 && (
+            <p className="text-xs text-text-secondary mt-1">
+              {build.iteration_count} × {tokensPerIteration} tokens/iter
+            </p>
+          )}
         </div>
 
-        {/* Iterations */}
+        {/* Iterations — show X / Y when max is known */}
         <div className="bg-surface border border-border rounded-lg p-4">
           <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Iterations</p>
           <div className="flex items-center gap-2">
             <Repeat2 size={18} className="text-primary" />
-            <p className="text-lg font-semibold text-text">{build.iteration_count}</p>
+            <p className="text-lg font-semibold text-text">
+              {build.iteration_count}{maxIterations != null ? ` / ${maxIterations}` : ''}
+            </p>
           </div>
+          {/* Visual progress bar for iterations */}
+          {maxIterations != null && maxIterations > 0 && (
+            <div className="mt-2 w-full bg-border rounded-full h-1.5">
+              <div
+                className="bg-primary h-1.5 rounded-full transition-all"
+                style={{ width: `${Math.min(100, (build.iteration_count / maxIterations) * 100)}%` }}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Duration */}
+        {/* Total Time — fixed elapsed time, stops counting on terminal states */}
         <div className="bg-surface border border-border rounded-lg p-4">
-          <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Duration</p>
+          <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Total Time</p>
           <div className="flex items-center gap-2">
             <Clock size={18} className="text-primary" />
             <p className="text-lg font-semibold text-text">{getElapsedTime()}</p>
@@ -763,12 +1182,97 @@ export default function BuildDetailPage() {
             )}
           </div>
 
-          {/* AI Chat Section */}
+          {/* Per-Iteration Result Cards (Change 5) */}
+          {iterationResults.length > 0 && (
+            <div className="bg-surface border border-border rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-text mb-4">Iteration Results</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {iterationResults.map((result) => {
+                  // Determine if this is the best iteration (highest total_return)
+                  const bestIteration = iterationResults.reduce((best, r) =>
+                    (r.total_return ?? -Infinity) > (best.total_return ?? -Infinity) ? r : best
+                  , iterationResults[0])
+                  const isBest = result.iteration === bestIteration.iteration && iterationResults.length > 1
+
+                  return (
+                    <div
+                      key={result.iteration}
+                      className={`rounded-lg p-4 border ${
+                        isBest
+                          ? 'bg-primary/10 border-primary/40'
+                          : 'bg-surface-hover border-border'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-semibold text-text">
+                          Iteration {result.iteration + 1}
+                        </span>
+                        {isBest && (
+                          <span className="flex items-center gap-1 text-xs font-medium text-primary">
+                            <Trophy size={14} />
+                            Best
+                          </span>
+                        )}
+                      </div>
+                      {result.model && (
+                        <p className="text-xs text-text-secondary mb-2">Model: {result.model}</p>
+                      )}
+                      <div className="grid grid-cols-2 gap-2">
+                        {result.total_return != null && (
+                          <div className="bg-surface rounded p-2">
+                            <p className="text-xs text-text-secondary">Total Return</p>
+                            <p className={`text-sm font-semibold ${(result.total_return ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {typeof result.total_return === 'number' ? `${result.total_return.toFixed(2)}%` : String(result.total_return)}
+                            </p>
+                          </div>
+                        )}
+                        {result.win_rate != null && (
+                          <div className="bg-surface rounded p-2">
+                            <p className="text-xs text-text-secondary">Win Rate</p>
+                            <p className="text-sm font-semibold text-text">
+                              {typeof result.win_rate === 'number' ? `${(result.win_rate * 100).toFixed(1)}%` : String(result.win_rate)}
+                            </p>
+                          </div>
+                        )}
+                        {result.sharpe_ratio != null && (
+                          <div className="bg-surface rounded p-2">
+                            <p className="text-xs text-text-secondary">Sharpe Ratio</p>
+                            <p className="text-sm font-semibold text-text">
+                              {typeof result.sharpe_ratio === 'number' ? result.sharpe_ratio.toFixed(2) : String(result.sharpe_ratio)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* AI Chat Section — renamed heading (Change 1) */}
           <div className="bg-surface border border-border rounded-lg p-6">
-            <h2 className="text-lg font-semibold text-text mb-6">Claude&apos;s Design Thinking</h2>
+            <h2 className="text-lg font-semibold text-text mb-6">Design Thinking</h2>
             <div className="space-y-4 max-h-[600px] overflow-y-auto">
 
-              {/* Chat messages - Claude's thinking is the hero content */}
+              {/* LLM Thinking Content — streamed from WebSocket (Change 4) */}
+              {thinkingContent.length > 0 && (
+                <div className="space-y-3 mb-4">
+                  {thinkingContent.map((thought, idx) => (
+                    <div key={idx} className="flex gap-3">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                        <Brain size={16} />
+                      </div>
+                      <div className="flex-1 bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                        <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide mb-1">Thinking</p>
+                        <p className="text-sm text-text break-words whitespace-pre-wrap">{thought}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Chat messages - design output is the hero content */}
               {loadingChat ? (
                 <div className="text-center py-8">
                   <Loader className="animate-spin text-primary mx-auto mb-2" size={20} />
@@ -781,27 +1285,31 @@ export default function BuildDetailPage() {
 
                     return (
                       <div key={msg.uuid} className="space-y-2">
-                        {/* User prompt - compact */}
-                        {msg.role === 'user' && (
-                          <div className="flex gap-3 flex-row-reverse">
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-primary/20 text-primary">
-                              👤
+                        {/* Thinking messages from chat history (message_type: "thinking") */}
+                        {(msg as any).message_type === 'thinking' && (
+                          <div className="flex gap-3">
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                              <Brain size={16} />
                             </div>
-                            <div className="flex-1 text-right">
-                              <div className="inline-block max-w-md px-4 py-2 rounded-lg bg-primary/20 text-primary border border-primary/30">
-                                <p className="text-sm break-words">{msg.content}</p>
-                              </div>
-                              <p className="text-xs text-text-secondary mt-1">
+                            <div className="flex-1 bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                              <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide mb-1">Thinking</p>
+                              <p className="text-sm text-text break-words whitespace-pre-wrap">{msg.content}</p>
+                              <p className="text-xs text-text-secondary mt-2">
                                 {new Date(msg.created_at).toLocaleTimeString()}
                               </p>
                             </div>
                           </div>
                         )}
 
-                        {/* Claude's design output - HERO content */}
+                        {/* User prompt - parsed into conversational bubbles */}
+                        {msg.role === 'user' && (
+                          <DesignPromptBubbles msg={msg} />
+                        )}
+
+                        {/* Design output - HERO content */}
                         {msg.role === 'assistant' && (
                           <div className="flex gap-3">
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-surface-hover text-text-secondary flex-shrink-0">
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-surface-hover text-text-secondary">
                               🧠
                             </div>
                             <div className="flex-1">

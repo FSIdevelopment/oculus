@@ -34,6 +34,10 @@ class StrategyBuild(Base):
     # Relationships
     strategy: Mapped["Strategy"] = relationship("Strategy", back_populates="builds", foreign_keys=[strategy_id])
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+    iterations: Mapped[list["BuildIteration"]] = relationship(
+        "BuildIteration", back_populates="build", foreign_keys="BuildIteration.build_id",
+        order_by="BuildIteration.iteration_number"
+    )
     
     # Indexes
     __table_args__ = (

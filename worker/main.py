@@ -14,7 +14,7 @@ import json
 import logging
 import signal
 import sys
-import time
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
@@ -24,11 +24,16 @@ import redis
 from worker.config import config
 from worker.job_processor import JobProcessor
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Force-configure logging (overrides any pre-existing handlers from library imports)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+# Remove any pre-existing handlers (e.g., from strategy_optimizer.py import)
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+# Add our handler with proper formatting
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+root_logger.addHandler(handler)
 logger = logging.getLogger(__name__)
 
 
@@ -59,10 +64,10 @@ class TrainingWorker:
                 # Block and wait for job ID from queue (timeout=1 to allow graceful shutdown)
                 # Wrap blpop in try/except to handle Redis connection errors gracefully
                 try:
-                    job_data = self.redis.blpop(config.job_queue, timeout=1)
+                    job_data = await asyncio.to_thread(self.redis.blpop, config.job_queue, 1)
                 except Exception as blpop_error:
                     logger.warning(f"⚠️  blpop error (will retry): {blpop_error}")
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     continue
 
                 if job_data is None:

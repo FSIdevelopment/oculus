@@ -1257,8 +1257,12 @@ class EnhancedMLTrainer:
         print(f"\n✓ Model saved to: {filepath}")
         return filepath
 
-    def generate_strategy_config(self) -> Dict[str, Any]:
-        """Generate trading strategy configuration from ML insights."""
+    def _build_strategy_config_dict(self) -> Dict[str, Any]:
+        """Build strategy config dict in-memory without writing to disk.
+
+        Shared logic used by generate_strategy_config() and the skip_disk_writes
+        path in run_full_pipeline().
+        """
         if not self.all_results or self.best_model is None:
             raise ValueError("Must train models first!")
 
@@ -1314,7 +1318,13 @@ class EnhancedMLTrainer:
             }
         }
 
-        # Save config
+        return config
+
+    def generate_strategy_config(self) -> Dict[str, Any]:
+        """Generate trading strategy configuration from ML insights and save to disk."""
+        config = self._build_strategy_config_dict()
+
+        # Save config to disk
         config_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             'strategies', 'semiconductor_momentum', 'ml_enhanced_config.json'
@@ -1326,8 +1336,15 @@ class EnhancedMLTrainer:
 
         return config
 
-    async def run_full_pipeline(self) -> Dict[str, Any]:
-        """Run the complete enhanced ML training pipeline."""
+    async def run_full_pipeline(self, skip_disk_writes: bool = False) -> Dict[str, Any]:
+        """Run the complete enhanced ML training pipeline.
+
+        Args:
+            skip_disk_writes: If True, skip writing model/config files to disk.
+                Used in worker context where results are sent via Redis and
+                hardcoded disk paths don't exist. Default False preserves
+                standalone behavior.
+        """
         print("\n" + "="*70)
         print("ENHANCED ML STRATEGY TRAINER")
         print("="*70)
@@ -1356,11 +1373,17 @@ class EnhancedMLTrainer:
         # Step 4: Create ensemble (optional)
         # ensemble = self.create_ensemble(top_n=3)
 
-        # Step 5: Save model
-        model_path = self.save_enhanced_model()
+        # Step 5: Save model (skip in worker context — results sent via Redis)
+        model_path = None
+        if not skip_disk_writes:
+            model_path = self.save_enhanced_model()
 
-        # Step 6: Generate strategy config
-        strategy_config = self.generate_strategy_config()
+        # Step 6: Generate strategy config (skip disk write in worker context)
+        if not skip_disk_writes:
+            strategy_config = self.generate_strategy_config()
+        else:
+            # Build config dict in-memory without writing to disk
+            strategy_config = self._build_strategy_config_dict()
 
         # Summary
         print("\n" + "="*70)
@@ -1377,7 +1400,8 @@ class EnhancedMLTrainer:
         print(f"  AUC: {best_metrics['auc']:.4f}")
         print(f"\n  Label Config: forward={self.best_config['forward_days']}d, "
               f"profit={self.best_config['profit_threshold']}%")
-        print(f"  Model saved to: {model_path}")
+        if model_path:
+            print(f"  Model saved to: {model_path}")
         print("="*70)
 
         return {

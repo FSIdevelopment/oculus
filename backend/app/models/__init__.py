@@ -10,6 +10,8 @@ from app.models.subscription import Subscription
 from app.models.rating import Rating
 from app.models.strategy_build import StrategyBuild
 from app.models.build_history import BuildHistory, FeatureTracker
+from app.models.build_iteration import BuildIteration
+from app.models.strategy_creation_guide import StrategyCreationGuide
 
 __all__ = [
     "User",
@@ -24,5 +26,7 @@ __all__ = [
     "StrategyBuild",
     "BuildHistory",
     "FeatureTracker",
+    "BuildIteration",
+    "StrategyCreationGuide",
 ]
 
