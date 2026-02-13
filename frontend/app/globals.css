@@ -72,3 +72,17 @@ input:focus-visible {
   @apply bg-border rounded hover:bg-text-secondary;
 }
 
+/* Subtle pulse animation for current iteration card when build is running */
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s ease-in-out infinite;
+}
+
