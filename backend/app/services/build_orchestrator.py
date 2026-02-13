@@ -549,6 +549,18 @@ The JSON must follow this exact schema:
 Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETELY REVISED strategy design.
 {creation_guide}"""
 
+    def _validate_design_rules(self, design: dict) -> bool:
+        """Check that the design has non-empty entry and exit rules."""
+        entry_rules = design.get("entry_rules", [])
+        exit_rules = design.get("exit_rules", [])
+        if not isinstance(entry_rules, list) or len(entry_rules) == 0:
+            logger.warning("Design has empty entry_rules")
+            return False
+        if not isinstance(exit_rules, list) or len(exit_rules) == 0:
+            logger.warning("Design has empty exit_rules")
+            return False
+        return True
+
     def _parse_design_response(self, response) -> Dict[str, Any]:
         """Parse Claude response to extract design JSON and thinking content.
 
@@ -567,14 +579,58 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
 
         thinking_text = "\n".join(thinking_parts)
 
-        # Find JSON in response
+        # Step 1: Try to match ```json ... ``` code fence (most reliable)
+        design = None
+        json_fence_match = re.search(r"```json\s*([\s\S]*?)```", text)
+        if json_fence_match:
+            try:
+                design = json.loads(json_fence_match.group(1).strip())
+                # Validate rules are non-empty
+                if self._validate_design_rules(design):
+                    return {"design": design, "thinking": thinking_text}
+            except json.JSONDecodeError:
+                pass
+
+        # Step 2: Try matching outermost JSON object (less greedy)
         json_match = re.search(r"\{.*\}", text, re.DOTALL)
         if json_match:
             try:
                 design = json.loads(json_match.group())
-                return {"design": design, "thinking": thinking_text}
+                if self._validate_design_rules(design):
+                    return {"design": design, "thinking": thinking_text}
+                # Design parsed but rules are empty — will retry below
             except json.JSONDecodeError:
                 pass
+
+        # If we got a design but rules are empty, retry once
+        if design and not self._validate_design_rules(design):
+            logger.warning("Parsed design has blank rules — retrying Claude once")
+            try:
+                retry_response = self.client.messages.create(
+                    model="claude-opus-4-6",
+                    max_tokens=settings.CLAUDE_MAX_TOKENS,
+                    thinking={"type": "adaptive"},
+                    messages=[{
+                        "role": "user",
+                        "content": f"Your previous response had empty entry_rules and/or exit_rules arrays. "
+                                   f"Please provide ONLY a JSON block with the complete strategy design including "
+                                   f"6-10 entry_rules and 4-8 exit_rules. Use features from: {', '.join(self.AVAILABLE_FEATURES[:20])}..."
+                    }],
+                )
+                retry_text = ""
+                for block in retry_response.content:
+                    if hasattr(block, "text"):
+                        retry_text += block.text
+                retry_fence = re.search(r"```json\s*([\s\S]*?)```", retry_text)
+                if retry_fence:
+                    retry_design = json.loads(retry_fence.group(1).strip())
+                    if self._validate_design_rules(retry_design):
+                        return {"design": retry_design, "thinking": thinking_text}
+            except Exception as e:
+                logger.warning("Rules retry failed: %s", e)
+
+        # Log when fallback is used
+        logger.warning("Using fallback design — Claude response could not be parsed: %s", text[:200])
 
         # Return default design with full schema if parsing fails
         return {
@@ -586,9 +642,21 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
                 "recommended_n_iter_search": 50,
                 "priority_features": [],
                 "feature_rationale": {},
-                "entry_rules": [],
+                "entry_rules": [
+                    {"feature": "RSI_14", "operator": "<=", "threshold": 35},
+                    {"feature": "MACD_HIST", "operator": ">=", "threshold": 0},
+                    {"feature": "EMA_21", "operator": "<=", "threshold": 1.02},
+                    {"feature": "BB_PCT_B", "operator": "<=", "threshold": 0.3},
+                    {"feature": "MOM_1M", "operator": ">=", "threshold": 0},
+                    {"feature": "VOLUME_RATIO", "operator": ">=", "threshold": 1.0},
+                ],
                 "entry_score_threshold": 3,
-                "exit_rules": [],
+                "exit_rules": [
+                    {"feature": "RSI_14", "operator": ">=", "threshold": 70},
+                    {"feature": "MACD_HIST", "operator": "<=", "threshold": 0},
+                    {"feature": "BB_PCT_B", "operator": ">=", "threshold": 0.85},
+                    {"feature": "MOM_1M", "operator": "<=", "threshold": -2},
+                ],
                 "exit_score_threshold": 3,
                 "recommended_stop_loss": 0.05,
                 "recommended_trailing_stop": 0.03,
@@ -747,6 +815,81 @@ Keep content concise and actionable. Each lesson should be directly applicable."
             # Non-blocking — log warning but never crash the build
             logger.warning("Creation guide update failed (non-blocking): %s", e)
             self._log(f"Warning: Creation guide update failed: {e}")
+
+    async def generate_selection_thinking(
+        self,
+        completed_iterations: List[Any],
+        best_iteration: Any,
+        target_return: float,
+    ) -> str:
+        """Generate Claude's explanation of which iteration was selected and why.
+
+        Args:
+            completed_iterations: List of all completed BuildIteration records
+            best_iteration: The BuildIteration record that was selected as best
+            target_return: The target return percentage that was not met
+
+        Returns:
+            A thinking string explaining the selection decision
+        """
+        # Build a summary of all iterations for Claude
+        iterations_summary = []
+        for it in completed_iterations:
+            bt = it.backtest_results or {}
+            iterations_summary.append({
+                "iteration": it.iteration_number,
+                "total_return": bt.get("total_return", 0),
+                "win_rate": bt.get("win_rate", 0),
+                "max_drawdown": bt.get("max_drawdown", 0),
+                "sharpe_ratio": bt.get("sharpe_ratio", "N/A"),
+                "total_trades": bt.get("total_trades", 0),
+            })
+
+        best_bt = best_iteration.backtest_results or {}
+
+        prompt = f"""You are reviewing the results of a multi-iteration strategy build process. The target return of {target_return}% was not achieved in any iteration, so we need to select the best performing iteration to deploy.
+
+Here are all completed iterations and their backtest results:
+
+{json.dumps(iterations_summary, indent=2)}
+
+The best iteration by total return is iteration {best_iteration.iteration_number} with {best_bt.get('total_return', 0):.2f}% return.
+
+Please provide a brief explanation (2-3 sentences) of:
+1. Why this iteration was selected as the best
+2. What the key performance metrics show
+3. Any notable trade-offs or considerations
+
+Keep it concise and focused on the decision rationale."""
+
+        try:
+            response = self.client.messages.create(
+                model="claude-opus-4-6",
+                max_tokens=settings.CLAUDE_MAX_TOKENS,
+                thinking={
+                    "type": "adaptive",
+                },
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            # Extract thinking and text blocks
+            thinking_blocks = [b for b in response.content if hasattr(b, "type") and b.type == "thinking"]
+            text_blocks = [b for b in response.content if hasattr(b, "text")]
+
+            thinking_text = "\n".join(b.thinking for b in thinking_blocks) if thinking_blocks else ""
+            response_text = "\n".join(b.text for b in text_blocks)
+
+            # Combine thinking and response
+            full_thinking = f"{thinking_text}\n\n{response_text}" if thinking_text else response_text
+
+            self._log(f"Selection thinking generated ({len(full_thinking)} chars)")
+            return full_thinking
+
+        except Exception as e:
+            logger.warning("Selection thinking generation failed: %s", e)
+            self._log(f"Warning: Selection thinking generation failed: {e}")
+            # Return a simple fallback explanation
+            return f"Selected iteration {best_iteration.iteration_number} as it achieved the highest total return of {best_bt.get('total_return', 0):.2f}% among all {len(completed_iterations)} completed iterations."
 
     async def generate_strategy_readme(
         self,

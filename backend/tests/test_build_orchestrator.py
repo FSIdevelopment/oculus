@@ -228,7 +228,7 @@ async def test_build_orchestrator_parse_design_response(test_db, test_user, test
         def __init__(self):
             self.content = [
                 MockThinkingBlock("I should design a momentum strategy using RSI."),
-                MockTextBlock('Some text before\n{"strategy_description": "Test", "priority_features": ["RSI"]}\nSome text after'),
+                MockTextBlock('Some text before\n{"strategy_description": "Test", "priority_features": ["RSI"], "entry_rules": [{"feature": "RSI_14", "operator": "<=", "threshold": 30}], "exit_rules": [{"feature": "RSI_14", "operator": ">=", "threshold": 70}]}\nSome text after'),
             ]
 
     result = orchestrator._parse_design_response(MockResponse())
