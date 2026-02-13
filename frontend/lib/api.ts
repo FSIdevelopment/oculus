@@ -124,6 +124,11 @@ export const strategyAPI = {
     })
     return response.data
   },
+
+  getBuildIterations: async (buildId: string) => {
+    const response = await api.get(`/api/builds/${buildId}/iterations`)
+    return response.data
+  },
 }
 
 // License API functions
