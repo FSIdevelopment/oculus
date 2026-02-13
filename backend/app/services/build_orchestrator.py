@@ -1,14 +1,17 @@
 """Build orchestrator service for strategy design and training."""
 import json
 import asyncio
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import anthropic
 import redis.asyncio as redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.strategy_build import StrategyBuild
+from app.models.strategy_creation_guide import StrategyCreationGuide
 from app.models.user import User
 from app.services.balance import deduct_tokens
 from app.services.build_history_service import BuildHistoryService, FeatureTrackerService
@@ -48,6 +51,7 @@ class BuildOrchestrator:
         description: str,
         timeframe: str,
         target_return: float,
+        strategy_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Call Claude API to design strategy.
 
@@ -66,9 +70,13 @@ class BuildOrchestrator:
         # Build context from past builds
         context = self._format_build_context(relevant_builds)
 
+        # Load creation guide from database
+        creation_guide = await self._load_creation_guide(strategy_type)
+
         # Create prompt
         prompt = self._build_design_prompt(
-            strategy_name, symbols, description, timeframe, target_return, context
+            strategy_name, symbols, description, timeframe, target_return, context,
+            creation_guide
         )
 
         try:
@@ -143,6 +151,7 @@ class BuildOrchestrator:
         previous_design: Dict[str, Any],
         backtest_results: Dict[str, Any],
         iteration: int,
+        strategy_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Refine strategy based on backtest results.
 
@@ -152,8 +161,11 @@ class BuildOrchestrator:
         """
         self._log(f"Refining strategy (iteration {iteration})")
 
+        # Load creation guide from database
+        creation_guide = await self._load_creation_guide(strategy_type)
+
         prompt = self._build_refinement_prompt(
-            previous_design, backtest_results, iteration
+            previous_design, backtest_results, iteration, creation_guide
         )
 
         try:
@@ -205,6 +217,88 @@ class BuildOrchestrator:
         
         return "\n".join(lines)
     
+    # Path to the default creation guide markdown (sections 1-5 seed the "general" row)
+    _GUIDE_MD_PATH = Path(__file__).resolve().parent.parent.parent.parent / "strategy_designer_ai" / "STRATEGY_CREATION_GUIDE.md"
+
+    @staticmethod
+    def _extract_general_sections(md_text: str) -> str:
+        """Extract sections 1-5 from STRATEGY_CREATION_GUIDE.md (everything before section 6)."""
+        marker = "## 6."
+        idx = md_text.find(marker)
+        if idx == -1:
+            # No section 6 found — return the whole file
+            return md_text.strip()
+        return md_text[:idx].strip()
+
+    async def _load_creation_guide(self, strategy_type: Optional[str]) -> str:
+        """Load creation guide content from the database for inclusion in LLM prompts.
+
+        Queries two rows from StrategyCreationGuide:
+        1. strategy_type = "general" — cross-cutting lessons for all strategies
+        2. strategy_type = <build's type> — type-specific knowledge (e.g. "Momentum")
+
+        If the "general" row doesn't exist, seeds it from STRATEGY_CREATION_GUIDE.md sections 1-5.
+        If the strategy-type row doesn't exist, uses empty string (Task 44.5 will create it).
+
+        Returns formatted guide text ready for prompt inclusion, or empty string if nothing available.
+        """
+        # --- Fetch "general" guide row ---
+        result = await self.db.execute(
+            select(StrategyCreationGuide).where(
+                StrategyCreationGuide.strategy_type == "general"
+            )
+        )
+        general_row = result.scalar_one_or_none()
+
+        # Seed "general" row from markdown file if it doesn't exist
+        if general_row is None:
+            try:
+                if self._GUIDE_MD_PATH.exists():
+                    md_content = self._GUIDE_MD_PATH.read_text()
+                    general_content = self._extract_general_sections(md_content)
+                    if general_content:
+                        general_row = StrategyCreationGuide(
+                            strategy_type="general",
+                            content=general_content,
+                            version=1,
+                        )
+                        self.db.add(general_row)
+                        await self.db.flush()
+            except Exception as e:
+                self._log(f"Warning: Could not seed general creation guide: {e}")
+
+        general_text = general_row.content if general_row else ""
+
+        # --- Fetch strategy-type-specific guide row ---
+        type_text = ""
+        if strategy_type and strategy_type != "general":
+            result = await self.db.execute(
+                select(StrategyCreationGuide).where(
+                    StrategyCreationGuide.strategy_type == strategy_type
+                )
+            )
+            type_row = result.scalar_one_or_none()
+            if type_row:
+                type_text = type_row.content
+
+        # --- Concatenate: general first, then strategy-specific ---
+        parts = []
+        if general_text:
+            parts.append(general_text)
+        if type_text:
+            parts.append(f"\n### Strategy-Type-Specific Knowledge ({strategy_type})\n\n{type_text}")
+
+        if not parts:
+            return ""
+
+        combined = "\n\n".join(parts)
+        return (
+            "\n\n## Strategy Creation Guide (Institutional Knowledge)\n"
+            "The following guide contains proven patterns and settings from "
+            "previously successful strategies. Follow these lessons:\n\n"
+            f"{combined}\n"
+        )
+
     # Available feature names produced by the ML pipeline.
     # Claude must select from these exact names for priority_features and rules.
     AVAILABLE_FEATURES = [
@@ -306,6 +400,7 @@ class BuildOrchestrator:
         timeframe: str,
         target_return: float,
         context: str,
+        creation_guide: str = "",
     ) -> str:
         """Build initial strategy design prompt with full features list, JSON schema, and rules."""
         features_list = "\n".join(f"  - {f}" for f in self.AVAILABLE_FEATURES)
@@ -372,13 +467,14 @@ The JSON must follow this exact schema:
 - Base your strategy design on proven technical analysis principles
 - The ML pipeline will find the optimal weights - you provide the structure and rules
 - Think deeply about what indicators work best for the specific symbols and strategy type
-"""
+{creation_guide}"""
     
     def _build_refinement_prompt(
         self,
         previous_design: Dict[str, Any],
         backtest_results: Dict[str, Any],
         iteration: int,
+        creation_guide: str = "",
     ) -> str:
         """Build strategy refinement prompt with full schema and analysis guidance."""
         # Extract key metrics from backtest results for the prompt
@@ -447,7 +543,7 @@ The JSON must follow this exact schema:
 - Think about whether the data is sequential (favor LSTM) or tabular (favor tree models)
 
 Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETELY REVISED strategy design.
-"""
+{creation_guide}"""
     
     def _parse_design_response(self, response) -> Dict[str, Any]:
         """Parse Claude response to extract design JSON and thinking content.

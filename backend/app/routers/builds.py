@@ -109,6 +109,7 @@ async def _run_build_loop(
     target_return: float,
     timeframe: str = "1d",
     max_iterations: int = 5,
+    strategy_type: str | None = None,
 ):
     """
     Background task that runs the full build iteration loop.
@@ -248,6 +249,7 @@ async def _run_build_loop(
                         description=description,
                         timeframe=timeframe,
                         target_return=target_return,
+                        strategy_type=strategy_type,
                     )
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
@@ -300,6 +302,7 @@ async def _run_build_loop(
                         previous_design=design,
                         backtest_results=training_results,
                         iteration=iteration,
+                        strategy_type=strategy_type,
                     )
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
@@ -549,6 +552,7 @@ async def trigger_build(
         strategy_symbols = []
 
     strategy_description = description or strategy.description or ""
+    strat_type = strategy.strategy_type  # e.g. "Momentum", "Mean Reversion", etc.
 
     # Launch the build loop as a background task
     asyncio.create_task(
@@ -562,6 +566,7 @@ async def trigger_build(
             target_return=target_return,
             timeframe=timeframe,
             max_iterations=max_iterations,
+            strategy_type=strat_type,
         )
     )
 
@@ -758,6 +763,7 @@ async def restart_build(
         strategy_symbols = []
 
     strategy_description = strategy.description or ""
+    strat_type = strategy.strategy_type  # e.g. "Momentum", "Mean Reversion", etc.
 
     # Launch the build loop as a background task
     asyncio.create_task(
@@ -771,6 +777,7 @@ async def restart_build(
             target_return=strategy.target_return or 10.0,
             timeframe="1d",
             max_iterations=max_iterations,
+            strategy_type=strat_type,
         )
     )
 
