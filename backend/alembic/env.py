@@ -1,5 +1,8 @@
 from logging.config import fileConfig
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -7,6 +10,13 @@ from sqlalchemy.ext.asyncio import create_async_engine
 import asyncio
 
 from alembic import context
+
+# Load .env files matching Pydantic's env_file = (".env", "../.env") pattern
+# Check backend/.env first, then repo root ../.env
+env_file = Path(__file__).resolve().parent.parent / ".env"
+parent_env_file = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(env_file)        # backend/.env (if exists)
+load_dotenv(parent_env_file)  # repo root .env (if exists, won't override)
 
 # Import Base and all models for autogenerate
 from app.database import Base
