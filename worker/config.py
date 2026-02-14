@@ -62,6 +62,11 @@ class WorkerConfig:
         return os.getenv('JOB_QUEUE', 'oculus:training_queue')
 
     @property
+    def expected_job_source(self) -> str:
+        """Expected source field in job payloads. Jobs without this source are skipped."""
+        return os.getenv('EXPECTED_JOB_SOURCE', 'oculus')
+
+    @property
     def result_key_prefix(self) -> str:
         """Redis key prefix for storing results."""
         return os.getenv('RESULT_KEY_PREFIX', 'result')
