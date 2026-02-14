@@ -119,6 +119,7 @@ class BuildOrchestrator:
             "timeframe": timeframe,
             "timestamp": datetime.utcnow().isoformat(),
             "iteration_uuid": iteration_uuid,
+            "source": "oculus",
         }
 
         # Push to Redis queue
