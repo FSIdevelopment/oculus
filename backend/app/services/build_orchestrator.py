@@ -122,9 +122,11 @@ class BuildOrchestrator:
         }
 
         # Push to Redis queue
-        job_id = f"build:{self.build.uuid}"
+        job_id = f"build:{self.build.uuid}:iter:{iteration_uuid or 'default'}"
+        # Clean up any stale result from previous runs
+        await self.redis_client.delete(f"result:{job_id}")
         await self.redis_client.set(job_id, json.dumps(job_payload), ex=86400)  # 24h TTL
-        await self.redis_client.lpush("training_queue", job_id)
+        await self.redis_client.lpush(settings.TRAINING_QUEUE, job_id)
 
         self._log(f"Job dispatched with ID: {job_id}")
         return job_id
@@ -141,6 +143,8 @@ class BuildOrchestrator:
             if result_data:
                 result = json.loads(result_data)
                 self._log(f"Results received: {result.get('status', 'unknown')}")
+                # Clean up result key to prevent stale data in future re-runs
+                await self.redis_client.delete(result_key)
                 return result
 
             # Check timeout

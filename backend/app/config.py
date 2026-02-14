@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     MAX_BUILD_ITERATIONS: int = 5  # Default max iterations per build
     TUNNEL_URL: str = "http://localhost:4040"  # Ngrok tunnel to local M3 Max
     REDIS_URL: str = "redis://localhost:6379"
+    TRAINING_QUEUE: str = "oculus:training_queue"
 
     # Admin Seed
     ADMIN_EMAIL: str = "admin@oculusalgorithms.com"
