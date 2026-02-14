@@ -58,8 +58,8 @@ class WorkerConfig:
 
     @property
     def job_queue(self) -> str:
-        """Redis queue name for training jobs."""
-        return os.getenv('JOB_QUEUE', 'training_queue')
+        """Redis queue name for Oculus training jobs (namespaced to avoid collision with other workers)."""
+        return os.getenv('JOB_QUEUE', 'oculus:training_queue')
 
     @property
     def result_key_prefix(self) -> str:
