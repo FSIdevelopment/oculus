@@ -423,35 +423,35 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
       </div>
 
       {/* Backtest Results */}
-      {iteration.backtest_results && (
+      {iteration.backtest_results && typeof iteration.backtest_results.total_return === 'number' && (
         <div className="mb-6">
           <h4 className="text-sm font-semibold text-text mb-3">Backtest Results</h4>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Total Return</p>
-              <p className={`text-lg font-bold ${iteration.backtest_results.total_return >= 0
+              <p className={`text-lg font-bold ${(iteration.backtest_results?.total_return ?? 0) >= 0
                   ? 'text-green-600 dark:text-green-400'
                   : 'text-red-600 dark:text-red-400'
                 }`}>
-                {iteration.backtest_results.total_return.toFixed(2)}%
+                {(iteration.backtest_results?.total_return ?? 0).toFixed(2)}%
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Win Rate</p>
               <p className="text-sm font-semibold text-text">
-                {(iteration.backtest_results.win_rate * 100).toFixed(1)}%
+                {((iteration.backtest_results?.win_rate ?? 0) * 100).toFixed(1)}%
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Sharpe Ratio</p>
               <p className="text-sm font-semibold text-text">
-                {iteration.backtest_results.sharpe_ratio.toFixed(2)}
+                {(iteration.backtest_results?.sharpe_ratio ?? 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Max Drawdown</p>
               <p className="text-sm font-semibold text-red-600 dark:text-red-400">
-                {iteration.backtest_results.max_drawdown.toFixed(2)}%
+                {(iteration.backtest_results?.max_drawdown ?? 0).toFixed(2)}%
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
@@ -463,7 +463,7 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Profit Factor</p>
               <p className="text-sm font-semibold text-text">
-                {iteration.backtest_results.profit_factor.toFixed(2)}
+                {(iteration.backtest_results?.profit_factor ?? 0).toFixed(2)}
               </p>
             </div>
           </div>
@@ -480,25 +480,25 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
               <div>
                 <p className="text-xs text-text-secondary mb-1">F1 Score</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.f1.toFixed(3)}
+                  {(iteration.best_model?.metrics?.f1 ?? 0).toFixed(3)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-text-secondary mb-1">Precision</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.precision.toFixed(3)}
+                  {(iteration.best_model?.metrics?.precision ?? 0).toFixed(3)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-text-secondary mb-1">Recall</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.recall.toFixed(3)}
+                  {(iteration.best_model?.metrics?.recall ?? 0).toFixed(3)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-text-secondary mb-1">AUC</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.auc.toFixed(3)}
+                  {(iteration.best_model?.metrics?.auc ?? 0).toFixed(3)}
                 </p>
               </div>
             </div>
