@@ -109,6 +109,13 @@ export default function BuildListPage() {
     })
   }
 
+  const getPhaseDisplayName = (phase: string | null) => {
+    const phaseDisplayNames: { [key: string]: string } = {
+      'building_docker': 'writing algorithm',
+    }
+    return phaseDisplayNames[phase || ''] || phase?.replace(/_/g, ' ') || ''
+  }
+
   const totalPages = Math.ceil(total / pageSize)
   const canGoPrevious = page > 0
   const canGoNext = page < totalPages - 1
@@ -175,7 +182,7 @@ export default function BuildListPage() {
                       </div>
                       {build.phase && (
                         <div className="text-text-secondary text-sm">
-                          Phase: <span className="text-text capitalize">{build.phase.replace(/_/g, ' ')}</span>
+                          Phase: <span className="text-text capitalize">{getPhaseDisplayName(build.phase)}</span>
                         </div>
                       )}
                       <div className="text-text-secondary text-sm">

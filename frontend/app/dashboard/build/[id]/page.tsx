@@ -98,7 +98,7 @@ interface ChatMessage {
   created_at: string
 }
 
-const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Building Docker', 'Complete']
+const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Writing Algorithm', 'Complete']
 
 // --- Parsed prompt section types and helpers ---
 
@@ -1046,7 +1046,7 @@ export default function BuildDetailPage() {
       'selecting_best': 'Selecting the best iteration...',               // NEW
       'training': 'Training ML models...',
       'optimizing': 'Optimizing parameters...',
-      'building_docker': 'Building Docker container...',
+      'building_docker': 'Writing algorithm...',
       'complete': 'Build complete',
       'completed': 'Build complete',                                     // NEW alias
     }
@@ -1062,11 +1062,27 @@ export default function BuildDetailPage() {
       'selecting_best': '🏆',    // NEW
       'training': '🤖',
       'optimizing': '⚙️',
-      'building_docker': '🐳',
+      'building_docker': '✍️',
       'complete': '✅',
       'completed': '✅',          // NEW alias
     }
     return emojis[phase?.toLowerCase() || ''] || '⏳'
+  }
+
+  // Helper: Get phase display name (uppercase)
+  const getPhaseDisplayName = (phase: string | null) => {
+    const phaseDisplayNames: { [key: string]: string } = {
+      'queued': 'QUEUED',
+      'designing': 'DESIGNING',
+      'refining': 'REFINING',
+      'selecting_best': 'SELECTING BEST',
+      'training': 'TRAINING',
+      'optimizing': 'OPTIMIZING',
+      'building_docker': 'WRITING ALGORITHM',
+      'complete': 'COMPLETE',
+      'completed': 'COMPLETE',
+    }
+    return phaseDisplayNames[phase?.toLowerCase() || ''] || phase?.replace(/_/g, ' ').toUpperCase() || ''
   }
 
   // Helper: Get seconds since timestamp
@@ -1471,7 +1487,7 @@ export default function BuildDetailPage() {
                   <span className="text-2xl">{getPhaseEmoji(build.phase)}</span>
                   <div>
                     <p className="text-sm font-medium text-text-secondary uppercase tracking-wide">Current Phase</p>
-                    <p className="text-lg font-semibold text-text">{build.phase.replace(/_/g, ' ').toUpperCase()}</p>
+                    <p className="text-lg font-semibold text-text">{getPhaseDisplayName(build.phase)}</p>
                   </div>
                 </div>
                 <p className="text-sm text-text-secondary ml-11">{getPhaseDescription(build.phase)}</p>
