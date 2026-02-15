@@ -101,10 +101,12 @@ export const authAPI = {
 
 // Strategy API functions
 export const strategyAPI = {
-  listStrategies: async (skip: number = 0, limit: number = 10) => {
-    const response = await api.get('/api/strategies', {
-      params: { skip, limit },
-    })
+  listStrategies: async (skip: number = 0, limit: number = 10, has_completed_build?: boolean) => {
+    const params: any = { skip, limit }
+    if (has_completed_build !== undefined) {
+      params.has_completed_build = has_completed_build
+    }
+    const response = await api.get('/api/strategies', { params })
     return response.data
   },
 
@@ -127,6 +129,14 @@ export const strategyAPI = {
 
   getBuildIterations: async (buildId: string) => {
     const response = await api.get(`/api/builds/${buildId}/iterations`)
+    return response.data
+  },
+}
+
+// Build API functions
+export const buildAPI = {
+  listBuilds: async (skip: number = 0, limit: number = 10) => {
+    const response = await api.get('/api/builds', { params: { skip, limit } })
     return response.data
   },
 }
