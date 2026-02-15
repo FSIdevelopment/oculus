@@ -266,8 +266,8 @@ async def _run_build_loop(
                     await _save_chat_history(
                         bg_db, user_id, strategy_id,
                         orchestrator._build_design_prompt(
-                            strategy_name, strategy_symbols,
-                            description, timeframe, target_return, ""
+                            strategy_name, strategy_type, strategy_symbols,
+                            description, timeframe, target_return, "", ""
                         ),
                         json.dumps(design)
                     )
@@ -317,7 +317,7 @@ async def _run_build_loop(
 
                     # Save refinement to ChatHistory
                     refinement_prompt = orchestrator._build_refinement_prompt(
-                        design, training_results, iteration
+                        design, training_results, iteration, ""
                     )
                     await _save_chat_history(
                         bg_db, user_id, strategy_id,

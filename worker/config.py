@@ -58,8 +58,13 @@ class WorkerConfig:
 
     @property
     def job_queue(self) -> str:
-        """Redis queue name for training jobs."""
-        return os.getenv('JOB_QUEUE', 'training_queue')
+        """Redis queue name for Oculus training jobs (namespaced to avoid collision with other workers)."""
+        return os.getenv('JOB_QUEUE', 'oculus:training_queue')
+
+    @property
+    def expected_job_source(self) -> str:
+        """Expected source field in job payloads. Jobs without this source are skipped."""
+        return os.getenv('EXPECTED_JOB_SOURCE', 'oculus')
 
     @property
     def result_key_prefix(self) -> str:

@@ -85,6 +85,12 @@ class TrainingWorker:
                     job = json.loads(job_json)
                     logger.info(f"Received job: {job_id}")
 
+                    # Verify job belongs to this worker (prevents cross-project contamination)
+                    job_source = job.get("source")
+                    if job_source != config.expected_job_source:
+                        logger.warning(f"Skipping job {job_id}: source '{job_source}' != expected '{config.expected_job_source}'")
+                        continue
+
                     # Process job asynchronously
                     asyncio.create_task(self._process_and_report(job, job_id))
 
