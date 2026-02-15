@@ -3,18 +3,13 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
-import api from '@/lib/api'
-import { Zap, Clock, CheckCircle, AlertCircle } from 'lucide-react'
+import { buildAPI } from '@/lib/api'
+import { Zap, Clock, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react'
 
-interface Strategy {
-  uuid: string
-  name: string
-  status: string
-}
-
-interface Build {
+interface BuildListItem {
   uuid: string
   strategy_id: string
+  strategy_name: string
   status: string
   phase: string | null
   tokens_consumed: number
@@ -23,49 +18,36 @@ interface Build {
   completed_at: string | null
 }
 
-interface StrategyWithBuild extends Strategy {
-  latestBuild?: Build
-}
-
 export default function BuildListPage() {
   const { isAuthenticated, isLoading } = useAuth()
-  const [strategies, setStrategies] = useState<StrategyWithBuild[]>([])
-  const [loadingStrategies, setLoadingStrategies] = useState(true)
+  const [builds, setBuilds] = useState<BuildListItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const pageSize = 10
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      fetchStrategies()
+      fetchBuilds()
     }
-  }, [isAuthenticated, isLoading])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading, page])
 
-  const fetchStrategies = async () => {
+  const fetchBuilds = async () => {
     try {
-      setLoadingStrategies(true)
-      const response = await api.get('/api/strategies')
-      const strategiesData = response.data.items || []
-
-      // Fetch latest build for each strategy
-      const strategiesWithBuilds = await Promise.all(
-        strategiesData.map(async (strategy: Strategy) => {
-          try {
-            const buildsResponse = await api.get(`/api/strategies/${strategy.uuid}/builds?limit=1`)
-            const latestBuild = buildsResponse.data.items?.[0]
-            return { ...strategy, latestBuild }
-          } catch (err) {
-            console.error(`Failed to fetch builds for strategy ${strategy.uuid}:`, err)
-            return strategy
-          }
-        })
-      )
-
-      setStrategies(strategiesWithBuilds)
+      setLoading(true)
+      const skip = page * pageSize
+      const response = await buildAPI.listBuilds(skip, pageSize)
+      setBuilds(response.items || [])
+      setTotal(response.total || 0)
       setError(null)
     } catch (err) {
-      console.error('Failed to fetch strategies:', err)
-      setError('Failed to load strategies')
+      console.error('Failed to fetch builds:', err)
+      setError('Failed to load builds')
     } finally {
-      setLoadingStrategies(false)
+      setLoading(false)
     }
   }
 
@@ -115,14 +97,30 @@ export default function BuildListPage() {
     }
   }
 
-  if (loadingStrategies) {
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(timestamp)
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    })
+  }
+
+  const totalPages = Math.ceil(total / pageSize)
+  const canGoPrevious = page > 0
+  const canGoNext = page < totalPages - 1
+
+  if (loading) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-text mb-2">Build Monitor</h1>
           <p className="text-text-secondary">Track your strategy builds in real-time</p>
         </div>
-        <div className="text-text-secondary">Loading strategies...</div>
+        <div className="text-text-secondary">Loading builds...</div>
       </div>
     )
   }
@@ -142,11 +140,11 @@ export default function BuildListPage() {
         </div>
       )}
 
-      {/* Strategies List */}
-      {strategies.length === 0 ? (
+      {/* Builds List */}
+      {builds.length === 0 ? (
         <div className="bg-surface border border-border rounded-lg p-8 text-center">
           <AlertCircle className="mx-auto mb-4 text-text-secondary" size={32} />
-          <p className="text-text-secondary mb-4">No strategies yet</p>
+          <p className="text-text-secondary mb-4">No active builds</p>
           <Link
             href="/dashboard/create"
             className="inline-block px-6 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors"
@@ -155,42 +153,82 @@ export default function BuildListPage() {
           </Link>
         </div>
       ) : (
-        <div className="grid gap-4">
-          {strategies.map((strategy) => {
-            const build = strategy.latestBuild
-            return (
+        <>
+          <div className="grid gap-4">
+            {builds.map((build) => (
               <Link
-                key={strategy.uuid}
-                href={`/dashboard/build/${strategy.uuid}`}
+                key={build.uuid}
+                href={`/dashboard/build/${build.uuid}`}
                 className="bg-surface border border-border rounded-lg p-6 hover:border-primary hover:bg-surface-hover transition-all duration-300 group"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-text group-hover:text-primary transition-colors mb-2">
-                      {strategy.name}
+                      {build.strategy_name}
                     </h3>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 flex-wrap">
                       <div className="flex items-center gap-2">
-                        {getPhaseIcon(build?.phase || null)}
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(build?.status || strategy.status)}`}>
-                          {build ? build.status.charAt(0).toUpperCase() + build.status.slice(1) : 'No builds'}
+                        {getPhaseIcon(build.phase)}
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(build.status)}`}>
+                          {build.status.charAt(0).toUpperCase() + build.status.slice(1)}
                         </span>
                       </div>
-                      {build && (
+                      {build.phase && (
                         <div className="text-text-secondary text-sm">
-                          Phase: <span className="text-text capitalize">{build.phase || 'N/A'}</span>
+                          Phase: <span className="text-text capitalize">{build.phase.replace(/_/g, ' ')}</span>
                         </div>
                       )}
+                      <div className="text-text-secondary text-sm">
+                        Iterations: <span className="text-text">{build.iteration_count}</span>
+                      </div>
+                      <div className="text-text-secondary text-sm">
+                        Tokens: <span className="text-text">{build.tokens_consumed.toLocaleString()}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-text-secondary text-sm">Click to view details</p>
+                    <div className="mt-2 text-text-secondary text-sm">
+                      Started: {formatTimestamp(build.started_at)}
+                    </div>
                   </div>
                 </div>
               </Link>
-            )
-          })}
-        </div>
+            ))}
+          </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-4 mt-6">
+              <button
+                onClick={() => setPage(page - 1)}
+                disabled={!canGoPrevious}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  canGoPrevious
+                    ? 'bg-surface border border-border hover:border-primary text-text'
+                    : 'bg-surface-hover border border-border text-text-secondary cursor-not-allowed'
+                }`}
+              >
+                <ChevronLeft size={16} />
+                Previous
+              </button>
+
+              <span className="text-text-secondary">
+                Page {page + 1} of {totalPages}
+              </span>
+
+              <button
+                onClick={() => setPage(page + 1)}
+                disabled={!canGoNext}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  canGoNext
+                    ? 'bg-surface border border-border hover:border-primary text-text'
+                    : 'bg-surface-hover border border-border text-text-secondary cursor-not-allowed'
+                }`}
+              >
+                Next
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
