@@ -21,6 +21,8 @@ interface BuildStatus {
   iteration_count: number
   started_at: string
   completed_at: string | null
+  strategy_type?: string
+  strategy_name?: string
 }
 
 interface LogMessage {
@@ -1295,7 +1297,12 @@ export default function BuildDetailPage() {
             >
               <ArrowLeft size={20} className="text-text-secondary" />
             </button>
-            <h1 className="text-3xl font-bold text-text">Build Details</h1>
+            <h1 className="text-3xl font-bold text-text">{build.strategy_name || 'Build Details'}</h1>
+            {build.strategy_type && (
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20 uppercase tracking-wide">
+                {build.strategy_type}
+              </span>
+            )}
           </div>
           <p className="text-text-secondary text-sm ml-11">Build ID: {build.uuid}</p>
         </div>
