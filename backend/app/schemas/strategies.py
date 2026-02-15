@@ -76,6 +76,19 @@ class DockerInfoResponse(BaseModel):
         from_attributes = True
 
 
+class BuildListItem(BuildResponse):
+    """Schema for build list item with strategy name."""
+    strategy_name: str
+
+
+class BuildListResponse(BaseModel):
+    """Schema for paginated build list response."""
+    items: List[BuildListItem]
+    total: int
+    skip: int
+    limit: int
+
+
 class BuildIterationResponse(BaseModel):
     """Schema for build iteration details."""
     uuid: str
