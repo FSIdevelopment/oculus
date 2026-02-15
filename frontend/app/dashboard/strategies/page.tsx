@@ -44,11 +44,17 @@ export default function StrategiesPage() {
   const [dockerInfo, setDockerInfo] = useState<DockerInfo | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
+  // Pagination state
+  const [skip, setSkip] = useState(0)
+  const [limit] = useState(10)
+  const [total, setTotal] = useState(0)
+
   const loadStrategies = async () => {
     try {
       setLoading(true)
-      const data = await strategyAPI.listStrategies(0, 50)
+      const data = await strategyAPI.listStrategies(skip, limit, true)
       setStrategies(data.items || [])
+      setTotal(data.total || 0)
     } catch (err) {
       setError('Failed to load strategies')
       console.error(err)
@@ -70,7 +76,7 @@ export default function StrategiesPage() {
     loadStrategies()
     loadLicenses()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [skip, limit])
 
   const openActionModal = async (strategy: Strategy) => {
     setSelectedStrategy(strategy)
@@ -147,7 +153,7 @@ export default function StrategiesPage() {
       {/* Strategies Grid */}
       {strategies.length === 0 ? (
         <div className="bg-surface border border-border rounded-lg p-12 text-center">
-          <p className="text-text-secondary mb-4">No strategies yet</p>
+          <p className="text-text-secondary mb-4">No completed strategies yet</p>
           <Link
             href="/dashboard/create"
             className="text-primary hover:underline"
@@ -230,6 +236,39 @@ export default function StrategiesPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Pagination Controls */}
+      {strategies.length > 0 && (
+        <div className="flex items-center justify-between border-t border-border pt-6">
+          <button
+            onClick={() => setSkip(Math.max(0, skip - limit))}
+            disabled={skip === 0}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              skip === 0
+                ? 'bg-surface-hover text-text-secondary cursor-not-allowed'
+                : 'bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-white'
+            }`}
+          >
+            Previous
+          </button>
+
+          <span className="text-text-secondary">
+            Page {Math.floor(skip / limit) + 1} of {Math.ceil(total / limit)}
+          </span>
+
+          <button
+            onClick={() => setSkip(skip + limit)}
+            disabled={skip + limit >= total}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              skip + limit >= total
+                ? 'bg-surface-hover text-text-secondary cursor-not-allowed'
+                : 'bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-white'
+            }`}
+          >
+            Next
+          </button>
         </div>
       )}
 
