@@ -65,24 +65,20 @@ interface BuildIteration {
       auc: number
     }
   } | null
-  entry_rules: {
-    rules: Array<{
-      feature: string
-      operator: string
-      threshold: number
-      description?: string
-    }>
-    score_threshold: number
-  } | null
-  exit_rules: {
-    rules: Array<{
-      feature: string
-      operator: string
-      threshold: number
-      description?: string
-    }>
-    score_threshold: number
-  } | null
+  entry_rules: Array<{
+    feature: string
+    operator: string
+    threshold: number
+    description?: string
+    importance?: number
+  }> | null
+  exit_rules: Array<{
+    feature: string
+    operator: string
+    threshold: number
+    description?: string
+    importance?: number
+  }> | null
   backtest_results: {
     total_return: number
     win_rate: number
@@ -511,13 +507,13 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
         <div className="mb-6">
           <h4 className="text-sm font-semibold text-text mb-3">Trading Rules</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {iteration.entry_rules && (
+            {iteration.entry_rules && iteration.entry_rules.length > 0 && (
               <div className="bg-surface-hover rounded-lg p-4 border border-border">
                 <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
-                  Entry Rules (Score ≥ {iteration.entry_rules.score_threshold})
+                  Entry Rules
                 </p>
                 <div className="space-y-2">
-                  {iteration.entry_rules.rules.map((rule, idx) => (
+                  {iteration.entry_rules.map((rule, idx) => (
                     <div key={idx} className="text-xs text-text">
                       <span className="font-mono">{rule.feature} {rule.operator} {rule.threshold}</span>
                       {rule.description && (
@@ -528,13 +524,13 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
                 </div>
               </div>
             )}
-            {iteration.exit_rules && (
+            {iteration.exit_rules && iteration.exit_rules.length > 0 && (
               <div className="bg-surface-hover rounded-lg p-4 border border-border">
                 <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
-                  Exit Rules (Score ≥ {iteration.exit_rules.score_threshold})
+                  Exit Rules
                 </p>
                 <div className="space-y-2">
-                  {iteration.exit_rules.rules.map((rule, idx) => (
+                  {iteration.exit_rules.map((rule, idx) => (
                     <div key={idx} className="text-xs text-text">
                       <span className="font-mono">{rule.feature} {rule.operator} {rule.threshold}</span>
                       {rule.description && (
