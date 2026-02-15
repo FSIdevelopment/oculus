@@ -477,6 +477,18 @@ async def _run_build_loop(
                         logger.warning("Failed to persist strategy files for build %s: %s", build_id, e)
                         iteration_logs.append(f"Iteration {iteration}: Strategy file persistence failed: {e}")
 
+                    # --- Persist backtest_results.json ---
+                    try:
+                        backtest_results = training_results.get("backtest_results", {})
+                        backtest_json_path = Path(strategy_output_dir) / "backtest_results.json"
+                        await asyncio.to_thread(
+                            backtest_json_path.write_text,
+                            json.dumps(backtest_results, indent=2)
+                        )
+                        iteration_logs.append("Persisted backtest_results.json")
+                    except Exception as e:
+                        logger.warning("Failed to persist backtest_results.json for build %s: %s", build_id, e)
+
                     # --- Generate README via Claude ---
                     try:
                         readme_content = await orchestrator.generate_strategy_readme(
@@ -613,6 +625,18 @@ async def _run_build_loop(
                         iteration_logs.append(f"Persisted {len(strategy_files)} strategy file(s)")
                     except Exception as e:
                         logger.warning("Failed to persist strategy files: %s", e)
+
+                    # --- Persist backtest_results.json ---
+                    try:
+                        backtest_results = best_iter.backtest_results or {}
+                        backtest_json_path = Path(strategy_output_dir) / "backtest_results.json"
+                        await asyncio.to_thread(
+                            backtest_json_path.write_text,
+                            json.dumps(backtest_results, indent=2)
+                        )
+                        iteration_logs.append("Persisted backtest_results.json")
+                    except Exception as e:
+                        logger.warning("Failed to persist backtest_results.json: %s", e)
 
                     # Generate README
                     try:
