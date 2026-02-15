@@ -498,6 +498,7 @@ async def _run_build_loop(
                             backtest_results=training_results.get("backtest_results", {}),
                             model_metrics=training_results.get("model_metrics", {}),
                             config=design,
+                            strategy_type=strategy_type or "",
                         )
                         # Write README to strategy output directory
                         readme_path = Path(strategy_output_dir) / "README.md"
@@ -579,6 +580,7 @@ async def _run_build_loop(
                             completed_iterations=completed_iterations,
                             best_iteration=best_iter,
                             target_return=target_return,
+                            strategy_type=strategy_type or "",
                         )
                         await _publish_progress(build_id, {
                             "phase": "selecting_best",
@@ -647,6 +649,7 @@ async def _run_build_loop(
                             backtest_results=best_iter.backtest_results or {},
                             model_metrics=(best_iter.best_model or {}),
                             config=design,
+                            strategy_type=strategy_type or "",
                         )
                         readme_path = Path(strategy_output_dir) / "README.md"
                         await asyncio.to_thread(readme_path.write_text, readme_content)
@@ -803,6 +806,8 @@ async def trigger_build(
         iteration_count=build.iteration_count,
         started_at=build.started_at,
         completed_at=build.completed_at,
+        strategy_type=strategy.strategy_type,
+        strategy_name=strategy.name,
     )
 
 
@@ -837,11 +842,12 @@ async def list_builds(
     )
     total = count_result.scalar()
 
-    # Fetch paginated builds with strategy name
+    # Fetch paginated builds with strategy name and type
     result = await db.execute(
         select(
             StrategyBuild,
-            Strategy.name.label("strategy_name")
+            Strategy.name.label("strategy_name"),
+            Strategy.strategy_type.label("strategy_type")
         )
         .join(Strategy, StrategyBuild.strategy_id == Strategy.uuid)
         .where(
@@ -856,7 +862,7 @@ async def list_builds(
 
     # Build response items
     items = []
-    for build, strategy_name in rows:
+    for build, strategy_name, strategy_type in rows:
         item_dict = {
             "uuid": build.uuid,
             "strategy_id": build.strategy_id,
@@ -867,6 +873,7 @@ async def list_builds(
             "started_at": build.started_at,
             "completed_at": build.completed_at,
             "strategy_name": strategy_name,
+            "strategy_type": strategy_type,
         }
         items.append(BuildListItem(**item_dict))
 
@@ -969,6 +976,12 @@ async def get_build_status(
             detail="Build not found"
         )
 
+    # Fetch strategy for name and type
+    strat_result = await db.execute(
+        select(Strategy).where(Strategy.uuid == build.strategy_id)
+    )
+    strategy = strat_result.scalar_one_or_none()
+
     return BuildResponse(
         uuid=build.uuid,
         strategy_id=build.strategy_id,
@@ -978,6 +991,8 @@ async def get_build_status(
         iteration_count=build.iteration_count,
         started_at=build.started_at,
         completed_at=build.completed_at,
+        strategy_type=strategy.strategy_type if strategy else None,
+        strategy_name=strategy.name if strategy else None,
     )
 
 
@@ -1144,6 +1159,8 @@ async def restart_build(
         iteration_count=new_build.iteration_count,
         started_at=new_build.started_at,
         completed_at=new_build.completed_at,
+        strategy_type=strategy.strategy_type,
+        strategy_name=strategy.name,
     )
 
 

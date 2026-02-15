@@ -28,6 +28,8 @@ class BuildResponse(BaseModel):
     iteration_count: int
     started_at: datetime
     completed_at: Optional[datetime] = None
+    strategy_type: Optional[str] = None
+    strategy_name: Optional[str] = None
 
     class Config:
         from_attributes = True

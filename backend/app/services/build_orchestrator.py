@@ -174,7 +174,7 @@ class BuildOrchestrator:
         creation_guide = await self._load_creation_guide(strategy_type)
 
         prompt = self._build_refinement_prompt(
-            previous_design, backtest_results, iteration, creation_guide
+            previous_design, backtest_results, iteration, creation_guide, strategy_type or ""
         )
 
         try:
@@ -486,6 +486,7 @@ The JSON must follow this exact schema:
         backtest_results: Dict[str, Any],
         iteration: int,
         creation_guide: str = "",
+        strategy_type: str = "",
     ) -> str:
         """Build strategy refinement prompt with full schema and analysis guidance."""
         # Extract key metrics from backtest results for the prompt
@@ -500,6 +501,9 @@ The JSON must follow this exact schema:
 
 ## Previous Design (Iteration {iteration})
 {json.dumps(previous_design, indent=2)}
+
+## Strategy Type
+- Strategy Type: {strategy_type}
 
 ## Backtest Results (Iteration {iteration})
 - Total Return: {total_return}%
@@ -828,6 +832,7 @@ Keep content concise and actionable. Each lesson should be directly applicable."
         completed_iterations: List[Any],
         best_iteration: Any,
         target_return: float,
+        strategy_type: str = "",
     ) -> str:
         """Generate Claude's explanation of which iteration was selected and why.
 
@@ -835,6 +840,7 @@ Keep content concise and actionable. Each lesson should be directly applicable."
             completed_iterations: List of all completed BuildIteration records
             best_iteration: The BuildIteration record that was selected as best
             target_return: The target return percentage that was not met
+            strategy_type: The type of strategy being built
 
         Returns:
             A thinking string explaining the selection decision
@@ -855,6 +861,8 @@ Keep content concise and actionable. Each lesson should be directly applicable."
         best_bt = best_iteration.backtest_results or {}
 
         prompt = f"""You are reviewing the results of a multi-iteration strategy build process. The target return of {target_return}% was not achieved in any iteration, so we need to select the best performing iteration to deploy.
+
+The strategy type is: {strategy_type}
 
 Here are all completed iterations and their backtest results:
 
@@ -906,6 +914,7 @@ Keep it concise and focused on the decision rationale."""
         backtest_results: Dict[str, Any],
         model_metrics: Dict[str, Any],
         config: Dict[str, Any],
+        strategy_type: str = "",
     ) -> str:
         """Generate a comprehensive README markdown for a completed strategy.
 
@@ -931,6 +940,7 @@ Keep it concise and focused on the decision rationale."""
 8. How to run the strategy
 
 Strategy: {strategy_name}
+Strategy Type: {strategy_type}
 Symbols: {', '.join(symbols)}
 Description: {design.get("strategy_description", "N/A")}
 Rationale: {design.get("strategy_rationale", "N/A")}
