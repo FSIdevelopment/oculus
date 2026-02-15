@@ -60,29 +60,41 @@ class DockerBuilder:
 
             # Build image
             logger.info(f"Building image: {image_tag}")
+            build_start = datetime.utcnow()
             build_cmd = f"docker build -t {image_tag} -t {latest_tag} {strategy_output_dir}"
-            result = await self._run_command(build_cmd)
+            result = await self._run_command(build_cmd, timeout=600)
+            build_duration = (datetime.utcnow() - build_start).total_seconds()
+            logger.info(f"Docker build completed in {build_duration:.1f}s")
             if result != 0:
                 raise RuntimeError(f"Docker build failed with code {result}")
 
             # Login to Docker Hub
             if self.docker_hub_pat:
                 logger.info("Logging in to Docker Hub")
+                login_start = datetime.utcnow()
                 login_cmd = f"echo '{self.docker_hub_pat}' | docker login -u {self.docker_hub_username} --password-stdin"
-                result = await self._run_command(login_cmd)
+                result = await self._run_command(login_cmd, timeout=300)
+                login_duration = (datetime.utcnow() - login_start).total_seconds()
+                logger.info(f"Docker login completed in {login_duration:.1f}s")
                 if result != 0:
                     raise RuntimeError("Docker login failed")
 
             # Push image
             logger.info(f"Pushing image: {image_tag}")
+            push_start = datetime.utcnow()
             push_cmd = f"docker push {image_tag}"
-            result = await self._run_command(push_cmd)
+            result = await self._run_command(push_cmd, timeout=300)
+            push_duration = (datetime.utcnow() - push_start).total_seconds()
+            logger.info(f"Docker push completed in {push_duration:.1f}s")
             if result != 0:
                 raise RuntimeError(f"Docker push failed with code {result}")
 
             # Push latest tag
+            push_latest_start = datetime.utcnow()
             push_latest_cmd = f"docker push {latest_tag}"
-            result = await self._run_command(push_latest_cmd)
+            result = await self._run_command(push_latest_cmd, timeout=300)
+            push_latest_duration = (datetime.utcnow() - push_latest_start).total_seconds()
+            logger.info(f"Docker push latest completed in {push_latest_duration:.1f}s")
             if result != 0:
                 logger.warning(f"Failed to push latest tag, but versioned tag succeeded")
 
@@ -104,15 +116,48 @@ class DockerBuilder:
             await self.db.commit()
             return False
 
-    async def _run_command(self, cmd: str) -> int:
-        """Run shell command asynchronously."""
+    async def _run_command(self, cmd: str, timeout: int = 600) -> int:
+        """
+        Run shell command asynchronously with timeout.
+
+        Args:
+            cmd: Shell command to execute
+            timeout: Timeout in seconds (default 600s)
+
+        Returns:
+            Process return code
+
+        Raises:
+            RuntimeError: If command times out
+        """
         process = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
         )
-        stdout, stderr = await process.communicate()
-        if stderr:
-            logger.debug(f"Command stderr: {stderr.decode()}")
-        return process.returncode
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout
+            )
+
+            # Log stdout at debug level
+            if stdout:
+                logger.debug(f"Command stdout: {stdout.decode()}")
+
+            # Log stderr at debug level
+            if stderr:
+                logger.debug(f"Command stderr: {stderr.decode()}")
+
+            return process.returncode
+
+        except asyncio.TimeoutError:
+            # Kill the process if it times out
+            process.kill()
+            await process.wait()
+            raise RuntimeError(
+                f"Command timed out after {timeout}s: {cmd[:100]}..."
+            )
 
