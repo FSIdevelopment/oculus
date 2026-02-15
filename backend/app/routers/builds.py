@@ -142,7 +142,23 @@ async def _run_build_loop(
 
         # Initialize orchestrator with background session
         orchestrator = BuildOrchestrator(bg_db, user, build)
-        await orchestrator.initialize()
+        try:
+            await orchestrator.initialize()
+        except Exception as e:
+            # Redis connection failed — mark build as failed and return early
+            logger.error(
+                f"Redis connection failed for build {build_id}: {e}",
+                extra={
+                    "error": "Redis connection failed — check REDIS_URL / ngrok tunnel",
+                    "details": str(e),
+                    "build_id": build_id,
+                }
+            )
+            build.status = "failed"
+            build.phase = "complete"
+            build.completed_at = datetime.utcnow()
+            await bg_db.commit()
+            return
 
         try:
             design = None
@@ -406,10 +422,10 @@ async def _run_build_loop(
                     "iteration_uuid": iteration_uuid,
                     "message": f"Training completed (iteration {iteration})",
                     "results": {
-                        "total_return": training_results.get("total_return"),
-                        "win_rate": training_results.get("win_rate"),
-                        "sharpe_ratio": training_results.get("sharpe_ratio"),
-                        "model": training_results.get("model"),
+                        "total_return": (training_results.get("backtest_results") or {}).get("total_return"),
+                        "win_rate": (training_results.get("backtest_results") or {}).get("win_rate"),
+                        "sharpe_ratio": (training_results.get("backtest_results") or {}).get("sharpe_ratio"),
+                        "model": (training_results.get("best_model") or {}).get("name"),
                         "best_model": training_results.get("best_model"),
                         "model_metrics": training_results.get("model_metrics"),
                         "optimal_label_config": training_results.get("optimal_label_config"),
@@ -420,7 +436,7 @@ async def _run_build_loop(
                 })
 
                 # Check if target metrics are met
-                total_return = training_results.get('total_return', 0)
+                total_return = (training_results.get('backtest_results') or {}).get('total_return', 0)
                 if total_return >= target_return:
                     # Build Docker image before marking complete
                     build.phase = "building_docker"
