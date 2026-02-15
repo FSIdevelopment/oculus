@@ -20,6 +20,7 @@ from app.models.build_iteration import BuildIteration
 from app.models.chat_history import ChatHistory
 from app.auth.dependencies import get_current_active_user
 from app.schemas.strategies import BuildResponse, BuildIterationResponse, BuildListItem, BuildListResponse
+from pydantic import ValidationError
 from app.services.build_orchestrator import BuildOrchestrator
 from app.services.docker_builder import DockerBuilder
 from app.services.balance import deduct_tokens
@@ -899,10 +900,19 @@ async def get_build_iterations(
     iterations = iterations_result.scalars().all()
 
     # Convert to response schema
-    iteration_responses = [
-        BuildIterationResponse.model_validate(iteration)
-        for iteration in iterations
-    ]
+    iteration_responses = []
+    for iteration in iterations:
+        try:
+            iteration_responses.append(BuildIterationResponse.model_validate(iteration))
+        except ValidationError as e:
+            logger.error(
+                f"Failed to validate iteration {iteration.uuid} for build {build_id}: {e}. "
+                f"Iteration data: iteration_number={iteration.iteration_number}, "
+                f"entry_rules type={type(iteration.entry_rules)}, "
+                f"exit_rules type={type(iteration.exit_rules)}"
+            )
+            # Skip this iteration instead of crashing the whole endpoint
+            continue
 
     return {
         "iterations": iteration_responses,
