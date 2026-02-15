@@ -1,9 +1,9 @@
 """Router for strategy build orchestration endpoints."""
 import os
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from datetime import datetime
 import json
 import asyncio
@@ -19,7 +19,7 @@ from app.models.strategy_build import StrategyBuild
 from app.models.build_iteration import BuildIteration
 from app.models.chat_history import ChatHistory
 from app.auth.dependencies import get_current_active_user
-from app.schemas.strategies import BuildResponse, BuildIterationResponse
+from app.schemas.strategies import BuildResponse, BuildIterationResponse, BuildListItem, BuildListResponse
 from app.services.build_orchestrator import BuildOrchestrator
 from app.services.docker_builder import DockerBuilder
 from app.services.balance import deduct_tokens
@@ -771,6 +771,70 @@ async def get_build_pricing():
     return {
         "tokens_per_iteration": settings.TOKENS_PER_ITERATION,
     }
+
+
+@router.get("/api/builds", response_model=BuildListResponse)
+async def list_builds(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all builds for the authenticated user (paginated).
+
+    Excludes completed builds (status='complete') as they belong on the strategies page.
+    Returns builds ordered by started_at DESC (latest first).
+    Each build includes the strategy_name from the joined Strategy table.
+    """
+    # Count total builds (excluding completed)
+    count_result = await db.execute(
+        select(func.count(StrategyBuild.uuid)).where(
+            StrategyBuild.user_id == current_user.uuid,
+            StrategyBuild.status != "complete"
+        )
+    )
+    total = count_result.scalar()
+
+    # Fetch paginated builds with strategy name
+    result = await db.execute(
+        select(
+            StrategyBuild,
+            Strategy.name.label("strategy_name")
+        )
+        .join(Strategy, StrategyBuild.strategy_id == Strategy.uuid)
+        .where(
+            StrategyBuild.user_id == current_user.uuid,
+            StrategyBuild.status != "complete"
+        )
+        .order_by(StrategyBuild.started_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = result.all()
+
+    # Build response items
+    items = []
+    for build, strategy_name in rows:
+        item_dict = {
+            "uuid": build.uuid,
+            "strategy_id": build.strategy_id,
+            "status": build.status,
+            "phase": build.phase,
+            "tokens_consumed": build.tokens_consumed,
+            "iteration_count": build.iteration_count,
+            "started_at": build.started_at,
+            "completed_at": build.completed_at,
+            "strategy_name": strategy_name,
+        }
+        items.append(BuildListItem(**item_dict))
+
+    return BuildListResponse(
+        items=items,
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
 
 
 @router.get("/api/builds/{build_id}/iterations")

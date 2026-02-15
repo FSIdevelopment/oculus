@@ -129,7 +129,7 @@ export default function CreateStrategyPage() {
       const strategyId = strategyRes.data.uuid
 
       // Step 2: Trigger build
-      await api.post('/api/builds/trigger', null, {
+      const buildRes = await api.post('/api/builds/trigger', null, {
         params: {
           strategy_id: strategyId,
           description: formData.comments,
@@ -140,7 +140,7 @@ export default function CreateStrategyPage() {
       })
 
       // Step 3: Redirect to build page
-      router.push(`/dashboard/build/${strategyId}`)
+      router.push(`/dashboard/build/${buildRes.data.uuid}`)
     } catch (err: any) {
       const message = err.response?.data?.detail || err.message || 'Failed to create strategy'
       setError(message)

@@ -1,4 +1,5 @@
 """Strategy CRUD router for user endpoints."""
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -71,26 +72,37 @@ async def create_strategy(
 async def list_strategies(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
+    has_completed_build: Optional[bool] = Query(None),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """List current user's strategies (paginated)."""
+    # Build base query conditions
+    base_conditions = [
+        Strategy.user_id == current_user.uuid,
+        Strategy.status != "deleted"
+    ]
+
+    # Add has_completed_build filter if specified
+    if has_completed_build is True:
+        # Subquery to find strategies with at least one completed build
+        completed_build_subquery = (
+            select(StrategyBuild.strategy_id)
+            .where(StrategyBuild.status == "complete")
+            .distinct()
+        )
+        base_conditions.append(Strategy.uuid.in_(completed_build_subquery))
+
     # Count total
     count_result = await db.execute(
-        select(func.count(Strategy.uuid)).where(
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted"
-        )
+        select(func.count(Strategy.uuid)).where(*base_conditions)
     )
     total = count_result.scalar()
 
     # Fetch paginated
     result = await db.execute(
         select(Strategy)
-        .where(
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted"
-        )
+        .where(*base_conditions)
         .offset(skip)
         .limit(limit)
     )

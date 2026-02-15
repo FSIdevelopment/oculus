@@ -396,11 +396,10 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
 
   return (
     <div
-      className={`rounded-lg p-6 border ${
-        isBest
+      className={`rounded-lg p-6 border ${isBest
           ? 'bg-primary/5 border-primary/40'
           : 'bg-surface border-border'
-      } ${isCurrent && isRunning ? 'animate-pulse-subtle' : ''}`}
+        } ${isCurrent && isRunning ? 'animate-pulse-subtle' : ''}`}
     >
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
@@ -430,11 +429,10 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Total Return</p>
-              <p className={`text-lg font-bold ${
-                iteration.backtest_results.total_return >= 0
+              <p className={`text-lg font-bold ${iteration.backtest_results.total_return >= 0
                   ? 'text-green-600 dark:text-green-400'
                   : 'text-red-600 dark:text-red-400'
-              }`}>
+                }`}>
                 {iteration.backtest_results.total_return.toFixed(2)}%
               </p>
             </div>
@@ -594,7 +592,7 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
 export default function BuildDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const strategyId = params.id as string
+  const buildId = params.id as string
   const { isAuthenticated, isLoading } = useAuth()
 
   const [build, setBuild] = useState<BuildStatus | null>(null)
@@ -641,21 +639,27 @@ export default function BuildDetailPage() {
     fetchPricing()
   }, [])
 
-  // Fetch initial build status and chat history
+  // Fetch initial build status
   useEffect(() => {
-    if (!isLoading && isAuthenticated && strategyId) {
+    if (!isLoading && isAuthenticated && buildId) {
       fetchLatestBuild()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading, buildId])
+
+  // Fetch chat history once build data is available
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && build?.strategy_id) {
       fetchChatHistory()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, isLoading, strategyId])
+  }, [isAuthenticated, isLoading, build?.strategy_id])
 
-  // Polling: refresh build status and chat history every 5 seconds (decoupled from WebSocket)
+  // Polling: refresh build status every 5 seconds
   useEffect(() => {
-    if (!isLoading && isAuthenticated && strategyId) {
+    if (!isLoading && isAuthenticated && buildId) {
       statusIntervalRef.current = setInterval(() => {
         fetchLatestBuild()
-        fetchChatHistory()
       }, 5000)
     }
 
@@ -665,7 +669,24 @@ export default function BuildDetailPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, isLoading, strategyId])
+  }, [isAuthenticated, isLoading, buildId])
+
+  // Polling: refresh chat history every 5 seconds (only when strategy_id is available)
+  const chatIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && build?.strategy_id) {
+      chatIntervalRef.current = setInterval(() => {
+        fetchChatHistory()
+      }, 5000)
+    }
+
+    return () => {
+      if (chatIntervalRef.current) {
+        clearInterval(chatIntervalRef.current)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading, build?.strategy_id])
 
   // Track build UUID changes — only update once when first discovered (prevents re-triggering on every poll)
   useEffect(() => {
@@ -722,13 +743,13 @@ export default function BuildDetailPage() {
 
   const fetchLatestBuild = async () => {
     try {
-      const response = await api.get(`/api/strategies/${strategyId}/builds?limit=1`)
-      const latestBuild = response.data.items?.[0]
-      if (latestBuild) {
-        setBuild(latestBuild)
+      const response = await api.get(`/api/builds/${buildId}`)
+      const buildData = response.data
+      if (buildData) {
+        setBuild(buildData)
         setError(null)
       } else {
-        setError('No builds found for this strategy')
+        setError('Build not found')
       }
       setLoadingBuild(false)
     } catch (err) {
@@ -739,8 +760,12 @@ export default function BuildDetailPage() {
   }
 
   const fetchChatHistory = async () => {
+    if (!build?.strategy_id) {
+      return
+    }
+
     try {
-      const response = await api.get(`/api/strategies/${strategyId}/chat`)
+      const response = await api.get(`/api/strategies/${build.strategy_id}/chat`)
       const allMessages = response.data.items || response.data || []
 
       // Deduplicate by UUID: only keep first occurrence of each UUID
@@ -801,7 +826,7 @@ export default function BuildDetailPage() {
       reconnectTimeoutRef.current = null
       connectWebSocket(buildUuid)
     }, delay)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const connectWebSocket = useCallback((buildUuid: string) => {
@@ -929,7 +954,7 @@ export default function BuildDetailPage() {
       reconnectAttemptsRef.current += 1
       scheduleReconnect(buildUuid)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isBuildTerminal, scheduleReconnect])
 
   const getCurrentPhaseIndex = () => {
@@ -991,9 +1016,8 @@ export default function BuildDetailPage() {
     try {
       const response = await api.post(`/api/builds/${build.uuid}/restart`)
       const newBuild = response.data
-      // The new build belongs to the same strategy — redirect to the strategy build page
-      // which will pick up the latest build
-      router.push(`/dashboard/build/${newBuild.strategy_id}`)
+      // Redirect to the new build's detail page using its UUID
+      router.push(`/dashboard/build/${newBuild.uuid}`)
     } catch (err: any) {
       console.error('Failed to restart build:', err)
       setError(err.response?.data?.detail || 'Failed to restart build')
@@ -1021,7 +1045,7 @@ export default function BuildDetailPage() {
   const getPhaseDescription = (phase: string | null) => {
     const descriptions: { [key: string]: string } = {
       'queued': 'Queued for processing',
-      'designing': 'Designing strategy with Claude AI...',
+      'designing': 'Designing strategy with Oculus AI...',
       'refining': 'Refining strategy based on previous results...',     // NEW
       'selecting_best': 'Selecting the best iteration...',               // NEW
       'training': 'Training ML models...',
@@ -1397,13 +1421,12 @@ export default function BuildDetailPage() {
                     {/* Timeline node */}
                     <div className="flex flex-col items-center">
                       <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                          isComplete
+                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isComplete
                             ? 'bg-green-500 text-white'
                             : isActive
-                            ? 'bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white animate-pulse'
-                            : 'bg-border text-text-secondary'
-                        }`}
+                              ? 'bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white animate-pulse'
+                              : 'bg-border text-text-secondary'
+                          }`}
                       >
                         {isComplete ? (
                           <CheckCircle2 size={16} />
@@ -1415,9 +1438,8 @@ export default function BuildDetailPage() {
                       </div>
                       {index < PHASES.length - 1 && (
                         <div
-                          className={`w-0.5 h-8 mt-2 ${
-                            isComplete ? 'bg-green-500' : 'bg-border'
-                          }`}
+                          className={`w-0.5 h-8 mt-2 ${isComplete ? 'bg-green-500' : 'bg-border'
+                            }`}
                         />
                       )}
                     </div>
