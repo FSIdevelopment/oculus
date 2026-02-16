@@ -21,6 +21,8 @@ interface BuildStatus {
   iteration_count: number
   started_at: string
   completed_at: string | null
+  strategy_type?: string
+  strategy_name?: string
 }
 
 interface LogMessage {
@@ -65,24 +67,20 @@ interface BuildIteration {
       auc: number
     }
   } | null
-  entry_rules: {
-    rules: Array<{
-      feature: string
-      operator: string
-      threshold: number
-      description?: string
-    }>
-    score_threshold: number
-  } | null
-  exit_rules: {
-    rules: Array<{
-      feature: string
-      operator: string
-      threshold: number
-      description?: string
-    }>
-    score_threshold: number
-  } | null
+  entry_rules: Array<{
+    feature: string
+    operator: string
+    threshold: number
+    description?: string
+    importance?: number
+  }> | null
+  exit_rules: Array<{
+    feature: string
+    operator: string
+    threshold: number
+    description?: string
+    importance?: number
+  }> | null
   backtest_results: {
     total_return: number
     win_rate: number
@@ -102,7 +100,7 @@ interface ChatMessage {
   created_at: string
 }
 
-const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Building Docker', 'Complete']
+const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Writing Algorithm', 'Complete']
 
 // --- Parsed prompt section types and helpers ---
 
@@ -423,35 +421,35 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
       </div>
 
       {/* Backtest Results */}
-      {iteration.backtest_results && (
+      {iteration.backtest_results && typeof iteration.backtest_results.total_return === 'number' && (
         <div className="mb-6">
           <h4 className="text-sm font-semibold text-text mb-3">Backtest Results</h4>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Total Return</p>
-              <p className={`text-lg font-bold ${iteration.backtest_results.total_return >= 0
+              <p className={`text-lg font-bold ${(iteration.backtest_results?.total_return ?? 0) >= 0
                   ? 'text-green-600 dark:text-green-400'
                   : 'text-red-600 dark:text-red-400'
                 }`}>
-                {iteration.backtest_results.total_return.toFixed(2)}%
+                {(iteration.backtest_results?.total_return ?? 0).toFixed(2)}%
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Win Rate</p>
               <p className="text-sm font-semibold text-text">
-                {(iteration.backtest_results.win_rate * 100).toFixed(1)}%
+                {((iteration.backtest_results?.win_rate ?? 0) * 100).toFixed(1)}%
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Sharpe Ratio</p>
               <p className="text-sm font-semibold text-text">
-                {iteration.backtest_results.sharpe_ratio.toFixed(2)}
+                {(iteration.backtest_results?.sharpe_ratio ?? 0).toFixed(2)}
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Max Drawdown</p>
               <p className="text-sm font-semibold text-red-600 dark:text-red-400">
-                {iteration.backtest_results.max_drawdown.toFixed(2)}%
+                {(iteration.backtest_results?.max_drawdown ?? 0).toFixed(2)}%
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
@@ -463,7 +461,7 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Profit Factor</p>
               <p className="text-sm font-semibold text-text">
-                {iteration.backtest_results.profit_factor.toFixed(2)}
+                {(iteration.backtest_results?.profit_factor ?? 0).toFixed(2)}
               </p>
             </div>
           </div>
@@ -480,25 +478,25 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
               <div>
                 <p className="text-xs text-text-secondary mb-1">F1 Score</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.f1.toFixed(3)}
+                  {(iteration.best_model?.metrics?.f1 ?? 0).toFixed(3)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-text-secondary mb-1">Precision</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.precision.toFixed(3)}
+                  {(iteration.best_model?.metrics?.precision ?? 0).toFixed(3)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-text-secondary mb-1">Recall</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.recall.toFixed(3)}
+                  {(iteration.best_model?.metrics?.recall ?? 0).toFixed(3)}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-text-secondary mb-1">AUC</p>
                 <p className="text-sm font-semibold text-text">
-                  {iteration.best_model.metrics.auc.toFixed(3)}
+                  {(iteration.best_model?.metrics?.auc ?? 0).toFixed(3)}
                 </p>
               </div>
             </div>
@@ -511,13 +509,13 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
         <div className="mb-6">
           <h4 className="text-sm font-semibold text-text mb-3">Trading Rules</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {iteration.entry_rules && (
+            {iteration.entry_rules && iteration.entry_rules.length > 0 && (
               <div className="bg-surface-hover rounded-lg p-4 border border-border">
                 <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
-                  Entry Rules (Score ≥ {iteration.entry_rules.score_threshold})
+                  Entry Rules
                 </p>
                 <div className="space-y-2">
-                  {iteration.entry_rules.rules.map((rule, idx) => (
+                  {iteration.entry_rules.map((rule, idx) => (
                     <div key={idx} className="text-xs text-text">
                       <span className="font-mono">{rule.feature} {rule.operator} {rule.threshold}</span>
                       {rule.description && (
@@ -528,13 +526,13 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
                 </div>
               </div>
             )}
-            {iteration.exit_rules && (
+            {iteration.exit_rules && iteration.exit_rules.length > 0 && (
               <div className="bg-surface-hover rounded-lg p-4 border border-border">
                 <p className="text-xs font-medium text-text-secondary uppercase tracking-wide mb-2">
-                  Exit Rules (Score ≥ {iteration.exit_rules.score_threshold})
+                  Exit Rules
                 </p>
                 <div className="space-y-2">
-                  {iteration.exit_rules.rules.map((rule, idx) => (
+                  {iteration.exit_rules.map((rule, idx) => (
                     <div key={idx} className="text-xs text-text">
                       <span className="font-mono">{rule.feature} {rule.operator} {rule.threshold}</span>
                       {rule.description && (
@@ -1050,7 +1048,7 @@ export default function BuildDetailPage() {
       'selecting_best': 'Selecting the best iteration...',               // NEW
       'training': 'Training ML models...',
       'optimizing': 'Optimizing parameters...',
-      'building_docker': 'Building Docker container...',
+      'building_docker': 'Writing algorithm...',
       'complete': 'Build complete',
       'completed': 'Build complete',                                     // NEW alias
     }
@@ -1066,11 +1064,27 @@ export default function BuildDetailPage() {
       'selecting_best': '🏆',    // NEW
       'training': '🤖',
       'optimizing': '⚙️',
-      'building_docker': '🐳',
+      'building_docker': '✍️',
       'complete': '✅',
       'completed': '✅',          // NEW alias
     }
     return emojis[phase?.toLowerCase() || ''] || '⏳'
+  }
+
+  // Helper: Get phase display name (uppercase)
+  const getPhaseDisplayName = (phase: string | null) => {
+    const phaseDisplayNames: { [key: string]: string } = {
+      'queued': 'QUEUED',
+      'designing': 'DESIGNING',
+      'refining': 'REFINING',
+      'selecting_best': 'SELECTING BEST',
+      'training': 'TRAINING',
+      'optimizing': 'OPTIMIZING',
+      'building_docker': 'WRITING ALGORITHM',
+      'complete': 'COMPLETE',
+      'completed': 'COMPLETE',
+    }
+    return phaseDisplayNames[phase?.toLowerCase() || ''] || phase?.replace(/_/g, ' ').toUpperCase() || ''
   }
 
   // Helper: Get seconds since timestamp
@@ -1283,7 +1297,12 @@ export default function BuildDetailPage() {
             >
               <ArrowLeft size={20} className="text-text-secondary" />
             </button>
-            <h1 className="text-3xl font-bold text-text">Build Details</h1>
+            <h1 className="text-3xl font-bold text-text">{build.strategy_name || 'Build Details'}</h1>
+            {build.strategy_type && (
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20 uppercase tracking-wide">
+                {build.strategy_type}
+              </span>
+            )}
           </div>
           <p className="text-text-secondary text-sm ml-11">Build ID: {build.uuid}</p>
         </div>
@@ -1475,7 +1494,7 @@ export default function BuildDetailPage() {
                   <span className="text-2xl">{getPhaseEmoji(build.phase)}</span>
                   <div>
                     <p className="text-sm font-medium text-text-secondary uppercase tracking-wide">Current Phase</p>
-                    <p className="text-lg font-semibold text-text">{build.phase.replace(/_/g, ' ').toUpperCase()}</p>
+                    <p className="text-lg font-semibold text-text">{getPhaseDisplayName(build.phase)}</p>
                   </div>
                 </div>
                 <p className="text-sm text-text-secondary ml-11">{getPhaseDescription(build.phase)}</p>

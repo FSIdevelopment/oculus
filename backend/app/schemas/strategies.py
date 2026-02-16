@@ -28,6 +28,8 @@ class BuildResponse(BaseModel):
     iteration_count: int
     started_at: datetime
     completed_at: Optional[datetime] = None
+    strategy_type: Optional[str] = None
+    strategy_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -101,14 +103,14 @@ class BuildIterationResponse(BaseModel):
     llm_thinking: Optional[str] = None
     training_config: Optional[dict] = None
     optimal_label_config: Optional[dict] = None
-    features: Optional[dict] = None
-    hyperparameter_results: Optional[dict] = None
-    nn_training_results: Optional[dict] = None
-    lstm_training_results: Optional[dict] = None
-    model_evaluations: Optional[dict] = None
+    features: Optional[Any] = None
+    hyperparameter_results: Optional[Any] = None
+    nn_training_results: Optional[Any] = None
+    lstm_training_results: Optional[Any] = None
+    model_evaluations: Optional[Any] = None
     best_model: Optional[dict] = None
-    entry_rules: Optional[dict] = None
-    exit_rules: Optional[dict] = None
+    entry_rules: Optional[list] = None
+    exit_rules: Optional[list] = None
     backtest_results: Optional[dict] = None
     created_at: datetime
     updated_at: datetime

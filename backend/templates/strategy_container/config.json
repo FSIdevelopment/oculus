@@ -1,0 +1,57 @@
+{
+  "strategy_name": "Template Strategy",
+  "version": "1.0.0",
+  "description": "A template strategy for Signal Synk. Customize this file for your strategy.",
+  "trading": {
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "GOOGL"
+    ],
+    "timeframe": "5m",
+    "signal_generation_interval": "1m",
+    "max_positions": 5,
+    "position_size_pct": 10,
+    "default_quantity": 10
+  },
+  "indicators": {
+    "rsi_period": 14,
+    "rsi_overbought": 70,
+    "rsi_oversold": 30,
+    "sma_fast": 20,
+    "sma_slow": 50
+  },
+  "risk_management": {
+    "max_daily_loss_pct": 2.0,
+    "max_position_loss_pct": 1.0,
+    "stop_loss_pct": 2.0,
+    "take_profit_pct": 4.0,
+    "trailing_stop_pct": 1.5
+  },
+  "schedule": {
+    "market_open": "09:30",
+    "market_close": "16:00",
+    "timezone": "America/New_York",
+    "trading_days": [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday"
+    ],
+    "avoid_first_minutes": 15,
+    "avoid_last_minutes": 15
+  },
+  "data_source": {
+    "provider": "alphavantage",
+    "interval": "5min",
+    "outputsize": "compact",
+    "history_bars": 50
+  },
+  "logging": {
+    "level": "INFO",
+    "log_trades": true,
+    "log_signals": true,
+    "log_indicators": false
+  }
+}

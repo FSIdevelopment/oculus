@@ -20,6 +20,7 @@ from app.models.build_iteration import BuildIteration
 from app.models.chat_history import ChatHistory
 from app.auth.dependencies import get_current_active_user
 from app.schemas.strategies import BuildResponse, BuildIterationResponse, BuildListItem, BuildListResponse
+from pydantic import ValidationError
 from app.services.build_orchestrator import BuildOrchestrator
 from app.services.docker_builder import DockerBuilder
 from app.services.balance import deduct_tokens
@@ -142,7 +143,23 @@ async def _run_build_loop(
 
         # Initialize orchestrator with background session
         orchestrator = BuildOrchestrator(bg_db, user, build)
-        await orchestrator.initialize()
+        try:
+            await orchestrator.initialize()
+        except Exception as e:
+            # Redis connection failed — mark build as failed and return early
+            logger.error(
+                f"Redis connection failed for build {build_id}: {e}",
+                extra={
+                    "error": "Redis connection failed — check REDIS_URL / ngrok tunnel",
+                    "details": str(e),
+                    "build_id": build_id,
+                }
+            )
+            build.status = "failed"
+            build.phase = "complete"
+            build.completed_at = datetime.utcnow()
+            await bg_db.commit()
+            return
 
         try:
             design = None
@@ -406,10 +423,10 @@ async def _run_build_loop(
                     "iteration_uuid": iteration_uuid,
                     "message": f"Training completed (iteration {iteration})",
                     "results": {
-                        "total_return": training_results.get("total_return"),
-                        "win_rate": training_results.get("win_rate"),
-                        "sharpe_ratio": training_results.get("sharpe_ratio"),
-                        "model": training_results.get("model"),
+                        "total_return": (training_results.get("backtest_results") or {}).get("total_return"),
+                        "win_rate": (training_results.get("backtest_results") or {}).get("win_rate"),
+                        "sharpe_ratio": (training_results.get("backtest_results") or {}).get("sharpe_ratio"),
+                        "model": (training_results.get("best_model") or {}).get("name"),
                         "best_model": training_results.get("best_model"),
                         "model_metrics": training_results.get("model_metrics"),
                         "optimal_label_config": training_results.get("optimal_label_config"),
@@ -420,7 +437,7 @@ async def _run_build_loop(
                 })
 
                 # Check if target metrics are met
-                total_return = training_results.get('total_return', 0)
+                total_return = (training_results.get('backtest_results') or {}).get('total_return', 0)
                 if total_return >= target_return:
                     # Build Docker image before marking complete
                     build.phase = "building_docker"
@@ -460,6 +477,18 @@ async def _run_build_loop(
                         logger.warning("Failed to persist strategy files for build %s: %s", build_id, e)
                         iteration_logs.append(f"Iteration {iteration}: Strategy file persistence failed: {e}")
 
+                    # --- Persist backtest_results.json ---
+                    try:
+                        backtest_results = training_results.get("backtest_results", {})
+                        backtest_json_path = Path(strategy_output_dir) / "backtest_results.json"
+                        await asyncio.to_thread(
+                            backtest_json_path.write_text,
+                            json.dumps(backtest_results, indent=2)
+                        )
+                        iteration_logs.append("Persisted backtest_results.json")
+                    except Exception as e:
+                        logger.warning("Failed to persist backtest_results.json for build %s: %s", build_id, e)
+
                     # --- Generate README via Claude ---
                     try:
                         readme_content = await orchestrator.generate_strategy_readme(
@@ -469,6 +498,7 @@ async def _run_build_loop(
                             backtest_results=training_results.get("backtest_results", {}),
                             model_metrics=training_results.get("model_metrics", {}),
                             config=design,
+                            strategy_type=strategy_type or "",
                         )
                         # Write README to strategy output directory
                         readme_path = Path(strategy_output_dir) / "README.md"
@@ -550,6 +580,7 @@ async def _run_build_loop(
                             completed_iterations=completed_iterations,
                             best_iteration=best_iter,
                             target_return=target_return,
+                            strategy_type=strategy_type or "",
                         )
                         await _publish_progress(build_id, {
                             "phase": "selecting_best",
@@ -597,6 +628,18 @@ async def _run_build_loop(
                     except Exception as e:
                         logger.warning("Failed to persist strategy files: %s", e)
 
+                    # --- Persist backtest_results.json ---
+                    try:
+                        backtest_results = best_iter.backtest_results or {}
+                        backtest_json_path = Path(strategy_output_dir) / "backtest_results.json"
+                        await asyncio.to_thread(
+                            backtest_json_path.write_text,
+                            json.dumps(backtest_results, indent=2)
+                        )
+                        iteration_logs.append("Persisted backtest_results.json")
+                    except Exception as e:
+                        logger.warning("Failed to persist backtest_results.json: %s", e)
+
                     # Generate README
                     try:
                         readme_content = await orchestrator.generate_strategy_readme(
@@ -606,6 +649,7 @@ async def _run_build_loop(
                             backtest_results=best_iter.backtest_results or {},
                             model_metrics=(best_iter.best_model or {}),
                             config=design,
+                            strategy_type=strategy_type or "",
                         )
                         readme_path = Path(strategy_output_dir) / "README.md"
                         await asyncio.to_thread(readme_path.write_text, readme_content)
@@ -762,6 +806,8 @@ async def trigger_build(
         iteration_count=build.iteration_count,
         started_at=build.started_at,
         completed_at=build.completed_at,
+        strategy_type=strategy.strategy_type,
+        strategy_name=strategy.name,
     )
 
 
@@ -796,11 +842,12 @@ async def list_builds(
     )
     total = count_result.scalar()
 
-    # Fetch paginated builds with strategy name
+    # Fetch paginated builds with strategy name and type
     result = await db.execute(
         select(
             StrategyBuild,
-            Strategy.name.label("strategy_name")
+            Strategy.name.label("strategy_name"),
+            Strategy.strategy_type.label("strategy_type")
         )
         .join(Strategy, StrategyBuild.strategy_id == Strategy.uuid)
         .where(
@@ -815,7 +862,7 @@ async def list_builds(
 
     # Build response items
     items = []
-    for build, strategy_name in rows:
+    for build, strategy_name, strategy_type in rows:
         item_dict = {
             "uuid": build.uuid,
             "strategy_id": build.strategy_id,
@@ -826,6 +873,7 @@ async def list_builds(
             "started_at": build.started_at,
             "completed_at": build.completed_at,
             "strategy_name": strategy_name,
+            "strategy_type": strategy_type,
         }
         items.append(BuildListItem(**item_dict))
 
@@ -883,10 +931,19 @@ async def get_build_iterations(
     iterations = iterations_result.scalars().all()
 
     # Convert to response schema
-    iteration_responses = [
-        BuildIterationResponse.model_validate(iteration)
-        for iteration in iterations
-    ]
+    iteration_responses = []
+    for iteration in iterations:
+        try:
+            iteration_responses.append(BuildIterationResponse.model_validate(iteration))
+        except ValidationError as e:
+            logger.error(
+                f"Failed to validate iteration {iteration.uuid} for build {build_id}: {e}. "
+                f"Iteration data: iteration_number={iteration.iteration_number}, "
+                f"entry_rules type={type(iteration.entry_rules)}, "
+                f"exit_rules type={type(iteration.exit_rules)}"
+            )
+            # Skip this iteration instead of crashing the whole endpoint
+            continue
 
     return {
         "iterations": iteration_responses,
@@ -919,6 +976,12 @@ async def get_build_status(
             detail="Build not found"
         )
 
+    # Fetch strategy for name and type
+    strat_result = await db.execute(
+        select(Strategy).where(Strategy.uuid == build.strategy_id)
+    )
+    strategy = strat_result.scalar_one_or_none()
+
     return BuildResponse(
         uuid=build.uuid,
         strategy_id=build.strategy_id,
@@ -928,6 +991,8 @@ async def get_build_status(
         iteration_count=build.iteration_count,
         started_at=build.started_at,
         completed_at=build.completed_at,
+        strategy_type=strategy.strategy_type if strategy else None,
+        strategy_name=strategy.name if strategy else None,
     )
 
 
@@ -1094,6 +1159,8 @@ async def restart_build(
         iteration_count=new_build.iteration_count,
         started_at=new_build.started_at,
         completed_at=new_build.completed_at,
+        strategy_type=strategy.strategy_type,
+        strategy_name=strategy.name,
     )
 
 
