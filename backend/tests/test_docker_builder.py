@@ -84,8 +84,8 @@ async def test_build_and_push_success(test_db, test_strategy, test_build):
         )
         
         assert result is True
-        assert test_strategy.docker_registry == "forfrontsolutions"
-        assert "forfrontsolutions/test-strategy:1" in test_strategy.docker_image_url
+        assert test_strategy.docker_registry == "forefrontsolutions"
+        assert "forefrontsolutions/test-strategy:1" in test_strategy.docker_image_url
         assert test_build.status == "complete"
         assert test_build.completed_at is not None
 

@@ -237,11 +237,17 @@ class DockerBuilder:
             # Build the image
             image_tag = await self.build_image(strategy, build, strategy_output_dir)
             if not image_tag:
+                build.status = "failed"
+                build.completed_at = datetime.utcnow()
+                await self.db.commit()
                 return False
 
             # Push the image
             push_success = await self.push_image(image_tag, build)
             if not push_success:
+                build.status = "failed"
+                build.completed_at = datetime.utcnow()
+                await self.db.commit()
                 return False
 
             # Update strategy record

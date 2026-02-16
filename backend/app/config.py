@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
 
     # Docker Hub
-    DOCKER_HUB_USERNAME: str = "forfrontsolutions"
+    DOCKER_HUB_USERNAME: str = "forefrontsolutions"
     DOCKER_HUB_PAT: str = ""
 
     # LLM and Build Orchestration
