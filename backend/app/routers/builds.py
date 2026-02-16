@@ -360,6 +360,31 @@ async def _build_strategy_container(
     except Exception as e:
         logger.warning("README generation failed: %s", e)
 
+    # Step 6: Safeguard - Re-copy main.py template to prevent any accidental overwrites
+    # This ensures the 428-line template is always intact before Docker build
+    try:
+        main_py_template = template_dir / "main.py"
+        main_py_output = output_path / "main.py"
+        await asyncio.to_thread(shutil.copy2, str(main_py_template), str(main_py_output))
+
+        # Verify the copied main.py
+        main_py_size = await asyncio.to_thread(os.path.getsize, str(main_py_output))
+        main_py_content = await asyncio.to_thread(main_py_output.read_text)
+        has_strategy_runner = "class StrategyRunner" in main_py_content
+
+        logger.info(
+            f"main.py verified: {main_py_size} bytes, StrategyRunner class present: {has_strategy_runner}"
+        )
+
+        # If verification fails, log warning but don't fail the build
+        if main_py_size < 10000 or not has_strategy_runner:
+            logger.warning(
+                f"main.py verification failed: size={main_py_size} bytes (expected >10KB), "
+                f"has_StrategyRunner={has_strategy_runner}"
+            )
+    except Exception as e:
+        logger.warning("main.py safeguard copy/verification failed: %s", e)
+
     return strategy_output_dir
 
 
