@@ -59,7 +59,8 @@ async def save_chat_message(
         user_id=chat_msg.user_id,
         role=chat_msg.message_type,
         content=chat_msg.message,
-        created_at=chat_msg.created_at
+        created_at=chat_msg.created_at,
+        metadata=chat_msg.content
     )
 
 
@@ -111,7 +112,8 @@ async def get_chat_history(
             user_id=msg.user_id,
             role=msg.message_type,
             content=msg.message,
-            created_at=msg.created_at
+            created_at=msg.created_at,
+            metadata=msg.content
         )
         for msg in messages
     ]

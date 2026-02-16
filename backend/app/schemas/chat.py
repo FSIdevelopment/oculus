@@ -12,14 +12,15 @@ class ChatMessageCreate(BaseModel):
 
 class ChatMessageResponse(BaseModel):
     """Schema for chat message response."""
-    
+
     uuid: str
     strategy_id: str
     user_id: str
     role: str
     content: str
     created_at: datetime
-    
+    metadata: dict | None = None
+
     class Config:
         from_attributes = True
 

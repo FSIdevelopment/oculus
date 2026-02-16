@@ -98,6 +98,7 @@ interface ChatMessage {
   role: string
   content: string
   created_at: string
+  metadata?: { type?: string; iteration?: number; phase?: string } | null
 }
 
 const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Writing Algorithm', 'Testing Algorithm', 'Complete']
@@ -437,7 +438,7 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Win Rate</p>
               <p className="text-sm font-semibold text-text">
-                {((iteration.backtest_results?.win_rate ?? 0) * 100).toFixed(1)}%
+                {(iteration.backtest_results?.win_rate ?? 0).toFixed(1)}%
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
@@ -596,16 +597,16 @@ export default function BuildDetailPage() {
   const [build, setBuild] = useState<BuildStatus | null>(null)
   const [latestProgress, setLatestProgress] = useState<LogMessage | null>(null)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
+  const [progressMessages, setProgressMessages] = useState<{message: string, iteration?: number, timestamp: string}[]>([])
   const [wsConnected, setWsConnected] = useState(false)
   const [wsRetriesExhausted, setWsRetriesExhausted] = useState(false)
   const [loadingBuild, setLoadingBuild] = useState(true)
   const [loadingChat, setLoadingChat] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // New state for stop/restart, thinking, iteration results, and max iterations
+  // New state for stop/restart, iteration results, and max iterations
   const [stopping, setStopping] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [thinkingContent, setThinkingContent] = useState<string[]>([])
   // Keep for backward compatibility with WebSocket data (prefixed with _ to indicate intentionally unused)
   const [_iterationResults, setIterationResults] = useState<IterationResult[]>([])
   const [maxIterations, setMaxIterations] = useState<number | null>(null)
@@ -884,6 +885,16 @@ export default function BuildDetailPage() {
 
             const progressData = newLog.data || {}
 
+            // Accumulate progress messages for rendering as individual bubbles
+            if (newLog.message) {
+              const message = newLog.message // Capture in const to satisfy TypeScript
+              setProgressMessages((prev) => [...prev, {
+                message,
+                iteration: progressData.iteration,
+                timestamp: newLog.timestamp || new Date().toISOString()
+              }])
+            }
+
             // Track max_iterations from progress messages
             if (progressData.max_iterations != null) {
               setMaxIterations(progressData.max_iterations)
@@ -897,11 +908,6 @@ export default function BuildDetailPage() {
             // Update iteration_count from WebSocket progress (real-time, no 5s delay)
             if (progressData.iteration_count != null) {
               setBuild(prev => prev ? { ...prev, iteration_count: progressData.iteration_count } : prev)
-            }
-
-            // Handle LLM thinking content
-            if (progressData.type === 'thinking' && progressData.thinking) {
-              setThinkingContent((prev) => [...prev, progressData.thinking])
             }
 
             // Handle per-iteration training results
@@ -1625,95 +1631,152 @@ export default function BuildDetailPage() {
             <h2 className="text-lg font-semibold text-text mb-6">Design Thinking</h2>
             <div className="space-y-4 max-h-[600px] overflow-y-auto">
 
-              {/* LLM Thinking Content — streamed from WebSocket (Change 4) */}
-              {thinkingContent.length > 0 && (
-                <div className="space-y-3 mb-4">
-                  {thinkingContent.map((thought, idx) => (
-                    <div key={idx} className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400">
-                        <Brain size={16} />
-                      </div>
-                      <div className="flex-1 bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
-                        <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide mb-1">Thinking</p>
-                        <p className="text-sm text-text break-words whitespace-pre-wrap">{thought}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
               {/* Chat messages - design output is the hero content */}
               {loadingChat ? (
                 <div className="text-center py-8">
                   <Loader className="animate-spin text-primary mx-auto mb-2" size={20} />
                   <p className="text-text-secondary text-sm">Loading chat history...</p>
                 </div>
-              ) : chatHistory.length > 0 ? (
-                <div className="space-y-4">
-                  {chatHistory.map((msg) => {
-                    const designOutput = msg.role === 'assistant' ? parseDesignOutput(msg.content) : null
+              ) : (() => {
+                // Combine all messages: chat history + progress messages
+                type CombinedMessage = ChatMessage | { role: 'progress', message: string, iteration?: number, timestamp: string, uuid: string }
 
-                    return (
-                      <div key={msg.uuid} className="space-y-2">
-                        {/* Thinking messages from chat history (message_type: "thinking") */}
-                        {(msg as any).message_type === 'thinking' && (
-                          <div className="flex gap-3">
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400">
-                              <Brain size={16} />
-                            </div>
-                            <div className="flex-1 bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
-                              <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide mb-1">Thinking</p>
-                              <p className="text-sm text-text break-words whitespace-pre-wrap">{msg.content}</p>
-                              <p className="text-xs text-text-secondary mt-2">
-                                {new Date(msg.created_at).toLocaleTimeString()}
-                              </p>
-                            </div>
-                          </div>
-                        )}
+                const allMessages: CombinedMessage[] = [
+                  ...chatHistory,
+                  ...progressMessages.map((pm, idx) => ({
+                    role: 'progress' as const,
+                    message: pm.message,
+                    iteration: pm.iteration,
+                    timestamp: pm.timestamp,
+                    uuid: `progress-${idx}-${pm.timestamp}`
+                  }))
+                ]
 
-                        {/* User prompt - parsed into conversational bubbles */}
-                        {msg.role === 'user' && (
-                          <DesignPromptBubbles msg={msg} />
-                        )}
+                // Sort all messages chronologically by timestamp
+                allMessages.sort((a, b) => {
+                  const timeA = 'created_at' in a ? new Date(a.created_at).getTime() : new Date(a.timestamp).getTime()
+                  const timeB = 'created_at' in b ? new Date(b.created_at).getTime() : new Date(b.timestamp).getTime()
+                  return timeA - timeB
+                })
 
-                        {/* Design output - HERO content */}
-                        {msg.role === 'assistant' && (
-                          <div className="flex gap-3">
-                            <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-surface-hover text-text-secondary">
-                              🧠
+                if (allMessages.length === 0) {
+                  return (
+                    <div className="text-center py-12">
+                      <p className="text-text-secondary">No design messages yet...</p>
+                    </div>
+                  )
+                }
+
+                // Render messages with iteration dividers
+                let lastIteration: number | undefined = undefined
+
+                return (
+                  <div className="space-y-4">
+                    {allMessages.map((msg) => {
+                      const isProgress = msg.role === 'progress'
+                      const isChatMessage = 'content' in msg
+                      const currentIteration = isProgress
+                        ? (msg as { role: 'progress', message: string, iteration?: number, timestamp: string, uuid: string }).iteration
+                        : (isChatMessage ? (msg as ChatMessage).metadata?.iteration : undefined)
+
+                      // Show iteration divider when iteration changes
+                      const showDivider = currentIteration !== undefined && currentIteration !== lastIteration
+                      if (currentIteration !== undefined) {
+                        lastIteration = currentIteration
+                      }
+
+                      const designOutput = isChatMessage && msg.role === 'assistant' ? parseDesignOutput((msg as ChatMessage).content) : null
+
+                      return (
+                        <div key={msg.uuid}>
+                          {/* Iteration divider */}
+                          {showDivider && (
+                            <div className="flex items-center gap-3 my-6">
+                              <div className="flex-1 h-px bg-border"></div>
+                              <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
+                                Iteration #{currentIteration}
+                              </span>
+                              <div className="flex-1 h-px bg-border"></div>
                             </div>
-                            <div className="flex-1">
-                              {designOutput ? (
-                                // Render as beautiful design card
-                                <div className="space-y-2">
-                                  {renderDesignCard(designOutput)}
-                                  <p className="text-xs text-text-secondary">
-                                    {new Date(msg.created_at).toLocaleTimeString()}
+                          )}
+
+                          {/* Progress messages */}
+                          {isProgress && (() => {
+                            const progressMsg = msg as { role: 'progress', message: string, iteration?: number, timestamp: string, uuid: string }
+                            return (
+                              <div className="flex gap-3">
+                                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500/20 text-blue-600 dark:text-blue-400">
+                                  ⚙️
+                                </div>
+                                <div className="flex-1 bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                                  <p className="text-xs text-blue-600 dark:text-blue-400">{progressMsg.message}</p>
+                                </div>
+                              </div>
+                            )
+                          })()}
+
+                          {/* Thinking messages from chat history (role: "thinking") */}
+                          {isChatMessage && msg.role === 'thinking' && (() => {
+                            const chatMsg = msg as ChatMessage
+                            return (
+                              <div className="flex gap-3">
+                                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                                  <Brain size={16} />
+                                </div>
+                                <div className="flex-1 bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                                  <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide mb-1">Thinking</p>
+                                  <p className="text-sm text-text break-words whitespace-pre-wrap">{chatMsg.content}</p>
+                                  <p className="text-xs text-text-secondary mt-2">
+                                    {new Date(chatMsg.created_at).toLocaleTimeString()}
                                   </p>
                                 </div>
-                              ) : (
-                                // Fallback: render as text if not JSON
-                                <div className="space-y-2">
-                                  <div className="bg-surface-hover border border-border rounded-lg p-4">
-                                    <p className="text-sm text-text break-words whitespace-pre-wrap">{msg.content}</p>
-                                  </div>
-                                  <p className="text-xs text-text-secondary">
-                                    {new Date(msg.created_at).toLocaleTimeString()}
-                                  </p>
+                              </div>
+                            )
+                          })()}
+
+                          {/* User prompt - parsed into conversational bubbles */}
+                          {isChatMessage && msg.role === 'user' && (
+                            <DesignPromptBubbles msg={msg as ChatMessage} />
+                          )}
+
+                          {/* Design output - HERO content */}
+                          {isChatMessage && msg.role === 'assistant' && (() => {
+                            const chatMsg = msg as ChatMessage
+                            return (
+                              <div className="flex gap-3">
+                                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-surface-hover text-text-secondary">
+                                  🧠
                                 </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <p className="text-text-secondary">No design messages yet...</p>
-                </div>
-              )}
+                                <div className="flex-1">
+                                  {designOutput ? (
+                                    // Render as beautiful design card
+                                    <div className="space-y-2">
+                                      {renderDesignCard(designOutput)}
+                                      <p className="text-xs text-text-secondary">
+                                        {new Date(chatMsg.created_at).toLocaleTimeString()}
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    // Fallback: render as text if not JSON
+                                    <div className="space-y-2">
+                                      <div className="bg-surface-hover border border-border rounded-lg p-4">
+                                        <p className="text-sm text-text break-words whitespace-pre-wrap">{chatMsg.content}</p>
+                                      </div>
+                                      <p className="text-xs text-text-secondary">
+                                        {new Date(chatMsg.created_at).toLocaleTimeString()}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </div>
           </div>
         </div>
