@@ -1123,7 +1123,7 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
             response = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
-                thinking={"type": "enabled", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
+                thinking={"type": "adaptive", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
                 messages=[{"role": "user", "content": prompt}],
             )
 
@@ -1212,7 +1212,7 @@ Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
             response = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
-                thinking={"type": "enabled", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
+                thinking={"type": "adaptive", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
                 messages=[{"role": "user", "content": prompt}],
             )
 
@@ -1308,7 +1308,7 @@ Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
             response = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
-                thinking={"type": "enabled", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
+                thinking={"type": "adaptive", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
                 messages=[{"role": "user", "content": prompt}],
             )
 
@@ -1401,7 +1401,7 @@ Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
             response = self.client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
-                thinking={"type": "enabled", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
+                thinking={"type": "adaptive", "budget_tokens": settings.CLAUDE_MAX_TOKENS - 2000},
                 messages=[{"role": "user", "content": prompt}],
             )
 
