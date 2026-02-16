@@ -295,6 +295,9 @@ export default function CreateStrategyPage() {
             <p className="text-xs text-text-secondary mt-1">
               Maximum number of AI design-train-refine cycles
             </p>
+            <p className="text-xs text-text-secondary mt-1">
+              Estimated build time: ~{formData.max_iterations * 3}–{formData.max_iterations * 5} minutes
+            </p>
           </div>
 
           {/* Comments */}

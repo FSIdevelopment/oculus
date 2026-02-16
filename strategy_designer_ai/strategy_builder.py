@@ -1702,7 +1702,9 @@ class PortfolioBacktester:
             'buy_hold_avg': avg_buy_hold,
             'buy_hold_best': best_buy_hold_symbol,
             'max_potential': self.max_potential_profit,
-            'buy_hold_by_symbol': self.buy_hold_returns
+            'buy_hold_by_symbol': self.buy_hold_returns,
+            'sharpe_ratio': round((total_return / 100) / (max_dd if max_dd > 0 else 1), 2),
+            'profit_factor': round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else (float('inf') if avg_win > 0 else 0)
         }}
 
 

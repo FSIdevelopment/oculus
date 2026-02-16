@@ -608,8 +608,14 @@ async def _run_build_loop(
                         ),
                         json.dumps(design)
                     )
-                    # Save thinking content to ChatHistory
-                    await _save_thinking_history(bg_db, user_id, strategy_id, thinking_text, iteration)
+                    # Save thinking content to ChatHistory (split into separate records)
+                    thinking_blocks = llm_result.get("thinking_blocks", [])
+                    if not thinking_blocks:
+                        # Backwards compat: fall back to single concatenated string
+                        if thinking_text:
+                            thinking_blocks = [thinking_text]
+                    for block in thinking_blocks:
+                        await _save_thinking_history(bg_db, user_id, strategy_id, block, iteration)
 
                     # Publish thinking via Redis
                     if thinking_text:
@@ -632,14 +638,14 @@ async def _run_build_loop(
                     await _publish_progress(build_id, {
                         "phase": "refining",
                         "iteration": iteration,
-                        "message": f"Refining strategy (iteration {iteration})...",
+                        "message": f"Refining strategy (iteration {iteration + 1})...",
                         "tokens_consumed": build.tokens_consumed,
                         "iteration_count": build.iteration_count,
                         "max_iterations": max_iterations,
                     })
                     await _save_progress_message(
                         bg_db, user_id, strategy_id,
-                        f"Refining strategy (iteration {iteration})...",
+                        f"Refining strategy (iteration {iteration + 1})...",
                         "refining",
                         iteration
                     )
@@ -667,8 +673,14 @@ async def _run_build_loop(
                         refinement_prompt,
                         json.dumps(design)
                     )
-                    # Save thinking content to ChatHistory
-                    await _save_thinking_history(bg_db, user_id, strategy_id, thinking_text, iteration)
+                    # Save thinking content to ChatHistory (split into separate records)
+                    thinking_blocks = llm_result.get("thinking_blocks", [])
+                    if not thinking_blocks:
+                        # Backwards compat: fall back to single concatenated string
+                        if thinking_text:
+                            thinking_blocks = [thinking_text]
+                    for block in thinking_blocks:
+                        await _save_thinking_history(bg_db, user_id, strategy_id, block, iteration)
 
                     # Publish thinking via Redis
                     if thinking_text:
@@ -691,14 +703,14 @@ async def _run_build_loop(
                 await _publish_progress(build_id, {
                     "phase": "training",
                     "iteration": iteration,
-                    "message": f"Training model (iteration {iteration})...",
+                    "message": f"Training model (iteration {iteration + 1})...",
                     "tokens_consumed": build.tokens_consumed,
                     "iteration_count": build.iteration_count,
                     "max_iterations": max_iterations,
                 })
                 await _save_progress_message(
                     bg_db, user_id, strategy_id,
-                    f"Training model (iteration {iteration})...",
+                    f"Training model (iteration {iteration + 1})...",
                     "training",
                     iteration
                 )
@@ -753,7 +765,7 @@ async def _run_build_loop(
                     "phase": "training_complete",
                     "iteration": iteration,
                     "iteration_uuid": iteration_uuid,
-                    "message": f"Training completed (iteration {iteration})",
+                    "message": f"Training completed (iteration {iteration + 1})",
                     "results": {
                         "total_return": (training_results.get("backtest_results") or {}).get("total_return"),
                         "win_rate": (training_results.get("backtest_results") or {}).get("win_rate"),
@@ -769,7 +781,7 @@ async def _run_build_loop(
                 })
                 await _save_progress_message(
                     bg_db, user_id, strategy_id,
-                    f"Training completed (iteration {iteration})",
+                    f"Training completed (iteration {iteration + 1})",
                     "training_complete",
                     iteration
                 )
@@ -894,7 +906,7 @@ async def _run_build_loop(
                     # Publish selection decision via WebSocket
                     await _publish_progress(build_id, {
                         "phase": "selecting_best",
-                        "message": f"Selecting best iteration: #{best_iter_num} with {best_return}% return",
+                        "message": f"Selecting best iteration: #{best_iter_num + 1} with {best_return}% return",
                         "best_iteration": best_iter_num,
                         "best_return": best_return,
                         "tokens_consumed": build.tokens_consumed,
@@ -903,27 +915,38 @@ async def _run_build_loop(
                     })
                     await _save_progress_message(
                         bg_db, user_id, strategy_id,
-                        f"Selecting best iteration: #{best_iter_num} with {best_return}% return",
+                        f"Selecting best iteration: #{best_iter_num + 1} with {best_return}% return",
                         "selecting_best",
                         None
                     )
 
                     # Generate selection thinking via Claude
                     try:
-                        selection_thinking = await orchestrator.generate_selection_thinking(
+                        selection_thinking_result = await orchestrator.generate_selection_thinking(
                             completed_iterations=completed_iterations,
                             best_iteration=best_iter,
                             target_return=target_return,
                             strategy_type=strategy_type or "",
                         )
+                        selection_thinking_text = selection_thinking_result.get("thinking", "")
+                        selection_thinking_blocks = selection_thinking_result.get("thinking_blocks", [])
+
                         await _publish_progress(build_id, {
                             "phase": "selecting_best",
                             "message": "Design thinking: iteration selection",
-                            "thinking": selection_thinking,
+                            "thinking": selection_thinking_text,
                             "tokens_consumed": build.tokens_consumed,
                             "iteration_count": build.iteration_count,
                             "max_iterations": max_iterations,
                         })
+
+                        # Save selection thinking to ChatHistory (split into separate records)
+                        if not selection_thinking_blocks:
+                            # Backwards compat: fall back to single concatenated string
+                            if selection_thinking_text:
+                                selection_thinking_blocks = [selection_thinking_text]
+                        for block in selection_thinking_blocks:
+                            await _save_thinking_history(bg_db, user_id, strategy_id, block, None)
                     except Exception as e:
                         logger.warning("Selection thinking failed for build %s: %s", build_id, e)
 
@@ -1000,14 +1023,14 @@ async def _run_build_loop(
                     build.phase = "complete"
                     await _publish_progress(build_id, {
                         "phase": "complete",
-                        "message": f"Build complete — best iteration: #{best_iter_num} ({best_return}% return, target was {target_return}%)",
+                        "message": f"Build complete — best iteration: #{best_iter_num + 1} ({best_return}% return, target was {target_return}%)",
                         "tokens_consumed": build.tokens_consumed,
                         "iteration_count": build.iteration_count,
                         "max_iterations": max_iterations,
                     })
                     await _save_progress_message(
                         bg_db, user_id, strategy_id,
-                        f"Build complete — best iteration: #{best_iter_num} ({best_return}% return, target was {target_return}%)",
+                        f"Build complete — best iteration: #{best_iter_num + 1} ({best_return}% return, target was {target_return}%)",
                         "complete",
                         None
                     )

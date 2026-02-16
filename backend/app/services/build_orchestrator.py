@@ -578,6 +578,7 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
         Returns a dict with keys:
         - "design": the parsed strategy design JSON
         - "thinking": concatenated thinking block text (empty string if none)
+        - "thinking_blocks": list of individual thinking blocks
         """
         # Extract text and thinking blocks from response
         text = ""
@@ -598,7 +599,7 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
                 design = json.loads(json_fence_match.group(1).strip())
                 # Validate rules are non-empty
                 if self._validate_design_rules(design):
-                    return {"design": design, "thinking": thinking_text}
+                    return {"design": design, "thinking": thinking_text, "thinking_blocks": thinking_parts}
             except json.JSONDecodeError:
                 pass
 
@@ -608,7 +609,7 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
             try:
                 design = json.loads(json_match.group())
                 if self._validate_design_rules(design):
-                    return {"design": design, "thinking": thinking_text}
+                    return {"design": design, "thinking": thinking_text, "thinking_blocks": thinking_parts}
                 # Design parsed but rules are empty — will retry below
             except json.JSONDecodeError:
                 pass
@@ -636,7 +637,7 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
                 if retry_fence:
                     retry_design = json.loads(retry_fence.group(1).strip())
                     if self._validate_design_rules(retry_design):
-                        return {"design": retry_design, "thinking": thinking_text}
+                        return {"design": retry_design, "thinking": thinking_text, "thinking_blocks": thinking_parts}
             except Exception as e:
                 logger.warning("Rules retry failed: %s", e)
 
@@ -692,6 +693,7 @@ Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETE
                 },
             },
             "thinking": thinking_text,
+            "thinking_blocks": thinking_parts,
         }
 
 
@@ -833,7 +835,7 @@ Keep content concise and actionable. Each lesson should be directly applicable."
         best_iteration: Any,
         target_return: float,
         strategy_type: str = "",
-    ) -> str:
+    ) -> Dict[str, Any]:
         """Generate Claude's explanation of which iteration was selected and why.
 
         Args:
@@ -843,7 +845,9 @@ Keep content concise and actionable. Each lesson should be directly applicable."
             strategy_type: The type of strategy being built
 
         Returns:
-            A thinking string explaining the selection decision
+            A dict with keys:
+            - "thinking": concatenated thinking text
+            - "thinking_blocks": list of individual thinking blocks
         """
         # Build a summary of all iterations for Claude
         iterations_summary = []
@@ -891,20 +895,28 @@ Keep it concise and focused on the decision rationale."""
             thinking_blocks = [b for b in response.content if hasattr(b, "type") and b.type == "thinking"]
             text_blocks = [b for b in response.content if hasattr(b, "text")]
 
-            thinking_text = "\n".join(b.thinking for b in thinking_blocks) if thinking_blocks else ""
+            thinking_parts = [b.thinking for b in thinking_blocks] if thinking_blocks else []
+            thinking_text = "\n".join(thinking_parts)
             response_text = "\n".join(b.text for b in text_blocks)
 
             # Combine thinking and response
             full_thinking = f"{thinking_text}\n\n{response_text}" if thinking_text else response_text
 
             self._log(f"Selection thinking generated ({len(full_thinking)} chars)")
-            return full_thinking
+            return {
+                "thinking": full_thinking,
+                "thinking_blocks": thinking_parts,
+            }
 
         except Exception as e:
             logger.warning("Selection thinking generation failed: %s", e)
             self._log(f"Warning: Selection thinking generation failed: {e}")
             # Return a simple fallback explanation
-            return f"Selected iteration {best_iteration.iteration_number} as it achieved the highest total return of {best_bt.get('total_return', 0):.2f}% among all {len(completed_iterations)} completed iterations."
+            fallback_text = f"Selected iteration {best_iteration.iteration_number} as it achieved the highest total return of {best_bt.get('total_return', 0):.2f}% among all {len(completed_iterations)} completed iterations."
+            return {
+                "thinking": fallback_text,
+                "thinking_blocks": [fallback_text],
+            }
 
     async def generate_strategy_readme(
         self,
