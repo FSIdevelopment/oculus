@@ -1364,34 +1364,184 @@ Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
 - Type: {strategy_type}
 - Symbols: {', '.join(symbols)}
 
-## Template Structure Overview
-The template backtest.py is 822 lines and includes:
-- Imports: strategy, risk_manager, data_provider
-- BacktestEngine class with position tracking
-- Performance metrics calculation
-- Results written to backtest_results.json
+## Required Data Structures
 
-Key structure from template:
+You MUST use these exact dataclass definitions in your backtest.py:
+
 ```python
-{template_code[:1500]}
-... (continues with backtest logic, metrics calculation)
+@dataclass
+class Trade:
+    \"\"\"Represents a single trade in the backtest\"\"\"
+    entry_date: str
+    exit_date: Optional[str]
+    symbol: str
+    action: str  # BUY or SELL
+    entry_price: float
+    exit_price: Optional[float]
+    quantity: int
+    pnl: float
+    pnl_pct: float
+    duration_hours: float
+    indicators: Dict[str, Any]
+    exit_reason: str = 'SIGNAL'  # SIGNAL, STOP_LOSS, TAKE_PROFIT, TRAILING_STOP, END_OF_BACKTEST
+
+@dataclass
+class BacktestResults:
+    \"\"\"Complete backtest results structure - stored in database\"\"\"
+    strategy_id: str
+    strategy_name: str
+    period: str
+    start_date: str
+    end_date: str
+
+    # Performance metrics (all required)
+    total_return_pct: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+    win_rate_pct: float
+    profit_factor: float
+
+    # Trade statistics
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    avg_trade_pnl: float
+    best_trade_pnl: float
+    worst_trade_pnl: float
+    avg_trade_duration_hours: float
+
+    # Trade data (stored as JSON in database)
+    trades: List[Dict[str, Any]]
+
+    # Equity curve data (stored as JSON in database)
+    equity_curve: List[Dict[str, float]]
+
+    # Period performance breakdown (stored as JSON in database)
+    daily_returns: List[Dict[str, Any]]
+    weekly_returns: List[Dict[str, Any]]
+    monthly_returns: List[Dict[str, Any]]
+    yearly_returns: List[Dict[str, Any]]
+
+    # OHLC data for candlestick charts (stored as JSON)
+    ohlc_data: List[Dict[str, Any]]
+
+    # Metadata
+    completed_at: str
+    duration_seconds: float
+
+    # Risk management statistics (optional, has default)
+    risk_stats: Dict[str, Any] = None
 ```
 
 ## CRITICAL REQUIREMENTS
-1. Must import: `from strategy import TradingStrategy` and `from risk_manager import RiskManager`
-2. Must use: `from data_provider import DataProvider` for fetching historical data
-3. Must write results to `backtest_results.json` with these fields:
-   - total_return_pct
-   - win_rate_pct
-   - sharpe_ratio
-   - max_drawdown_pct
-   - total_trades
-   - winning_trades
-   - losing_trades
-4. Must have a `main()` function that runs the backtest
-5. Strategy type is {strategy_type} - adjust backtest parameters accordingly
+
+1. **Imports**: Must import `from strategy import TradingStrategy`, `from risk_manager import RiskManager`, and `from data_provider import DataProvider`
+
+2. **Main Function**: Must have a `main()` function that runs the backtest
+
+3. **Results File**: Must write results to `backtest_results.json` with ALL fields from BacktestResults dataclass
+
+4. **Complete Field Requirements**: The backtest_results.json MUST include ALL of these fields:
+
+   **Basic Info**:
+   - strategy_id, strategy_name, period, start_date, end_date
+
+   **Performance Metrics** (all required):
+   - total_return_pct, max_drawdown_pct, sharpe_ratio, win_rate_pct, profit_factor
+
+   **Trade Statistics**:
+   - total_trades, winning_trades, losing_trades
+   - avg_trade_pnl, best_trade_pnl, worst_trade_pnl, avg_trade_duration_hours
+
+   **Trade Data** (trades):
+   - List of trade dicts, each with: entry_date, exit_date, symbol, action, entry_price, exit_price, quantity, pnl, pnl_pct, duration_hours, indicators, exit_reason
+
+   **Equity Curve** (equity_curve):
+   - List of {{"date": "YYYY-MM-DD", "value": float}} dicts tracking portfolio value over time
+
+   **Period Returns**:
+   - daily_returns: List of {{"period": "YYYY-MM-DD", "value": float, "return_pct": float}}
+   - weekly_returns: List of {{"period": "YYYY-Www", "value": float, "return_pct": float}}
+   - monthly_returns: List of {{"period": "YYYY-MM", "value": float, "return_pct": float}}
+   - yearly_returns: List of {{"period": "YYYY", "value": float, "return_pct": float}}
+
+   **OHLC Data** (ohlc_data):
+   - List of {{"date": "YYYY-MM-DD", "open": float, "high": float, "low": float, "close": float, "volume": int}}
+
+   **Metadata**:
+   - completed_at: ISO 8601 timestamp string
+   - duration_seconds: float
+
+   **Risk Stats** (risk_stats):
+   - Dict with exit_reason_counts mapping (e.g., {{"SIGNAL": 50, "STOP_LOSS": 10, "TAKE_PROFIT": 5}})
+   - Include any other risk management metrics
+
+5. **Example JSON Output Structure**:
+```json
+{{
+    "strategy_id": "from config",
+    "strategy_name": "{strategy_name}",
+    "period": "2y",
+    "start_date": "2022-01-01",
+    "end_date": "2024-01-01",
+    "total_return_pct": 15.0,
+    "max_drawdown_pct": -8.5,
+    "sharpe_ratio": 1.5,
+    "win_rate_pct": 55.0,
+    "profit_factor": 1.8,
+    "total_trades": 150,
+    "winning_trades": 82,
+    "losing_trades": 68,
+    "avg_trade_pnl": 250.0,
+    "best_trade_pnl": 2000.0,
+    "worst_trade_pnl": -800.0,
+    "avg_trade_duration_hours": 120.0,
+    "trades": [
+        {{
+            "entry_date": "2022-01-15T10:30:00",
+            "exit_date": "2022-01-20T15:45:00",
+            "symbol": "AAPL",
+            "action": "BUY",
+            "entry_price": 150.0,
+            "exit_price": 155.0,
+            "quantity": 100,
+            "pnl": 500.0,
+            "pnl_pct": 3.33,
+            "duration_hours": 125.25,
+            "indicators": {{"rsi": 45.2, "macd": 0.5}},
+            "exit_reason": "SIGNAL"
+        }}
+    ],
+    "equity_curve": [
+        {{"date": "2022-01-01", "value": 100000.0}},
+        {{"date": "2022-01-02", "value": 100500.0}}
+    ],
+    "daily_returns": [
+        {{"period": "2022-01-01", "value": 100000.0, "return_pct": 0.0}},
+        {{"period": "2022-01-02", "value": 100500.0, "return_pct": 0.5}}
+    ],
+    "weekly_returns": [
+        {{"period": "2022-W01", "value": 101000.0, "return_pct": 1.0}}
+    ],
+    "monthly_returns": [
+        {{"period": "2022-01", "value": 103500.0, "return_pct": 3.5}}
+    ],
+    "yearly_returns": [
+        {{"period": "2022", "value": 107000.0, "return_pct": 7.0}}
+    ],
+    "ohlc_data": [
+        {{"date": "2022-01-01", "open": 150.0, "high": 155.0, "low": 149.0, "close": 154.0, "volume": 1000000}}
+    ],
+    "completed_at": "2024-01-01T12:00:00Z",
+    "duration_seconds": 45.2,
+    "risk_stats": {{
+        "exit_reason_counts": {{"SIGNAL": 82, "STOP_LOSS": 50, "TAKE_PROFIT": 18}}
+    }}
+}}
+```
 
 ## Strategy Type Considerations
+- Strategy type is {strategy_type}
 - Momentum: Longer holding periods, trend-following metrics
 - Mean Reversion: Shorter holding periods, reversal metrics
 - Adjust performance expectations based on strategy type
