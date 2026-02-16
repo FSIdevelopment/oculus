@@ -1,6 +1,7 @@
 """
 FastAPI application entry point for Oculus Strategy Platform.
 """
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -9,6 +10,9 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.logging_config import setup_logging
 from app.routers import auth, users, admin, chat, balance, products, ratings, strategies, licenses, subscriptions, payments, builds, connect
+
+# Get logger for request logging
+logger = logging.getLogger(__name__)
 
 # Configure logging
 setup_logging()
@@ -25,10 +29,14 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Parse CORS origins from config
-cors_origins = (
-    ["*"] if settings.CORS_ORIGINS == "*"
-    else [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
-)
+# In development mode, allow all origins for easier local development
+if settings.ENVIRONMENT == "development" or settings.DEBUG:
+    cors_origins = ["*"]
+else:
+    cors_origins = (
+        ["*"] if settings.CORS_ORIGINS == "*"
+        else [origin.strip() for origin in settings.CORS_ORIGINS.split(",")]
+    )
 
 # Configure CORS
 app.add_middleware(
@@ -38,6 +46,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all incoming requests with method, path, origin, and response status."""
+    origin = request.headers.get("origin", "no-origin")
+    logger.info(f"Request: {request.method} {request.url.path} | Origin: {origin}")
+
+    response = await call_next(request)
+
+    logger.info(f"Response: {request.method} {request.url.path} | Status: {response.status_code}")
+    return response
 
 # Security headers middleware
 @app.middleware("http")
