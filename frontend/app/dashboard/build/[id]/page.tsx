@@ -19,6 +19,7 @@ interface BuildStatus {
   phase: string | null
   tokens_consumed: number
   iteration_count: number
+  max_iterations?: number
   started_at: string
   completed_at: string | null
   strategy_type?: string
@@ -403,7 +404,7 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-text">Iteration #{iteration.iteration_number}</h3>
+          <h3 className="text-lg font-semibold text-text">Iteration #{iteration.iteration_number + 1}</h3>
           {getStatusBadge(iteration.status)}
         </div>
         <div className="flex items-center gap-2">
@@ -1423,6 +1424,19 @@ export default function BuildDetailPage() {
           )}
         </div>
 
+        {/* Est. Time Left - only show when build is running */}
+        {(build.status === 'running' || build.status === 'in_progress') && build.max_iterations && (
+          <div className="bg-surface border border-border rounded-lg p-4">
+            <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Est. Time Left</p>
+            <div className="flex items-center gap-2">
+              <Clock size={18} className="text-primary" />
+              <p className="text-lg font-semibold text-text">
+                ~{Math.max(0, ((build.max_iterations ?? 0) - (build.iteration_count ?? 0)) * 4)} min
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Total Time — fixed elapsed time, stops counting on terminal states */}
         <div className="bg-surface border border-border rounded-lg p-4">
           <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Total Time</p>
@@ -1694,7 +1708,7 @@ export default function BuildDetailPage() {
                             <div className="flex items-center gap-3 my-6">
                               <div className="flex-1 h-px bg-border"></div>
                               <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-                                Iteration #{currentIteration}
+                                Iteration #{(currentIteration ?? 0) + 1}
                               </span>
                               <div className="flex-1 h-px bg-border"></div>
                             </div>
@@ -1702,14 +1716,16 @@ export default function BuildDetailPage() {
 
                           {/* Progress messages */}
                           {isProgress && (() => {
-                            const progressMsg = msg as { role: 'progress', message: string, iteration?: number, timestamp: string, uuid: string }
+                            const messageText = isChatMessage
+                              ? (msg as any).content
+                              : (msg as any).message
                             return (
                               <div className="flex gap-3">
                                 <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500/20 text-blue-600 dark:text-blue-400">
                                   ⚙️
                                 </div>
                                 <div className="flex-1 bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
-                                  <p className="text-xs text-blue-600 dark:text-blue-400">{progressMsg.message}</p>
+                                  <p className="text-xs text-blue-600 dark:text-blue-400">{messageText}</p>
                                 </div>
                               </div>
                             )
