@@ -100,7 +100,7 @@ interface ChatMessage {
   created_at: string
 }
 
-const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Writing Algorithm', 'Complete']
+const PHASES = ['Queued', 'Designing', 'Training', 'Optimizing', 'Writing Algorithm', 'Testing Algorithm', 'Complete']
 
 // --- Parsed prompt section types and helpers ---
 
@@ -965,8 +965,9 @@ export default function BuildDetailPage() {
       'training': 2,
       'optimizing': 3,
       'building_docker': 4,
-      'complete': 5,
-      'completed': 5,       // NEW: backward compat alias
+      'testing_algorithm': 5,
+      'complete': 6,
+      'completed': 6,       // NEW: backward compat alias
     }
     return phaseMap[build.phase] || 0
   }
@@ -1049,6 +1050,7 @@ export default function BuildDetailPage() {
       'training': 'Training ML models...',
       'optimizing': 'Optimizing parameters...',
       'building_docker': 'Writing algorithm...',
+      'testing_algorithm': 'Testing algorithm container...',
       'complete': 'Build complete',
       'completed': 'Build complete',                                     // NEW alias
     }
@@ -1065,6 +1067,7 @@ export default function BuildDetailPage() {
       'training': '🤖',
       'optimizing': '⚙️',
       'building_docker': '✍️',
+      'testing_algorithm': '🧪',
       'complete': '✅',
       'completed': '✅',          // NEW alias
     }
@@ -1081,6 +1084,7 @@ export default function BuildDetailPage() {
       'training': 'TRAINING',
       'optimizing': 'OPTIMIZING',
       'building_docker': 'WRITING ALGORITHM',
+      'testing_algorithm': 'TESTING ALGORITHM',
       'complete': 'COMPLETE',
       'completed': 'COMPLETE',
     }

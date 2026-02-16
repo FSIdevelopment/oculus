@@ -65,6 +65,8 @@ export default function BuildListPage() {
         return <Zap className="text-yellow-400" size={16} />
       case 'building_docker':
         return <Zap className="text-green-400" size={16} />
+      case 'testing_algorithm':
+        return <Zap className="text-cyan-400" size={16} />
       case 'complete':
         return <CheckCircle className="text-green-500" size={16} />
       case 'completed':
@@ -86,6 +88,7 @@ export default function BuildListPage() {
       case 'training':
       case 'optimizing':
       case 'building_docker':
+      case 'testing_algorithm':
         return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
       case 'complete':
       case 'completed':
@@ -112,6 +115,7 @@ export default function BuildListPage() {
   const getPhaseDisplayName = (phase: string | null) => {
     const phaseDisplayNames: { [key: string]: string } = {
       'building_docker': 'writing algorithm',
+      'testing_algorithm': 'testing algorithm',
     }
     return phaseDisplayNames[phase || ''] || phase?.replace(/_/g, ' ') || ''
   }
