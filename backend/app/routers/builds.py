@@ -1,5 +1,7 @@
 """Router for strategy build orchestration endpoints."""
 import os
+import sys
+import shutil
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +103,264 @@ class BuildTriggerRequest:
     strategy_id: str
     description: str = ""
     target_return: float = 10.0
+
+
+async def _build_strategy_container(
+    build_id: str,
+    build: StrategyBuild,
+    bg_db: AsyncSession,
+    orchestrator: BuildOrchestrator,
+    strategy_name: str,
+    strategy_symbols: list,
+    design: dict,
+    training_results: dict,
+    strategy_type: str,
+    iteration: int,
+    max_iterations: int,
+    iteration_logs: list,
+) -> str:
+    """
+    Build the strategy container files: copy static templates,
+    generate custom files via LLM, verify with backtest, generate README.
+
+    Returns the strategy_output_dir path.
+    """
+    # Step 1: Create output directory
+    strategy_output_dir = str(
+        Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id
+    )
+    output_path = Path(strategy_output_dir)
+    await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
+
+    # Step 2: Copy static template files
+    await _publish_progress(build_id, {
+        "phase": "building_docker",
+        "iteration": iteration,
+        "message": "Copying template files...",
+        "tokens_consumed": build.tokens_consumed,
+        "iteration_count": build.iteration_count,
+        "max_iterations": max_iterations,
+    })
+
+    template_dir = Path(__file__).resolve().parent.parent.parent / "templates" / "strategy_container"
+    for static_file in ["main.py", "Dockerfile", "data_provider.py", "requirements.txt"]:
+        src = template_dir / static_file
+        dst = output_path / static_file
+        await asyncio.to_thread(shutil.copy2, str(src), str(dst))
+
+    # Step 3: Generate custom files via LLM
+    # Generate config.json
+    await _publish_progress(build_id, {
+        "phase": "building_docker",
+        "iteration": iteration,
+        "message": "Generating strategy configuration...",
+        "tokens_consumed": build.tokens_consumed,
+        "iteration_count": build.iteration_count,
+        "max_iterations": max_iterations,
+    })
+    config_json = await orchestrator.generate_strategy_config(
+        strategy_name=strategy_name,
+        symbols=strategy_symbols,
+        design=design,
+        training_results=training_results,
+        strategy_type=strategy_type or "",
+    )
+    (output_path / "config.json").write_text(config_json)
+
+    # Parse config for downstream use
+    try:
+        config = json.loads(config_json)
+    except json.JSONDecodeError:
+        config = {}
+
+    # Generate strategy.py
+    await _publish_progress(build_id, {
+        "phase": "building_docker",
+        "iteration": iteration,
+        "message": "Generating strategy code...",
+        "tokens_consumed": build.tokens_consumed,
+        "iteration_count": build.iteration_count,
+        "max_iterations": max_iterations,
+    })
+    strategy_code = await orchestrator.generate_strategy_code(
+        strategy_name=strategy_name,
+        symbols=strategy_symbols,
+        design=design,
+        training_results=training_results,
+        strategy_type=strategy_type or "",
+        config=config,
+    )
+    (output_path / "strategy.py").write_text(strategy_code)
+
+    # Generate risk_manager.py
+    await _publish_progress(build_id, {
+        "phase": "building_docker",
+        "iteration": iteration,
+        "message": "Generating risk manager...",
+        "tokens_consumed": build.tokens_consumed,
+        "iteration_count": build.iteration_count,
+        "max_iterations": max_iterations,
+    })
+    risk_manager_code = await orchestrator.generate_risk_manager_code(
+        strategy_name=strategy_name,
+        design=design,
+        training_results=training_results,
+        strategy_type=strategy_type or "",
+        config=config,
+    )
+    (output_path / "risk_manager.py").write_text(risk_manager_code)
+
+    # Generate backtest.py
+    await _publish_progress(build_id, {
+        "phase": "building_docker",
+        "iteration": iteration,
+        "message": "Generating backtest code...",
+        "tokens_consumed": build.tokens_consumed,
+        "iteration_count": build.iteration_count,
+        "max_iterations": max_iterations,
+    })
+    backtest_code = await orchestrator.generate_backtest_code(
+        strategy_name=strategy_name,
+        symbols=strategy_symbols,
+        design=design,
+        training_results=training_results,
+        strategy_type=strategy_type or "",
+        config=config,
+    )
+    (output_path / "backtest.py").write_text(backtest_code)
+
+    # Step 4: Verification backtest loop (max 3 retries)
+    max_verification_retries = 3
+    verification_passed = False
+
+    for attempt in range(1, max_verification_retries + 1):
+        await _publish_progress(build_id, {
+            "phase": "building_docker",
+            "iteration": iteration,
+            "message": f"Running verification backtest (attempt {attempt}/{max_verification_retries})...",
+            "tokens_consumed": build.tokens_consumed,
+            "iteration_count": build.iteration_count,
+            "max_iterations": max_iterations,
+        })
+
+        # Run backtest.py as subprocess
+        env = os.environ.copy()
+        env["BACKTEST_MODE"] = "true"
+        env["BACKTEST_PERIOD"] = "6M"
+        env["STRATEGY_ID"] = build_id
+        env["LOG_LEVEL"] = "WARNING"
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "backtest.py",
+            cwd=strategy_output_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            iteration_logs.append(f"Verification backtest timed out (attempt {attempt})")
+            if attempt < max_verification_retries:
+                # Regenerate strategy.py with timeout feedback
+                strategy_code = await orchestrator.generate_strategy_code(
+                    strategy_name=strategy_name,
+                    symbols=strategy_symbols,
+                    design=design,
+                    training_results=training_results,
+                    strategy_type=strategy_type or "",
+                    config=config,
+                )
+                (output_path / "strategy.py").write_text(strategy_code)
+            continue
+
+        if process.returncode != 0:
+            error_output = stderr.decode() if stderr else "Unknown error"
+            iteration_logs.append(f"Verification backtest failed (attempt {attempt}): {error_output[:500]}")
+            if attempt < max_verification_retries:
+                strategy_code = await orchestrator.generate_strategy_code(
+                    strategy_name=strategy_name,
+                    symbols=strategy_symbols,
+                    design=design,
+                    training_results=training_results,
+                    strategy_type=strategy_type or "",
+                    config=config,
+                )
+                (output_path / "strategy.py").write_text(strategy_code)
+            continue
+
+        # Read backtest results
+        results_file = output_path / "backtest_results.json"
+        if results_file.exists():
+            try:
+                generated_results = json.loads(results_file.read_text())
+            except json.JSONDecodeError:
+                iteration_logs.append(f"Verification: invalid JSON in backtest_results.json (attempt {attempt})")
+                continue
+
+            # Compare with training results
+            comparison = orchestrator.compare_backtest_results(generated_results, training_results)
+
+            if comparison["passed"]:
+                verification_passed = True
+                iteration_logs.append(f"Verification passed (attempt {attempt}): {comparison['details']}")
+                break
+            else:
+                iteration_logs.append(f"Verification failed (attempt {attempt}): {comparison['details']}")
+                if attempt < max_verification_retries:
+                    # Regenerate strategy with feedback
+                    strategy_code = await orchestrator.generate_strategy_code(
+                        strategy_name=strategy_name,
+                        symbols=strategy_symbols,
+                        design=design,
+                        training_results=training_results,
+                        strategy_type=strategy_type or "",
+                        config=config,
+                    )
+                    (output_path / "strategy.py").write_text(strategy_code)
+        else:
+            iteration_logs.append(f"Verification: no backtest_results.json produced (attempt {attempt})")
+            if attempt < max_verification_retries:
+                backtest_code = await orchestrator.generate_backtest_code(
+                    strategy_name=strategy_name,
+                    symbols=strategy_symbols,
+                    design=design,
+                    training_results=training_results,
+                    strategy_type=strategy_type or "",
+                    config=config,
+                )
+                (output_path / "backtest.py").write_text(backtest_code)
+
+    if not verification_passed:
+        iteration_logs.append("Verification: all attempts failed, proceeding with best available code")
+
+    # Step 5: Generate README
+    try:
+        await _publish_progress(build_id, {
+            "phase": "building_docker",
+            "iteration": iteration,
+            "message": "Generating README...",
+            "tokens_consumed": build.tokens_consumed,
+            "iteration_count": build.iteration_count,
+            "max_iterations": max_iterations,
+        })
+        readme = await orchestrator.generate_strategy_readme(
+            strategy_name=strategy_name,
+            symbols=strategy_symbols,
+            design=design,
+            backtest_results=training_results.get("backtest_results", {}),
+            model_metrics=training_results.get("model_metrics", {}),
+            config=config,
+            strategy_type=strategy_type or "",
+        )
+        (output_path / "README.md").write_text(readme)
+    except Exception as e:
+        logger.warning("README generation failed: %s", e)
+
+    return strategy_output_dir
 
 
 async def _run_build_loop(
@@ -439,88 +699,72 @@ async def _run_build_loop(
                 # Check if target metrics are met
                 total_return = (training_results.get('backtest_results') or {}).get('total_return', 0)
                 if total_return >= target_return:
-                    # Build Docker image before marking complete
+                    # --- NEW: Template-based strategy container build ---
                     build.phase = "building_docker"
                     await bg_db.commit()
                     await _publish_progress(build_id, {
                         "phase": "building_docker",
                         "iteration": iteration,
-                        "message": "Building Docker image...",
+                        "message": "Writing algorithm files...",
                         "tokens_consumed": build.tokens_consumed,
                         "iteration_count": build.iteration_count,
                         "max_iterations": max_iterations,
                     })
 
-                    # Re-fetch strategy for Docker build
+                    strategy_output_dir = await _build_strategy_container(
+                        build_id=build_id,
+                        build=build,
+                        bg_db=bg_db,
+                        orchestrator=orchestrator,
+                        strategy_name=strategy_name,
+                        strategy_symbols=strategy_symbols,
+                        design=design,
+                        training_results=training_results,
+                        strategy_type=strategy_type or "",
+                        iteration=iteration,
+                        max_iterations=max_iterations,
+                        iteration_logs=iteration_logs,
+                    )
+
+                    # Transition to testing phase (58.4 will implement the testing logic)
+                    build.phase = "testing_algorithm"
+                    await bg_db.commit()
+                    await _publish_progress(build_id, {
+                        "phase": "testing_algorithm",
+                        "iteration": iteration,
+                        "message": "Testing algorithm container...",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
+                    })
+
+                    # --- Docker build, test, and push ---
                     strat_result = await bg_db.execute(
                         select(Strategy).where(Strategy.uuid == strategy_id)
                     )
                     strategy_obj = strat_result.scalar_one_or_none()
-
-                    # --- Persist strategy files from worker to disk ---
-                    strategy_output_dir = str(
-                        Path(__file__).resolve().parent.parent.parent
-                        / "strategy_outputs"
-                        / build_id
-                    )
-                    strategy_files = training_results.get("strategy_files", {})
-                    try:
-                        output_path = Path(strategy_output_dir)
-                        await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
-                        for filename, content in strategy_files.items():
-                            file_path = output_path / filename
-                            await asyncio.to_thread(file_path.write_text, content)
-                        iteration_logs.append(
-                            f"Iteration {iteration}: Persisted {len(strategy_files)} strategy file(s) to {strategy_output_dir}"
-                        )
-                    except Exception as e:
-                        logger.warning("Failed to persist strategy files for build %s: %s", build_id, e)
-                        iteration_logs.append(f"Iteration {iteration}: Strategy file persistence failed: {e}")
-
-                    # --- Persist backtest_results.json ---
-                    try:
-                        backtest_results = training_results.get("backtest_results", {})
-                        backtest_json_path = Path(strategy_output_dir) / "backtest_results.json"
-                        await asyncio.to_thread(
-                            backtest_json_path.write_text,
-                            json.dumps(backtest_results, indent=2)
-                        )
-                        iteration_logs.append("Persisted backtest_results.json")
-                    except Exception as e:
-                        logger.warning("Failed to persist backtest_results.json for build %s: %s", build_id, e)
-
-                    # --- Generate README via Claude ---
-                    try:
-                        readme_content = await orchestrator.generate_strategy_readme(
-                            strategy_name=strategy_name,
-                            symbols=strategy_symbols,
-                            design=design,
-                            backtest_results=training_results.get("backtest_results", {}),
-                            model_metrics=training_results.get("model_metrics", {}),
-                            config=design,
-                            strategy_type=strategy_type or "",
-                        )
-                        # Write README to strategy output directory
-                        readme_path = Path(strategy_output_dir) / "README.md"
-                        await asyncio.to_thread(readme_path.write_text, readme_content)
-                        iteration_logs.append(f"Iteration {iteration}: README generated ({len(readme_content)} chars)")
-                    except Exception as e:
-                        logger.warning("README generation failed for build %s: %s", build_id, e)
-                        iteration_logs.append(f"Iteration {iteration}: README generation failed: {e}")
-
-                    # --- Docker build ---
                     docker_builder = DockerBuilder(bg_db)
-                    success = await docker_builder.build_and_push(
-                        strategy_obj, build, strategy_output_dir
-                    )
 
-                    if success:
-                        iteration_logs.append(f"Iteration {iteration}: Docker image built and pushed")
-                        build.phase = "complete"
+                    # Build the Docker image
+                    image_tag = await docker_builder.build_image(strategy_obj, build, strategy_output_dir)
+
+                    if image_tag:
+                        # Test the container
+                        test_result = await docker_builder.test_container(image_tag, strategy_output_dir)
+
+                        if test_result["passed"]:
+                            # Push to Docker Hub
+                            push_success = await docker_builder.push_image(image_tag, build)
+                            if push_success:
+                                iteration_logs.append(f"Iteration {iteration}: Docker image built, tested, and pushed")
+                            else:
+                                iteration_logs.append(f"Iteration {iteration}: Docker push failed")
+                        else:
+                            iteration_logs.append(f"Iteration {iteration}: Container test failed: {test_result.get('error', 'Unknown')}")
                     else:
                         iteration_logs.append(f"Iteration {iteration}: Docker build failed")
-                        build.phase = "complete"
 
+                    build.phase = "complete"
                     build.status = "complete"
                     iteration_logs.append(
                         f"Iteration {iteration}: Target achieved ({total_return}% >= {target_return}%)"
@@ -597,75 +841,68 @@ async def _run_build_loop(
                     design = best_iter.llm_design or design
                     training_results = best_iter.backtest_results or training_results
 
-                    # --- Persist strategy files, generate README, build Docker ---
-                    # (Same logic as the target-met path at lines 442-504)
+                    # --- NEW: Template-based strategy container build ---
                     build.phase = "building_docker"
                     await bg_db.commit()
                     await _publish_progress(build_id, {
                         "phase": "building_docker",
                         "iteration": best_iter_num,
-                        "message": "Building Docker image for best iteration...",
+                        "message": "Writing algorithm files for best iteration...",
                         "tokens_consumed": build.tokens_consumed,
                         "iteration_count": build.iteration_count,
                         "max_iterations": max_iterations,
                     })
 
-                    # Persist strategy files from best iteration's training result
-                    strategy_output_dir = str(
-                        Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id
+                    strategy_output_dir = await _build_strategy_container(
+                        build_id=build_id,
+                        build=build,
+                        bg_db=bg_db,
+                        orchestrator=orchestrator,
+                        strategy_name=strategy_name,
+                        strategy_symbols=strategy_symbols,
+                        design=design,
+                        training_results=training_results,
+                        strategy_type=strategy_type or "",
+                        iteration=best_iter_num,
+                        max_iterations=max_iterations,
+                        iteration_logs=iteration_logs,
                     )
-                    # Get strategy files: prefer from the best iteration's stored data
-                    strategy_files = (best_iter.training_config or {}).get("strategy_files", {})
-                    if not strategy_files:
-                        strategy_files = (training_results or {}).get("strategy_files", {})
-                    try:
-                        output_path = Path(strategy_output_dir)
-                        await asyncio.to_thread(output_path.mkdir, parents=True, exist_ok=True)
-                        for filename, content in strategy_files.items():
-                            file_path = output_path / filename
-                            await asyncio.to_thread(file_path.write_text, content)
-                        iteration_logs.append(f"Persisted {len(strategy_files)} strategy file(s)")
-                    except Exception as e:
-                        logger.warning("Failed to persist strategy files: %s", e)
 
-                    # --- Persist backtest_results.json ---
-                    try:
-                        backtest_results = best_iter.backtest_results or {}
-                        backtest_json_path = Path(strategy_output_dir) / "backtest_results.json"
-                        await asyncio.to_thread(
-                            backtest_json_path.write_text,
-                            json.dumps(backtest_results, indent=2)
-                        )
-                        iteration_logs.append("Persisted backtest_results.json")
-                    except Exception as e:
-                        logger.warning("Failed to persist backtest_results.json: %s", e)
+                    # Transition to testing phase
+                    build.phase = "testing_algorithm"
+                    await bg_db.commit()
+                    await _publish_progress(build_id, {
+                        "phase": "testing_algorithm",
+                        "iteration": best_iter_num,
+                        "message": "Testing algorithm container for best iteration...",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
+                    })
 
-                    # Generate README
-                    try:
-                        readme_content = await orchestrator.generate_strategy_readme(
-                            strategy_name=strategy_name,
-                            symbols=strategy_symbols,
-                            design=design,
-                            backtest_results=best_iter.backtest_results or {},
-                            model_metrics=(best_iter.best_model or {}),
-                            config=design,
-                            strategy_type=strategy_type or "",
-                        )
-                        readme_path = Path(strategy_output_dir) / "README.md"
-                        await asyncio.to_thread(readme_path.write_text, readme_content)
-                    except Exception as e:
-                        logger.warning("README generation failed: %s", e)
-
-                    # Docker build
+                    # --- Docker build, test, and push ---
                     strat_result = await bg_db.execute(
                         select(Strategy).where(Strategy.uuid == strategy_id)
                     )
                     strategy_obj = strat_result.scalar_one_or_none()
                     docker_builder = DockerBuilder(bg_db)
-                    success = await docker_builder.build_and_push(strategy_obj, build, strategy_output_dir)
 
-                    if success:
-                        iteration_logs.append("Docker image built and pushed for best iteration")
+                    # Build the Docker image
+                    image_tag = await docker_builder.build_image(strategy_obj, build, strategy_output_dir)
+
+                    if image_tag:
+                        # Test the container
+                        test_result = await docker_builder.test_container(image_tag, strategy_output_dir)
+
+                        if test_result["passed"]:
+                            # Push to Docker Hub
+                            push_success = await docker_builder.push_image(image_tag, build)
+                            if push_success:
+                                iteration_logs.append("Docker image built, tested, and pushed for best iteration")
+                            else:
+                                iteration_logs.append("Docker push failed for best iteration")
+                        else:
+                            iteration_logs.append(f"Container test failed for best iteration: {test_result.get('error', 'Unknown')}")
                     else:
                         iteration_logs.append("Docker build failed for best iteration")
 

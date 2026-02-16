@@ -3,8 +3,10 @@
 Data Provider for Strategy Backtests
 
 Provides historical market data from multiple sources:
-1. AlphaVantage (primary) - For US stocks and forex
-2. Yahoo Finance (fallback) - Free backup data source
+1. Polygon.io (primary) - Professional-grade market data
+2. AlphaVantage - For US stocks and forex
+3. Alpaca - Commission-free trading platform data
+4. Yahoo Finance (fallback) - Free backup data source
 
 This module is ISOLATED and does NOT execute any real trades.
 It only fetches historical data for backtesting purposes.
@@ -26,6 +28,9 @@ logger = logging.getLogger('DataProvider')
 # API Keys and Configuration
 ALPHAVANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY', 'PHCRS4IARZHCWH2P')
 ALPHAVANTAGE_BASE_URL = "https://www.alphavantage.co/query"
+POLYGON_API_KEY = os.getenv('POLYGON_API_KEY', '')
+ALPACA_API_KEY = os.getenv('ALPACA_API_KEY', '')
+ALPACA_API_SECRET = os.getenv('ALPACA_API_SECRET', '')
 
 
 class DataProvider:
@@ -62,13 +67,35 @@ class DataProvider:
             logger.debug(f"Using cached data for {symbol}")
             return self.cache[cache_key]
 
-        # Try AlphaVantage first
-        df = await self._fetch_alphavantage(symbol, interval)
+        # Try providers in order: Polygon -> AlphaVantage -> Alpaca -> Yahoo
+        df = None
 
+        # 1. Try Polygon first (if API key is configured)
+        if POLYGON_API_KEY:
+            df = await self._fetch_polygon(symbol, days, interval)
+            if df is not None and not df.empty:
+                logger.info(f"Using Polygon data for {symbol}")
+
+        # 2. Try AlphaVantage (if Polygon failed and API key is configured)
+        if (df is None or df.empty) and ALPHAVANTAGE_API_KEY:
+            logger.warning(f"Polygon failed for {symbol}, trying AlphaVantage")
+            df = await self._fetch_alphavantage(symbol, interval)
+            if df is not None and not df.empty:
+                logger.info(f"Using AlphaVantage data for {symbol}")
+
+        # 3. Try Alpaca (if previous providers failed and API key is configured)
+        if (df is None or df.empty) and ALPACA_API_KEY and ALPACA_API_SECRET:
+            logger.warning(f"AlphaVantage failed for {symbol}, trying Alpaca")
+            df = await self._fetch_alpaca(symbol, days, interval)
+            if df is not None and not df.empty:
+                logger.info(f"Using Alpaca data for {symbol}")
+
+        # 4. Fallback to Yahoo Finance (always available, no API key needed)
         if df is None or df.empty:
-            # Fallback to Yahoo Finance
-            logger.warning(f"AlphaVantage failed for {symbol}, trying Yahoo Finance")
+            logger.warning(f"All paid providers failed for {symbol}, trying Yahoo Finance")
             df = await self._fetch_yahoo(symbol, days)
+            if df is not None and not df.empty:
+                logger.info(f"Using Yahoo Finance data for {symbol}")
 
         if df is not None and not df.empty:
             # Filter to requested period
@@ -202,6 +229,209 @@ class DataProvider:
             df['Close'] = df['Adj Close']
 
         return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+    async def _fetch_polygon(
+        self,
+        symbol: str,
+        days: int = 365,
+        interval: str = 'daily'
+    ) -> Optional[pd.DataFrame]:
+        """Fetch data from Polygon.io API"""
+        if not POLYGON_API_KEY:
+            logger.debug("Polygon API key not configured")
+            return None
+
+        try:
+            from polygon import RESTClient
+            from datetime import date
+
+            # Map interval to Polygon timespan
+            timespan_map = {
+                'daily': 'day',
+                '1D': 'day',
+                'weekly': 'week',
+                '1W': 'week',
+                'monthly': 'month',
+                '1M': 'month',
+                '1min': 'minute',
+                '5min': 'minute',
+                '15min': 'minute',
+                '30min': 'minute',
+                '60min': 'hour',
+                '1m': 'minute',
+                '5m': 'minute',
+                '15m': 'minute',
+                '30m': 'minute',
+                '1h': 'hour',
+                '4h': 'hour'
+            }
+
+            # Map interval to multiplier
+            multiplier_map = {
+                '1min': 1, '5min': 5, '15min': 15, '30min': 30, '60min': 60,
+                '1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 1, '4h': 4,
+                'daily': 1, '1D': 1, 'weekly': 1, '1W': 1, 'monthly': 1, '1M': 1
+            }
+
+            timespan = timespan_map.get(interval, 'day')
+            multiplier = multiplier_map.get(interval, 1)
+
+            # Calculate date range
+            end_date = date.today()
+            start_date = end_date - timedelta(days=days + 30)  # Extra buffer
+
+            # Initialize Polygon client
+            client = RESTClient(api_key=POLYGON_API_KEY)
+
+            # Fetch aggregates (bars)
+            aggs = []
+            for agg in client.get_aggs(
+                ticker=symbol,
+                multiplier=multiplier,
+                timespan=timespan,
+                from_=start_date.isoformat(),
+                to=end_date.isoformat(),
+                limit=50000
+            ):
+                aggs.append(agg)
+
+            if not aggs:
+                logger.warning(f"No Polygon data for {symbol}")
+                return None
+
+            # Convert to DataFrame
+            data = []
+            for agg in aggs:
+                data.append({
+                    'timestamp': pd.Timestamp(agg.timestamp, unit='ms', tz='UTC'),
+                    'Open': agg.open,
+                    'High': agg.high,
+                    'Low': agg.low,
+                    'Close': agg.close,
+                    'Volume': agg.volume
+                })
+
+            df = pd.DataFrame(data)
+            df.set_index('timestamp', inplace=True)
+            df = df.sort_index()
+
+            logger.info(f"Fetched {len(df)} bars from Polygon for {symbol}")
+            return df
+
+        except ImportError:
+            logger.error("polygon-api-client not installed. Run: pip install polygon-api-client")
+            return None
+        except Exception as e:
+            logger.error(f"Polygon request failed for {symbol}: {e}")
+            return None
+
+    async def _fetch_alpaca(
+        self,
+        symbol: str,
+        days: int = 365,
+        interval: str = 'daily'
+    ) -> Optional[pd.DataFrame]:
+        """Fetch data from Alpaca API"""
+        if not ALPACA_API_KEY or not ALPACA_API_SECRET:
+            logger.debug("Alpaca API credentials not configured")
+            return None
+
+        try:
+            from alpaca.data import StockHistoricalDataClient
+            from alpaca.data.requests import StockBarsRequest
+            from alpaca.data.timeframe import TimeFrame
+
+            # Map interval to Alpaca TimeFrame
+            timeframe_map = {
+                '1min': TimeFrame.Minute,
+                '5min': TimeFrame(5, 'Min'),
+                '15min': TimeFrame(15, 'Min'),
+                '30min': TimeFrame(30, 'Min'),
+                '60min': TimeFrame.Hour,
+                '1m': TimeFrame.Minute,
+                '5m': TimeFrame(5, 'Min'),
+                '15m': TimeFrame(15, 'Min'),
+                '30m': TimeFrame(30, 'Min'),
+                '1h': TimeFrame.Hour,
+                '4h': TimeFrame(4, 'Hour'),
+                'daily': TimeFrame.Day,
+                '1D': TimeFrame.Day,
+                'weekly': TimeFrame.Week,
+                '1W': TimeFrame.Week,
+                'monthly': TimeFrame.Month,
+                '1M': TimeFrame.Month
+            }
+
+            timeframe = timeframe_map.get(interval, TimeFrame.Day)
+
+            # Calculate date range
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(days=days + 30)  # Extra buffer
+
+            # Initialize Alpaca client (no auth needed for market data)
+            client = StockHistoricalDataClient(
+                api_key=ALPACA_API_KEY,
+                secret_key=ALPACA_API_SECRET
+            )
+
+            # Create request
+            request = StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=timeframe,
+                start=start_date,
+                end=end_date
+            )
+
+            # Fetch bars
+            bars = client.get_stock_bars(request)
+
+            if not bars or symbol not in bars.data:
+                logger.warning(f"No Alpaca data for {symbol}")
+                return None
+
+            # Convert to DataFrame
+            df = bars.df
+
+            if df.empty:
+                logger.warning(f"Empty Alpaca data for {symbol}")
+                return None
+
+            # Reset index to get timestamp as column
+            df = df.reset_index()
+
+            # Rename columns to standard format
+            column_map = {
+                'timestamp': 'timestamp',
+                'open': 'Open',
+                'high': 'High',
+                'low': 'Low',
+                'close': 'Close',
+                'volume': 'Volume'
+            }
+            df = df.rename(columns=column_map)
+
+            # Set timestamp as index
+            df.set_index('timestamp', inplace=True)
+            df = df.sort_index()
+
+            # Ensure timezone-aware
+            if df.index.tz is None:
+                df.index = df.index.tz_localize('UTC')
+            else:
+                df.index = df.index.tz_convert('UTC')
+
+            # Select only needed columns
+            df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+            logger.info(f"Fetched {len(df)} bars from Alpaca for {symbol}")
+            return df
+
+        except ImportError:
+            logger.error("alpaca-py not installed. Run: pip install alpaca-py")
+            return None
+        except Exception as e:
+            logger.error(f"Alpaca request failed for {symbol}: {e}")
+            return None
 
     async def _fetch_yahoo(
         self,

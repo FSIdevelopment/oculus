@@ -1002,3 +1002,464 @@ Return ONLY the markdown content, no code fences wrapping it."""
             logger.warning("README generation failed: %s", e)
             self._log(f"Warning: README generation failed: {e}")
             return f"# {strategy_name}\n\nAuto-generated strategy for {', '.join(symbols)}.\n"
+
+    def _read_template_file(self, filename: str) -> str:
+        """Read a template file from the strategy container templates directory."""
+        template_dir = Path(__file__).resolve().parent.parent.parent / "templates" / "strategy_container"
+        template_path = template_dir / filename
+        return template_path.read_text()
+
+    async def generate_strategy_code(
+        self,
+        strategy_name: str,
+        symbols: List[str],
+        design: Dict[str, Any],
+        training_results: Dict[str, Any],
+        strategy_type: str,
+        config: Dict[str, Any],
+    ) -> str:
+        """Generate complete custom strategy.py file using Claude.
+
+        Args:
+            strategy_name: Name of the strategy
+            symbols: List of trading symbols
+            design: Strategy design dict with entry/exit rules, features, indicators
+            training_results: Training results with backtest metrics
+            strategy_type: Type of strategy (momentum, mean reversion, etc.)
+            config: Strategy configuration dict
+
+        Returns:
+            Complete Python source code for strategy.py
+        """
+        self._log(f"Generating strategy code for {strategy_name}")
+
+        try:
+            # Read template file for reference
+            template_code = self._read_template_file("strategy.py")
+
+            # Build prompt
+            entry_rules = json.dumps(design.get("entry_rules", []), indent=2)
+            exit_rules = json.dumps(design.get("exit_rules", []), indent=2)
+            features = design.get("priority_features", [])
+            indicators = design.get("indicators", {})
+
+            prompt = f"""You are generating a complete custom trading strategy file (strategy.py) for a production trading system.
+
+## Strategy Specifications
+- Name: {strategy_name}
+- Type: {strategy_type}
+- Symbols: {', '.join(symbols)}
+- Description: {design.get("strategy_description", "N/A")}
+
+## Entry Rules
+{entry_rules}
+Entry Score Threshold: {design.get("entry_score_threshold", 3)}
+
+## Exit Rules
+{exit_rules}
+Exit Score Threshold: {design.get("exit_score_threshold", 3)}
+
+## Priority Features
+{features}
+
+## Training Results
+The ML training achieved:
+- Total Return: {training_results.get('backtest_results', {}).get('total_return', 0)}%
+- Win Rate: {training_results.get('backtest_results', {}).get('win_rate', 0)}%
+- Best Model: {training_results.get('best_model', 'Unknown')}
+
+## CRITICAL REQUIREMENTS
+
+1. **Class Structure**: The class MUST be named `TradingStrategy` with this exact API:
+   - `__init__(self)` - Load config from config.json
+   - `analyze(self, symbols: List[str]) -> List[Dict]` - Main analysis method that returns signals
+
+2. **Imports**: You MUST use these imports:
+   - `from data_provider import DataProvider` for fetching market data
+   - `import json` to load config.json
+   - Standard libraries: pandas, numpy, ta (technical analysis)
+
+3. **Data Fetching**: Use `DataProvider` class, NOT direct API calls:
+   ```python
+   data_provider = DataProvider()
+   df = data_provider.get_historical_data(symbol, interval=self.config['trading']['timeframe'])
+   ```
+
+4. **Strategy Type Consideration**: This is a {strategy_type} strategy.
+   - Momentum strategies: Faster entry signals, ride trends
+   - Mean reversion: Wait for extremes, enter on reversals
+   - Adjust indicator thresholds and timing accordingly
+
+5. **Return Format**: The `analyze()` method must return a list of signal dicts:
+   ```python
+   [{{
+       "symbol": "AAPL",
+       "action": "BUY" or "SELL" or "HOLD",
+       "confidence": 0.0-1.0,
+       "indicators": {{"RSI": 35.2, "MACD": 0.5, ...}},
+       "reasoning": "Brief explanation"
+   }}]
+   ```
+
+## Template Reference
+Here is the template strategy.py structure to follow:
+
+```python
+{template_code[:3000]}
+... (template continues)
+```
+
+## Instructions
+Generate a COMPLETE, PRODUCTION-READY strategy.py file that:
+1. Implements the entry/exit rules from the design
+2. Calculates the required technical indicators
+3. Uses the DataProvider for data fetching
+4. Follows the exact class structure and API
+5. Includes proper error handling
+6. Returns signals in the correct format
+
+Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."""
+
+            response = self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=settings.CLAUDE_MAX_TOKENS,
+                thinking={"type": "adaptive"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            # Extract text from response
+            code = ""
+            for block in response.content:
+                if hasattr(block, 'text'):
+                    code += block.text
+
+            if code:
+                self._log(f"Strategy code generated ({len(code)} chars)")
+                return code
+            else:
+                raise ValueError("No code generated in response")
+
+        except Exception as e:
+            logger.warning("Strategy code generation failed: %s", e)
+            self._log(f"Warning: Strategy code generation failed: {e}")
+            # Return template as fallback
+            return self._read_template_file("strategy.py")
+
+    async def generate_strategy_config(
+        self,
+        strategy_name: str,
+        symbols: List[str],
+        design: Dict[str, Any],
+        training_results: Dict[str, Any],
+        strategy_type: str,
+    ) -> str:
+        """Generate custom config.json file using Claude.
+
+        Args:
+            strategy_name: Name of the strategy
+            symbols: List of trading symbols
+            design: Strategy design dict
+            training_results: Training results
+            strategy_type: Type of strategy
+
+        Returns:
+            Valid JSON string for config.json
+        """
+        self._log(f"Generating config.json for {strategy_name}")
+
+        try:
+            # Read template for reference
+            template_config = self._read_template_file("config.json")
+
+            # Extract design parameters
+            indicators = design.get("indicators", {})
+            risk_params = {
+                "stop_loss_pct": design.get("recommended_stop_loss", 0.05) * 100,
+                "trailing_stop_pct": design.get("recommended_trailing_stop", 0.03) * 100,
+                "max_position_loss_pct": 1.0,
+                "max_daily_loss_pct": 2.0,
+            }
+
+            prompt = f"""Generate a custom config.json file for a trading strategy.
+
+## Strategy Details
+- Name: {strategy_name}
+- Type: {strategy_type}
+- Symbols: {', '.join(symbols)}
+
+## Template Schema
+Use this template structure as reference:
+{template_config}
+
+## Requirements
+1. Set "strategy_name" to "{strategy_name}"
+2. Set "symbols" to {json.dumps(symbols)}
+3. Populate "indicators" section with parameters from the design:
+   - RSI period: {design.get('entry_rules', [{}])[0].get('threshold', 14) if design.get('entry_rules') else 14}
+   - SMA/EMA periods from the priority features
+   - Any other indicator parameters mentioned in the design
+4. Set "risk_management" parameters:
+   - stop_loss_pct: {risk_params['stop_loss_pct']:.1f}
+   - trailing_stop_pct: {risk_params['trailing_stop_pct']:.1f}
+   - max_position_loss_pct: {risk_params['max_position_loss_pct']:.1f}
+   - max_daily_loss_pct: {risk_params['max_daily_loss_pct']:.1f}
+5. Set "max_positions" to {design.get('recommended_max_positions', 3)}
+6. Set "position_size_pct" to {design.get('recommended_position_size', 0.10) * 100:.0f}
+7. Keep the schedule, data_source, and logging sections from the template
+
+Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
+
+            response = self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=settings.CLAUDE_MAX_TOKENS,
+                thinking={"type": "adaptive"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            # Extract text
+            config_json = ""
+            for block in response.content:
+                if hasattr(block, 'text'):
+                    config_json += block.text
+
+            # Validate JSON
+            if config_json:
+                json.loads(config_json)  # Will raise if invalid
+                self._log(f"Config JSON generated ({len(config_json)} chars)")
+                return config_json
+            else:
+                raise ValueError("No config generated")
+
+        except Exception as e:
+            logger.warning("Config generation failed: %s", e)
+            self._log(f"Warning: Config generation failed: {e}")
+            return self._read_template_file("config.json")
+
+    async def generate_risk_manager_code(
+        self,
+        strategy_name: str,
+        design: Dict[str, Any],
+        training_results: Dict[str, Any],
+        strategy_type: str,
+        config: Dict[str, Any],
+    ) -> str:
+        """Generate custom risk_manager.py file using Claude.
+
+        Args:
+            strategy_name: Name of the strategy
+            design: Strategy design dict with risk parameters
+            training_results: Training results
+            strategy_type: Type of strategy
+            config: Strategy configuration
+
+        Returns:
+            Complete Python source code for risk_manager.py
+        """
+        self._log(f"Generating risk_manager.py for {strategy_name}")
+
+        try:
+            # Read template
+            template_code = self._read_template_file("risk_manager.py")
+
+            # Extract risk parameters
+            stop_loss = design.get("recommended_stop_loss", 0.05)
+            trailing_stop = design.get("recommended_trailing_stop", 0.03)
+            max_drawdown = training_results.get('backtest_results', {}).get('max_drawdown', 10)
+
+            prompt = f"""Generate a custom risk_manager.py file for a trading strategy.
+
+## Strategy Details
+- Name: {strategy_name}
+- Type: {strategy_type}
+- Stop Loss: {stop_loss * 100:.1f}%
+- Trailing Stop: {trailing_stop * 100:.1f}%
+- Max Drawdown (from training): {max_drawdown:.1f}%
+
+## Risk Parameters from Design
+- Stop Loss: {stop_loss} (as decimal)
+- Trailing Stop: {trailing_stop} (as decimal)
+- Max Positions: {design.get('recommended_max_positions', 3)}
+- Position Size: {design.get('recommended_position_size', 0.10)}
+
+## Strategy Type Considerations
+This is a {strategy_type} strategy. Adjust risk tolerances accordingly:
+- Momentum: May need wider stops to avoid whipsaws
+- Mean Reversion: Tighter stops, faster exits
+- Trend Following: Trailing stops are critical
+
+## Template Reference
+Here is the template risk_manager.py structure:
+
+```python
+{template_code[:2000]}
+... (template continues)
+```
+
+## CRITICAL REQUIREMENTS
+1. Class MUST be named `RiskManager`
+2. Must match the template's interface (same methods and signatures)
+3. Implement position sizing based on the design parameters
+4. Implement stop loss and trailing stop logic
+5. Include max drawdown protection
+6. Load config from config.json
+
+Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
+
+            response = self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=settings.CLAUDE_MAX_TOKENS,
+                thinking={"type": "adaptive"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            # Extract code
+            code = ""
+            for block in response.content:
+                if hasattr(block, 'text'):
+                    code += block.text
+
+            if code:
+                self._log(f"Risk manager code generated ({len(code)} chars)")
+                return code
+            else:
+                raise ValueError("No code generated")
+
+        except Exception as e:
+            logger.warning("Risk manager generation failed: %s", e)
+            self._log(f"Warning: Risk manager generation failed: {e}")
+            return self._read_template_file("risk_manager.py")
+
+    async def generate_backtest_code(
+        self,
+        strategy_name: str,
+        symbols: List[str],
+        design: Dict[str, Any],
+        training_results: Dict[str, Any],
+        strategy_type: str,
+        config: Dict[str, Any],
+    ) -> str:
+        """Generate custom backtest.py file using Claude.
+
+        Args:
+            strategy_name: Name of the strategy
+            symbols: List of trading symbols
+            design: Strategy design dict
+            training_results: Training results
+            strategy_type: Type of strategy
+            config: Strategy configuration
+
+        Returns:
+            Complete Python source code for backtest.py
+        """
+        self._log(f"Generating backtest.py for {strategy_name}")
+
+        try:
+            # Read template (it's 822 lines, so we'll include structure overview)
+            template_code = self._read_template_file("backtest.py")
+
+            prompt = f"""Generate a custom backtest.py file for a trading strategy.
+
+## Strategy Details
+- Name: {strategy_name}
+- Type: {strategy_type}
+- Symbols: {', '.join(symbols)}
+
+## Template Structure Overview
+The template backtest.py is 822 lines and includes:
+- Imports: strategy, risk_manager, data_provider
+- BacktestEngine class with position tracking
+- Performance metrics calculation
+- Results written to backtest_results.json
+
+Key structure from template:
+```python
+{template_code[:1500]}
+... (continues with backtest logic, metrics calculation)
+```
+
+## CRITICAL REQUIREMENTS
+1. Must import: `from strategy import TradingStrategy` and `from risk_manager import RiskManager`
+2. Must use: `from data_provider import DataProvider` for fetching historical data
+3. Must write results to `backtest_results.json` with these fields:
+   - total_return_pct
+   - win_rate_pct
+   - sharpe_ratio
+   - max_drawdown_pct
+   - total_trades
+   - winning_trades
+   - losing_trades
+4. Must have a `main()` function that runs the backtest
+5. Strategy type is {strategy_type} - adjust backtest parameters accordingly
+
+## Strategy Type Considerations
+- Momentum: Longer holding periods, trend-following metrics
+- Mean Reversion: Shorter holding periods, reversal metrics
+- Adjust performance expectations based on strategy type
+
+Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
+
+            response = self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=settings.CLAUDE_MAX_TOKENS,
+                thinking={"type": "adaptive"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            # Extract code
+            code = ""
+            for block in response.content:
+                if hasattr(block, 'text'):
+                    code += block.text
+
+            if code:
+                self._log(f"Backtest code generated ({len(code)} chars)")
+                return code
+            else:
+                raise ValueError("No code generated")
+
+        except Exception as e:
+            logger.warning("Backtest generation failed: %s", e)
+            self._log(f"Warning: Backtest generation failed: {e}")
+            return self._read_template_file("backtest.py")
+
+    def compare_backtest_results(self, generated_results: dict, training_results: dict) -> dict:
+        """Compare generated backtest results with training results.
+
+        Args:
+            generated_results: Results from the verification backtest
+            training_results: Original training results
+
+        Returns:
+            Dict with:
+            - passed: bool - True if generated results match or exceed training
+            - details: str - Human-readable comparison summary
+            - metrics: dict - Side-by-side comparison of key metrics
+        """
+        # Extract backtest results from training_results (may be nested)
+        training_bt = training_results.get('backtest_results', training_results)
+
+        # Extract metrics with safe defaults
+        gen_return = generated_results.get('total_return_pct', 0)
+        train_return = training_bt.get('total_return', training_bt.get('total_return_pct', 0))
+
+        gen_sharpe = generated_results.get('sharpe_ratio', 0)
+        train_sharpe = training_bt.get('sharpe_ratio', 0)
+
+        gen_win_rate = generated_results.get('win_rate_pct', 0)
+        train_win_rate = training_bt.get('win_rate', training_bt.get('win_rate_pct', 0))
+
+        # Pass if total return is within 10% of training or better
+        return_threshold = train_return * 0.9  # 90% of training return
+        passed = gen_return >= return_threshold
+
+        metrics = {
+            'total_return': {'generated': gen_return, 'training': train_return},
+            'sharpe_ratio': {'generated': gen_sharpe, 'training': train_sharpe},
+            'win_rate': {'generated': gen_win_rate, 'training': train_win_rate},
+        }
+
+        details = f"Generated return: {gen_return:.2f}% vs training: {train_return:.2f}% (threshold: {return_threshold:.2f}%)"
+
+        self._log(f"Backtest comparison: {'PASSED' if passed else 'FAILED'} - {details}")
+
+        return {'passed': passed, 'details': details, 'metrics': metrics}

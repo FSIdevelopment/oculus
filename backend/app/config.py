@@ -41,12 +41,14 @@ class Settings(BaseSettings):
     # Data Provider Keys (centrally managed)
     POLYGON_API_KEY: str = ""
     ALPHAVANTAGE_API_KEY: str = ""
+    ALPACA_API_KEY: str = ""
+    ALPACA_API_SECRET: str = ""
 
     # Email
     RESEND_API_KEY: str = ""
 
     # Docker Hub
-    DOCKER_HUB_USERNAME: str = "forfrontsolutions"
+    DOCKER_HUB_USERNAME: str = "forefrontsolutions"
     DOCKER_HUB_PAT: str = ""
 
     # LLM and Build Orchestration
