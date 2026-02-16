@@ -11,6 +11,12 @@ aiohttp>=3.9.0
 # AlphaVantage market data (default provider)
 alpha_vantage>=2.3.1
 
+# Polygon.io market data
+polygon-api-client>=1.13.0
+
+# Alpaca market data
+alpaca-py>=0.21.0
+
 # Data analysis
 pandas>=2.1.0
 numpy>=1.26.0

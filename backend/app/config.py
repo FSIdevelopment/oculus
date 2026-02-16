@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # Data Provider Keys (centrally managed)
     POLYGON_API_KEY: str = ""
     ALPHAVANTAGE_API_KEY: str = ""
+    ALPACA_API_KEY: str = ""
+    ALPACA_API_SECRET: str = ""
 
     # Email
     RESEND_API_KEY: str = ""
