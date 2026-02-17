@@ -1145,7 +1145,7 @@ Generate a COMPLETE, PRODUCTION-READY strategy.py file that:
 Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."""
 
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-opus-4-6",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
@@ -1164,7 +1164,7 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
                 raise ValueError("No code generated in response")
 
         except Exception as e:
-            logger.warning("Strategy code generation failed: %s", e)
+            logger.error("Strategy code generation failed: %s", e)
             self._log(f"Warning: Strategy code generation failed: {e}")
             # Return template as fallback
             return self._read_template_file("strategy.py")
@@ -1234,7 +1234,7 @@ Use this template structure as reference:
 Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
 
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-opus-4-6",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
@@ -1255,7 +1255,7 @@ Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
                 raise ValueError("No config generated")
 
         except Exception as e:
-            logger.warning("Config generation failed: %s", e)
+            logger.error("Config generation failed: %s", e)
             self._log(f"Warning: Config generation failed: {e}")
             return self._read_template_file("config.json")
 
@@ -1330,7 +1330,7 @@ Here is the template risk_manager.py structure:
 Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
 
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-opus-4-6",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
@@ -1349,7 +1349,7 @@ Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
                 raise ValueError("No code generated")
 
         except Exception as e:
-            logger.warning("Risk manager generation failed: %s", e)
+            logger.error("Risk manager generation failed: %s", e)
             self._log(f"Warning: Risk manager generation failed: {e}")
             return self._read_template_file("risk_manager.py")
 
@@ -1573,7 +1573,7 @@ class BacktestResults:
 Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
 
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-opus-4-6",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
@@ -1592,7 +1592,7 @@ Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
                 raise ValueError("No code generated")
 
         except Exception as e:
-            logger.warning("Backtest generation failed: %s", e)
+            logger.error("Backtest generation failed: %s", e)
             self._log(f"Warning: Backtest generation failed: {e}")
             return self._read_template_file("backtest.py")
 

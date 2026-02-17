@@ -212,6 +212,14 @@ async def _build_strategy_container(
     # Write config with injected metadata
     (output_path / "config.json").write_text(json.dumps(config, indent=2))
 
+    # Force-override critical config fields (defense-in-depth)
+    config["strategy_name"] = strategy_name
+    if "trading" not in config:
+        config["trading"] = {}
+    config["trading"]["symbols"] = strategy_symbols
+    # Re-write with corrected values
+    (output_path / "config.json").write_text(json.dumps(config, indent=2))
+
     # Generate strategy.py
     await _publish_progress(build_id, {
         "phase": "building_docker",
@@ -285,8 +293,8 @@ async def _build_strategy_container(
         # Run backtest.py as subprocess
         env = os.environ.copy()
         env["BACKTEST_MODE"] = "true"
-        env["BACKTEST_PERIOD"] = "6M"
-        env["STRATEGY_ID"] = build_id
+        env["BACKTEST_PERIOD"] = "1Y"
+        env["STRATEGY_ID"] = build.strategy_id
         env["LOG_LEVEL"] = "WARNING"
 
         process = await asyncio.create_subprocess_exec(
@@ -339,6 +347,12 @@ async def _build_strategy_container(
             except json.JSONDecodeError:
                 iteration_logs.append(f"Verification: invalid JSON in backtest_results.json (attempt {attempt})")
                 continue
+
+            # Force-override identity fields in backtest results
+            generated_results["strategy_id"] = build.strategy_id
+            generated_results["strategy_name"] = strategy_name
+            # Write corrected results back
+            results_file.write_text(json.dumps(generated_results, indent=2, default=str))
 
             # Compare with training results
             comparison = orchestrator.compare_backtest_results(generated_results, training_results)
