@@ -1072,8 +1072,8 @@ export default function BuildDetailPage() {
   }
 
   // Helper: Calculate elapsed time — never show negative, stop counting on terminal states
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const getElapsedTime = (_tick?: number) => {
+  const getElapsedTime = (tick?: number) => { // tick forces re-render each second
+    void tick
     if (!build) return '0 00:00:00'
     const start = new Date(build.started_at).getTime()
     const end = build.completed_at ? new Date(build.completed_at).getTime() : Date.now()

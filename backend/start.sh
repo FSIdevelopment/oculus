@@ -33,8 +33,8 @@ PORT=${PORT:-8080}
 echo "========================================="
 echo "Starting uvicorn on 0.0.0.0:$PORT..."
 echo "Health check: /health"
-echo "Workers: ${UVICORN_WORKERS:-12}"
+echo "Workers: ${UVICORN_WORKERS:-4}"
 echo "========================================="
 
-exec uvicorn main:app --host 0.0.0.0 --port $PORT --log-level info --workers ${UVICORN_WORKERS:-12} --timeout-keep-alive 120
+exec uvicorn main:app --host 0.0.0.0 --port $PORT --log-level info --workers ${UVICORN_WORKERS:-4} --timeout-keep-alive 120
 
