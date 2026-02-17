@@ -583,7 +583,9 @@ async def _run_build_loop(
                 if iteration == 0:
                     # First iteration: initial design
                     build.phase = "designing"
-                    build.status = "building"
+                    # Only set to "building" if not already "stopping"
+                    if build.status != "stopping":
+                        build.status = "building"
                     iteration_record.status = "designing"
                     await bg_db.commit()
                     await _publish_progress(build_id, {
@@ -1424,7 +1426,7 @@ async def stop_build(
             detail="Build not found"
         )
 
-    if build.status not in ("building", "queued"):
+    if build.status not in ("building", "queued", "stopping"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot stop build with status '{build.status}'. Only 'building' or 'queued' builds can be stopped."
@@ -1441,6 +1443,13 @@ async def stop_build(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not signal build to stop. Please try again."
         )
+
+    # Update build status to "stopping" in DB
+    build.status = "stopping"
+    await db.commit()
+    await db.refresh(build)
+
+    logger.info("Stop signal sent for build %s", build_id)
 
     return BuildResponse(
         uuid=build.uuid,
