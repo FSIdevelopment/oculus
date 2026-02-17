@@ -474,6 +474,12 @@ The JSON must follow this exact schema:
 - Optional models you control: MLP neural networks (train_neural_networks), LSTM (train_lstm)
 - Think about whether the data is sequential (favor LSTM) or tabular (favor tree models)
 
+## HARD CONSTRAINTS (DO NOT VIOLATE)
+- The strategy type "{strategy_type}" is FIXED and chosen by the user. You MUST NOT change it.
+- ALL entry rules, exit rules, features, and indicators MUST be consistent with a {strategy_type} strategy.
+- Do NOT redesign this as a different strategy type (e.g., do not turn a "Volume Profile" strategy into a "Momentum Breakout" strategy).
+- If you believe the strategy type is suboptimal for the given symbols/target, you may note this in strategy_rationale, but you MUST still design within the {strategy_type} framework.
+
 ## Important:
 - Base your strategy design on proven technical analysis principles
 - The ML pipeline will find the optimal weights - you provide the structure and rules
@@ -524,7 +530,7 @@ You MUST select from these exact feature names:
 2. DO NOT repeat approaches that have already been tried. Each iteration MUST try something meaningfully different.
 3. If features were tried before and didn't work well, use DIFFERENT features.
 4. If thresholds were too tight or too loose, adjust them significantly (not just +-5%).
-5. Consider fundamentally different strategy approaches if incremental changes aren't working.
+5. Consider different features, thresholds, and ML configurations — but NEVER change the core strategy type.
 
 ## Analysis Questions (answer these in your thinking before designing)
 1. What pattern do you see in the results? Is the strategy improving or stuck?
@@ -557,7 +563,13 @@ The JSON must follow this exact schema:
 - Configure NN and LSTM hyperparameters as needed
 - Think about whether the data is sequential (favor LSTM) or tabular (favor tree models)
 
-Make meaningful changes — don't just tweak numbers slightly. Return a COMPLETELY REVISED strategy design.
+## HARD CONSTRAINTS (DO NOT VIOLATE)
+- The strategy type "{strategy_type}" is FIXED and chosen by the user. You MUST NOT change it.
+- ALL entry rules, exit rules, features, and indicators MUST be consistent with a {strategy_type} strategy.
+- "Completely revised" means new features, thresholds, ML config, and risk parameters — NOT a different strategy type.
+- Do NOT redesign this as a different strategy type. Optimize WITHIN the {strategy_type} framework.
+
+Make meaningful changes to parameters, features, and rules — don't just tweak numbers slightly. Return a revised strategy design that stays true to the {strategy_type} approach.
 {creation_guide}"""
 
     def _validate_design_rules(self, design: dict) -> bool:
