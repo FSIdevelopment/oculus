@@ -44,7 +44,7 @@ logging.basicConfig(
 logger = logging.getLogger('Backtest')
 
 # Configuration from environment
-BACKTEST_PERIOD = os.getenv('BACKTEST_PERIOD', '6M')
+BACKTEST_PERIOD = os.getenv('BACKTEST_PERIOD', '1Y')
 BACKTEST_TIMEFRAME = os.getenv('BACKTEST_TIMEFRAME', '1D')
 STRATEGY_ID = os.getenv('STRATEGY_ID', 'unknown')
 RESULTS_FILE = Path(__file__).parent / 'backtest_results.json'
