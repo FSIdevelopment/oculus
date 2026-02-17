@@ -388,6 +388,8 @@ class JobProcessor:
                                 "sharpe_ratio": bt_results.get("sharpe_ratio", 0),
                                 "profit_factor": bt_results.get("profit_factor", 0),
                                 "avg_trade_return": bt_results.get("avg_trade_return", 0),
+                                "avg_win": bt_results.get("avg_win", 0),
+                                "avg_loss": bt_results.get("avg_loss", 0),
                                 "buy_hold_avg": bt_results.get("buy_hold_avg", 0),
                                 "max_potential": bt_results.get("max_potential", 0),
                             }
