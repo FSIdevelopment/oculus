@@ -39,9 +39,9 @@ if env_path.exists():
                 os.environ[key.strip()] = value.strip()
 
 # Set Polygon API key - MUST be set before importing strategy modules
-POLYGON_API_KEY = os.getenv('POLYGON_MASSIVE_API_KEY', '')
+POLYGON_API_KEY = os.getenv('POLYGON_API_KEY', '')
 if not POLYGON_API_KEY:
-    print("⚠️  WARNING: POLYGON_MASSIVE_API_KEY not found in environment!")
+    print("⚠️  WARNING: POLYGON_API_KEY not found in environment!")
     print("   The optimizer will fall back to slower AlphaVantage API.")
 else:
     print(f"✓ Polygon API key found: {POLYGON_API_KEY[:8]}...")

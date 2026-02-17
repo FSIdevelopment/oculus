@@ -21,7 +21,7 @@ The AI Strategy Designer uses a multi-step pipeline to create optimized trading 
 ### Required Environment Variables
 
 ```bash
-export POLYGON_MASSIVE_API_KEY="your_polygon_api_key"
+export POLYGON_API_KEY="your_polygon_api_key"
 
 # Required only when using --LLM flag
 export ANTHROPIC_API_KEY="your_anthropic_api_key"
@@ -332,11 +332,11 @@ This creates a feedback loop: `Claude designs -> ML trains -> Backtest evaluates
 
 ### Missing Polygon API Key
 ```
-⚠️ Polygon client not configured. Set POLYGON_MASSIVE_API_KEY.
+⚠️ Polygon client not configured. Set POLYGON_API_KEY.
 ```
 **Solution:** Export your Polygon API key:
 ```bash
-export POLYGON_MASSIVE_API_KEY="your_api_key"
+export POLYGON_API_KEY="your_api_key"
 ```
 
 ### Insufficient Data

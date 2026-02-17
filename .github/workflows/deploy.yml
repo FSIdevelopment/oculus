@@ -1,0 +1,51 @@
+name: Deploy to Digital Ocean
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install backend dependencies
+        run: cd backend && pip install -r requirements.txt
+      
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+      
+      - name: Frontend type check
+        run: cd frontend && npx tsc --noEmit
+      
+      - name: Frontend build
+        run: cd frontend && npm run build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.oculusalgorithms.com
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: placeholder
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+      
+      - name: Deploy to App Platform
+        run: doctl apps create-deployment ${{ secrets.DO_APP_ID }}
+

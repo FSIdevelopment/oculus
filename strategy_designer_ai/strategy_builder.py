@@ -1702,7 +1702,9 @@ class PortfolioBacktester:
             'buy_hold_avg': avg_buy_hold,
             'buy_hold_best': best_buy_hold_symbol,
             'max_potential': self.max_potential_profit,
-            'buy_hold_by_symbol': self.buy_hold_returns
+            'buy_hold_by_symbol': self.buy_hold_returns,
+            'sharpe_ratio': round((total_return / 100) / (max_dd if max_dd > 0 else 1), 2),
+            'profit_factor': round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else (float('inf') if avg_win > 0 else 0)
         }}
 
 
@@ -1834,7 +1836,7 @@ class DataProvider:
     """Provides market data for the strategy."""
 
     def __init__(self):
-        self.api_key = os.environ.get('POLYGON_MASSIVE_API_KEY', '')
+        self.api_key = os.environ.get('POLYGON_API_KEY', '')
         if HAS_POLYGON and self.api_key:
             self.client = RESTClient(self.api_key)
         else:
@@ -1843,7 +1845,7 @@ class DataProvider:
     def get_historical_data(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """Fetch historical OHLCV data."""
         if not self.client:
-            print(f"⚠️ Polygon client not configured. Set POLYGON_MASSIVE_API_KEY.")
+            print(f"⚠️ Polygon client not configured. Set POLYGON_API_KEY.")
             return None
 
         try:
@@ -2199,7 +2201,7 @@ COPY . .
 ENV STRATEGY_PASSPHRASE=""
 ENV SIGNALSYNK_WS_URL="wss://app.signalsynk.com/ws/strategy"
 ENV SIGNALSYNK_API_URL="https://app.signalsynk.com"
-ENV POLYGON_MASSIVE_API_KEY=""
+ENV POLYGON_API_KEY=""
 ENV ALPHAVANTAGE_API_KEY=""
 ENV LOG_LEVEL="INFO"
 ENV HEARTBEAT_INTERVAL="30"
@@ -2248,7 +2250,7 @@ services:
       - STRATEGY_PASSPHRASE=${{STRATEGY_PASSPHRASE:-}}
       - SIGNALSYNK_WS_URL=${{SIGNALSYNK_WS_URL:-wss://app.signalsynk.com/ws/strategy}}
       - SIGNALSYNK_API_URL=${{SIGNALSYNK_API_URL:-https://app.signalsynk.com}}
-      - POLYGON_MASSIVE_API_KEY=${{POLYGON_MASSIVE_API_KEY:-}}
+      - POLYGON_API_KEY=${{POLYGON_API_KEY:-}}
       - ALPHAVANTAGE_API_KEY=${{ALPHAVANTAGE_API_KEY:-}}
       - LOG_LEVEL=${{LOG_LEVEL:-INFO}}
       - HEARTBEAT_INTERVAL=${{HEARTBEAT_INTERVAL:-30}}
