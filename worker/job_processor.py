@@ -153,6 +153,7 @@ class JobProcessor:
                 symbols=symbols,
                 period_years=years,
                 config=ml_training_config,
+                timeframe=timeframe,
             )
 
             # Skip disk writes — worker sends results via Redis, and hardcoded
@@ -184,7 +185,7 @@ class JobProcessor:
             strategy_rules = rule_extractor.extract_all_rules(
                 strategy_name=f"{strategy_type}_{job_id}",
                 symbols=symbols,
-                timeframe="1d",
+                timeframe=timeframe,
                 model_metrics=metrics
             )
             reporter.report_phase("rule_extraction", "complete")
@@ -508,6 +509,7 @@ class JobProcessor:
                 "iteration_uuid": iteration_uuid,  # For BuildIteration DB persistence
                 "status": "success",
                 "phase": "complete",
+                "timeframe": timeframe,  # Trading timeframe used for training/backtesting
 
                 # --- Existing fields (backward compatible) ---
                 "model_metrics": {

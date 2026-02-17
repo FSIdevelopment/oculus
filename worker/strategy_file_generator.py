@@ -1085,8 +1085,10 @@ Author: SignalSynk AI
 """
 
 import os
+import json
 import asyncio
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, List, Dict
 
 import pandas as pd
@@ -1108,6 +1110,55 @@ class DataProvider:
         else:
             self.client = None
 
+        # Load timeframe from config.json
+        self.timeframe = self._load_timeframe()
+        self.polygon_timespan = self._convert_timeframe_to_polygon(self.timeframe)
+
+    def _load_timeframe(self) -> str:
+        """Load timeframe from config.json."""
+        try:
+            config_path = Path(__file__).parent / 'config.json'
+            with open(config_path) as f:
+                config = json.load(f)
+                return config.get('trading', {}).get('timeframe', '1d')
+        except:
+            return '1d'
+
+    def _convert_timeframe_to_polygon(self, timeframe: str) -> str:
+        """Convert timeframe format (1h, 1d, etc.) to Polygon API format.
+
+        Args:
+            timeframe: Timeframe in format like '1m', '5m', '15m', '1h', '4h', '1d', '1w'
+
+        Returns:
+            Polygon API timespan: 'minute', 'hour', 'day', 'week', 'month'
+        """
+        if not timeframe:
+            return 'day'
+
+        # Extract the unit (last character)
+        unit = timeframe[-1].lower()
+
+        # Map to Polygon API format
+        unit_map = {
+            'm': 'minute',
+            'h': 'hour',
+            'd': 'day',
+            'w': 'week',
+            'M': 'month'
+        }
+
+        return unit_map.get(unit, 'day')
+
+    def _get_multiplier(self, timeframe: str) -> int:
+        """Extract multiplier from timeframe (e.g., '5m' -> 5, '1h' -> 1)."""
+        if not timeframe or len(timeframe) < 2:
+            return 1
+        try:
+            return int(timeframe[:-1])
+        except ValueError:
+            return 1
+
     def get_historical_data(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """Fetch historical OHLCV data."""
         if not self.client:
@@ -1115,8 +1166,9 @@ class DataProvider:
             return None
 
         try:
+            multiplier = self._get_multiplier(self.timeframe)
             aggs = self.client.get_aggs(
-                ticker=symbol, multiplier=1, timespan='day',
+                ticker=symbol, multiplier=multiplier, timespan=self.polygon_timespan,
                 from_=start_date, to=end_date, limit=50000
             )
             if not aggs:

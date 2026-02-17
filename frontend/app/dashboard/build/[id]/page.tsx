@@ -720,6 +720,13 @@ export default function BuildDetailPage() {
     }
   }, [build?.uuid])
 
+  // Initialize maxIterations from build.max_iterations when build loads
+  useEffect(() => {
+    if (build?.max_iterations != null && maxIterations == null) {
+      setMaxIterations(build.max_iterations)
+    }
+  }, [build?.max_iterations, maxIterations])
+
   // WebSocket connection: depends only on buildUuid state, not on the full build object
   useEffect(() => {
     if (!isLoading && isAuthenticated && buildUuid) {
@@ -1039,15 +1046,24 @@ export default function BuildDetailPage() {
     }
   }
 
-  // Restart a failed/stopped build — redirects to the new build page
+  // Restart a failed/stopped build — resumes from where it left off
   const handleRestartBuild = async () => {
     if (!build) return
     setRestarting(true)
     try {
       const response = await api.post(`/api/builds/${build.uuid}/restart`)
-      const newBuild = response.data
-      // Redirect to the new build's detail page using its UUID
-      router.push(`/dashboard/build/${newBuild.uuid}`)
+      const updatedBuild = response.data
+
+      // Update build state with the resumed build
+      setBuild(updatedBuild)
+      setRestarting(false)
+      setError(null)
+
+      // If it's the same build UUID, stay on this page (resume)
+      // If it's a different UUID, redirect to the new build page (full restart)
+      if (updatedBuild.uuid !== build.uuid) {
+        router.push(`/dashboard/build/${updatedBuild.uuid}`)
+      }
     } catch (err: any) {
       console.error('Failed to restart build:', err)
       setError(err.response?.data?.detail || 'Failed to restart build')
@@ -1452,7 +1468,7 @@ export default function BuildDetailPage() {
         </div>
 
         {/* Est. Time / Build Duration - show for all build states when max_iterations is available */}
-        {build.max_iterations && (
+        {maxIterations != null && maxIterations > 0 && (
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">
               {(build.status === 'running' || build.status === 'in_progress') ? 'Est. Time Left' : 'Build Duration'}
@@ -1461,7 +1477,7 @@ export default function BuildDetailPage() {
               <Clock size={18} className="text-primary" />
               <p className="text-lg font-semibold text-text">
                 {(build.status === 'running' || build.status === 'in_progress')
-                  ? `~${Math.max(0, ((build.max_iterations ?? 0) - (build.iteration_count ?? 0)) * 4)} min`
+                  ? `~${Math.max(0, (maxIterations - (build.iteration_count ?? 0)) * 4)} min`
                   : `~${(build.iteration_count ?? 0) * 4} min`
                 }
               </p>

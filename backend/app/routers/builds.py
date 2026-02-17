@@ -452,9 +452,13 @@ async def _run_build_loop(
     timeframe: str = "1d",
     max_iterations: int = 5,
     strategy_type: str | None = None,
+    start_iteration: int = 0,
 ):
     """
     Background task that runs the full build iteration loop.
+
+    Args:
+        start_iteration: Iteration number to start from (default 0). Used for resuming builds.
 
     Uses its own DB session since the request-scoped session will be closed
     by the time this coroutine executes.
@@ -504,8 +508,29 @@ async def _run_build_loop(
             training_results = None
             iteration_logs = []
 
+            # When resuming (start_iteration > 0), load the last completed iteration's data
+            if start_iteration > 0:
+                last_iter_num = start_iteration - 1
+                result = await bg_db.execute(
+                    select(BuildIteration).where(
+                        (BuildIteration.build_id == build_id) &
+                        (BuildIteration.iteration_number == last_iter_num)
+                    )
+                )
+                last_iteration = result.scalar_one_or_none()
+                if last_iteration and last_iteration.llm_design:
+                    design = last_iteration.llm_design
+                    logger.info(f"Resuming build {build_id} from iteration {start_iteration}, loaded previous design")
+                    # Load backtest results as training_results for continuity
+                    if last_iteration.backtest_results:
+                        training_results = {
+                            "backtest_results": last_iteration.backtest_results,
+                            "best_model": last_iteration.best_model.get("name") if last_iteration.best_model else "Unknown",
+                        }
+
             # Iteration loop: design → train → refine → repeat
-            for iteration in range(max_iterations):
+            # Starts from start_iteration to support resuming stopped/failed builds
+            for iteration in range(start_iteration, max_iterations):
                 # Check for stop signal via Redis key
                 try:
                     stop_client = await redis_async.from_url(settings.REDIS_URL)
@@ -1472,9 +1497,9 @@ async def restart_build(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Restart a failed or stopped build by creating a new build record.
+    Resume a failed or stopped build from where it left off.
 
-    Creates a new StrategyBuild and launches a fresh build loop.
+    Reuses the same build record and continues from the last completed iteration.
     Only builds with status 'failed' or 'stopped' can be restarted.
     """
     # Fetch original build and validate ownership
@@ -1483,18 +1508,18 @@ async def restart_build(
             (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
         )
     )
-    original_build = result.scalar_one_or_none()
+    build = result.scalar_one_or_none()
 
-    if not original_build:
+    if not build:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Build not found"
         )
 
-    if original_build.status not in ("failed", "stopped"):
+    if build.status not in ("failed", "stopped"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot restart build with status '{original_build.status}'. Only 'failed' or 'stopped' builds can be restarted."
+            detail=f"Cannot restart build with status '{build.status}'. Only 'failed' or 'stopped' builds can be restarted."
         )
 
     # Validate user has enough tokens for at least one iteration
@@ -1507,7 +1532,7 @@ async def restart_build(
     # Fetch the strategy for the build
     strat_result = await db.execute(
         select(Strategy).where(
-            (Strategy.uuid == original_build.strategy_id) & (Strategy.user_id == current_user.uuid)
+            (Strategy.uuid == build.strategy_id) & (Strategy.user_id == current_user.uuid)
         )
     )
     strategy = strat_result.scalar_one_or_none()
@@ -1518,22 +1543,19 @@ async def restart_build(
             detail="Strategy not found"
         )
 
-    # Create a NEW build record (don't reuse the failed/stopped one)
-    new_build = StrategyBuild(
-        strategy_id=original_build.strategy_id,
-        user_id=current_user.uuid,
-        status="queued",
-        phase="initializing",
-        started_at=datetime.utcnow(),
-        max_iterations=max_iterations,
-    )
-    db.add(new_build)
+    # Reuse the same build record - reset status and clear completed_at
+    build.status = "queued"
+    build.phase = "resuming"
+    build.completed_at = None
+    # Keep max_iterations from the original build, or update if provided
+    if max_iterations != build.max_iterations:
+        build.max_iterations = max_iterations
     await db.commit()
 
     # Capture values for background task
-    new_build_id = new_build.uuid
     user_id = current_user.uuid
     strategy_name = strategy.name
+    start_iteration = build.iteration_count  # Resume from where we left off
 
     raw_symbols = strategy.symbols
     if isinstance(raw_symbols, dict):
@@ -1546,32 +1568,35 @@ async def restart_build(
     strategy_description = strategy.description or ""
     strat_type = strategy.strategy_type  # e.g. "Momentum", "Mean Reversion", etc.
 
-    # Launch the build loop as a background task
+    logger.info(f"Resuming build {build_id} from iteration {start_iteration} of {build.max_iterations}")
+
+    # Launch the build loop as a background task, resuming from last completed iteration
     asyncio.create_task(
         _run_build_loop(
-            build_id=new_build_id,
-            strategy_id=original_build.strategy_id,
+            build_id=build_id,
+            strategy_id=build.strategy_id,
             user_id=user_id,
             strategy_name=strategy_name,
             strategy_symbols=strategy_symbols,
             description=strategy_description,
             target_return=strategy.target_return or 10.0,
             timeframe="1d",
-            max_iterations=max_iterations,
+            max_iterations=build.max_iterations,
             strategy_type=strat_type,
+            start_iteration=start_iteration,  # Resume from here
         )
     )
 
     return BuildResponse(
-        uuid=new_build.uuid,
-        strategy_id=new_build.strategy_id,
-        status=new_build.status,
-        phase=new_build.phase,
-        tokens_consumed=new_build.tokens_consumed,
-        iteration_count=new_build.iteration_count,
-        max_iterations=new_build.max_iterations,
-        started_at=new_build.started_at,
-        completed_at=new_build.completed_at,
+        uuid=build.uuid,
+        strategy_id=build.strategy_id,
+        status=build.status,
+        phase=build.phase,
+        tokens_consumed=build.tokens_consumed,
+        iteration_count=build.iteration_count,
+        max_iterations=build.max_iterations,
+        started_at=build.started_at,
+        completed_at=build.completed_at,
         strategy_type=strategy.strategy_type,
         strategy_name=strategy.name,
     )

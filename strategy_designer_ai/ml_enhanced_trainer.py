@@ -777,9 +777,10 @@ class EnhancedMLTrainer:
     ]
 
     def __init__(self, symbols: List[str] = None, period_years: int = 2,
-                 config: EnhancedMLConfig = None):
+                 config: EnhancedMLConfig = None, timeframe: str = '1d'):
         self.symbols = symbols or self.SEMICONDUCTOR_SYMBOLS
         self.period_years = period_years
+        self.timeframe = timeframe
         self.config = config or EnhancedMLConfig()
         self.data_provider = DataProvider()
 
@@ -813,10 +814,11 @@ class EnhancedMLTrainer:
         days = self.period_years * 365 + 100
         print(f"  📊 Requesting {days} days of data for {len(self.symbols)} symbols...")
         print(f"  📡 Using Polygon API (parallel fetch)...")
+        print(f"  ⏱️  Timeframe: {self.timeframe}")
 
         # Fetch all symbols in parallel for speed
         self.stock_data = await self.data_provider.get_multiple_symbols(
-            self.symbols, days=days, interval='day', parallel=True
+            self.symbols, days=days, interval=self.timeframe, parallel=True
         )
 
         total_bars = 0
