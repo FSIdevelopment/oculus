@@ -25,7 +25,7 @@ from app.schemas.strategies import BuildResponse, BuildIterationResponse, BuildL
 from pydantic import ValidationError
 from app.services.build_orchestrator import BuildOrchestrator
 from app.services.docker_builder import DockerBuilder
-from app.services.balance import deduct_tokens
+from app.services.balance import deduct_tokens, check_balance
 from app.config import settings
 from sqlalchemy import select as sa_select
 
@@ -147,6 +147,7 @@ async def _build_strategy_container(
     iteration: int,
     max_iterations: int,
     iteration_logs: list,
+    iteration_id: str,
 ) -> str:
     """
     Build the strategy container files: copy static templates,
@@ -194,13 +195,22 @@ async def _build_strategy_container(
         training_results=training_results,
         strategy_type=strategy_type or "",
     )
-    (output_path / "config.json").write_text(config_json)
 
-    # Parse config for downstream use
+    # Parse config for downstream use and inject build_info metadata
     try:
         config = json.loads(config_json)
     except json.JSONDecodeError:
         config = {}
+
+    # Inject build_info metadata (iteration_number is 1-indexed)
+    config["build_info"] = {
+        "build_id": build_id,
+        "iteration_id": iteration_id,
+        "iteration_number": iteration + 1,
+    }
+
+    # Write config with injected metadata
+    (output_path / "config.json").write_text(json.dumps(config, indent=2))
 
     # Generate strategy.py
     await _publish_progress(build_id, {
@@ -514,40 +524,34 @@ async def _run_build_loop(
                 except Exception:
                     pass  # Redis check is best-effort
 
-                # Deduct tokens for this iteration
-                try:
-                    await deduct_tokens(
-                        bg_db,
-                        user_id,
-                        settings.TOKENS_PER_ITERATION,
-                        f"Build iteration {iteration + 1} for '{strategy_name}'"
-                    )
-                    build.tokens_consumed += settings.TOKENS_PER_ITERATION
+                # Check balance before starting iteration (fail fast)
+                has_balance = await check_balance(
+                    bg_db,
+                    user_id,
+                    settings.TOKENS_PER_ITERATION
+                )
+                if not has_balance:
+                    # Insufficient balance — stop build gracefully
+                    build.status = "stopped"
+                    build.phase = "insufficient_tokens"
+                    build.completed_at = datetime.utcnow()
+                    build.logs = json.dumps({
+                        "error": "Insufficient token balance",
+                        "message": f"Build stopped at iteration {iteration + 1}. Please purchase more tokens to continue.",
+                        "iterations_completed": iteration,
+                        "tokens_consumed": build.tokens_consumed,
+                    })
                     await bg_db.commit()
-                except HTTPException as e:
-                    if e.status_code == 402:
-                        # Insufficient balance — stop build gracefully
-                        build.status = "stopped"
-                        build.phase = "insufficient_tokens"
-                        build.completed_at = datetime.utcnow()
-                        build.logs = json.dumps({
-                            "error": "Insufficient token balance",
-                            "message": f"Build stopped at iteration {iteration + 1}. Please purchase more tokens to continue.",
-                            "iterations_completed": iteration,
-                            "tokens_consumed": build.tokens_consumed,
-                        })
-                        await bg_db.commit()
-                        await _publish_progress(build_id, {
-                            "phase": "stopped",
-                            "status": "insufficient_tokens",
-                            "message": f"Build stopped — insufficient token balance. {iteration} iterations completed.",
-                            "tokens_consumed": build.tokens_consumed,
-                            "iteration_count": build.iteration_count,
-                            "max_iterations": max_iterations,
-                        })
-                        logger.info("Build %s stopped at iteration %d due to insufficient tokens", build_id, iteration + 1)
-                        return
-                    raise  # Re-raise non-402 errors
+                    await _publish_progress(build_id, {
+                        "phase": "stopped",
+                        "status": "insufficient_tokens",
+                        "message": f"Build stopped — insufficient token balance. {iteration} iterations completed.",
+                        "tokens_consumed": build.tokens_consumed,
+                        "iteration_count": build.iteration_count,
+                        "max_iterations": max_iterations,
+                    })
+                    logger.info("Build %s stopped at iteration %d due to insufficient tokens", build_id, iteration + 1)
+                    return
 
                 # Create BuildIteration record for this iteration
                 iter_start_time = time.time()
@@ -747,6 +751,28 @@ async def _run_build_loop(
                 build.iteration_count = iteration + 1
                 await bg_db.commit()
 
+                # Deduct tokens AFTER iteration completion
+                try:
+                    await deduct_tokens(
+                        bg_db,
+                        user_id,
+                        settings.TOKENS_PER_ITERATION,
+                        f"Build iteration {iteration + 1} for '{strategy_name}'"
+                    )
+                    build.tokens_consumed += settings.TOKENS_PER_ITERATION
+                    await bg_db.commit()
+                except HTTPException as e:
+                    if e.status_code == 402:
+                        # Edge case: balance changed between check and deduct
+                        # Log warning but don't fail the build (iteration already completed)
+                        logger.warning(
+                            "Build %s iteration %d completed but token deduction failed (balance changed). "
+                            "Tokens consumed may be inconsistent.",
+                            build_id, iteration + 1
+                        )
+                    else:
+                        raise  # Re-raise non-402 errors
+
                 # Non-blocking: update creation guide with lessons from this iteration
                 try:
                     await orchestrator.update_creation_guide(
@@ -814,6 +840,7 @@ async def _run_build_loop(
                         iteration=iteration,
                         max_iterations=max_iterations,
                         iteration_logs=iteration_logs,
+                        iteration_id=iteration_record.uuid,
                     )
 
                     # Transition to testing phase (58.4 will implement the testing logic)
@@ -979,6 +1006,7 @@ async def _run_build_loop(
                         iteration=best_iter_num,
                         max_iterations=max_iterations,
                         iteration_logs=iteration_logs,
+                        iteration_id=best_iter.uuid,
                     )
 
                     # Transition to testing phase
@@ -1113,6 +1141,7 @@ async def trigger_build(
         status="queued",
         phase="initializing",
         started_at=datetime.utcnow(),
+        max_iterations=max_iterations,
     )
 
     db.add(build)
@@ -1160,6 +1189,7 @@ async def trigger_build(
         phase=build.phase,
         tokens_consumed=build.tokens_consumed,
         iteration_count=build.iteration_count,
+        max_iterations=build.max_iterations,
         started_at=build.started_at,
         completed_at=build.completed_at,
         strategy_type=strategy.strategy_type,
@@ -1345,6 +1375,7 @@ async def get_build_status(
         phase=build.phase,
         tokens_consumed=build.tokens_consumed,
         iteration_count=build.iteration_count,
+        max_iterations=build.max_iterations,
         started_at=build.started_at,
         completed_at=build.completed_at,
         strategy_type=strategy.strategy_type if strategy else None,
@@ -1470,6 +1501,7 @@ async def restart_build(
         status="queued",
         phase="initializing",
         started_at=datetime.utcnow(),
+        max_iterations=max_iterations,
     )
     db.add(new_build)
     await db.commit()
@@ -1513,6 +1545,7 @@ async def restart_build(
         phase=new_build.phase,
         tokens_consumed=new_build.tokens_consumed,
         iteration_count=new_build.iteration_count,
+        max_iterations=new_build.max_iterations,
         started_at=new_build.started_at,
         completed_at=new_build.completed_at,
         strategy_type=strategy.strategy_type,

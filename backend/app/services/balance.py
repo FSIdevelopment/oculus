@@ -54,6 +54,22 @@ async def deduct_tokens(
     return transaction
 
 
+async def check_balance(
+    db: AsyncSession,
+    user_id: str,
+    required_amount: float
+) -> bool:
+    """
+    Check if user has enough tokens without deducting.
+
+    This is a lightweight read-only check (no SELECT FOR UPDATE).
+    Use this before starting expensive operations to fail fast.
+    """
+    result = await db.execute(select(User).where(User.uuid == user_id))
+    user = result.scalar_one_or_none()
+    return user is not None and user.balance >= required_amount
+
+
 async def add_tokens(
     db: AsyncSession,
     user_id: str,
@@ -62,7 +78,7 @@ async def add_tokens(
 ) -> Balance:
     """
     Atomically add tokens to user balance.
-    
+
     Uses SELECT FOR UPDATE to prevent race conditions.
     """
     # Get user with lock
@@ -70,16 +86,16 @@ async def add_tokens(
         select(User).where(User.uuid == user_id).with_for_update()
     )
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Add tokens
     user.balance += amount
-    
+
     # Create transaction record
     transaction = Balance(
         tokens=amount,
@@ -88,9 +104,9 @@ async def add_tokens(
         user_id=user_id,
         status="completed"
     )
-    
+
     db.add(transaction)
     await db.flush()
-    
+
     return transaction
 
