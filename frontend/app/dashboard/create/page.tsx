@@ -284,19 +284,20 @@ export default function CreateStrategyPage() {
             <label className="block text-sm font-medium text-text mb-2">
               Max Iterations
             </label>
-            <input
-              type="number"
+            <select
               value={formData.max_iterations}
-              onChange={(e) => setFormData({ ...formData, max_iterations: parseInt(e.target.value) || 1 })}
-              min="1"
-              max="20"
+              onChange={(e) => setFormData({ ...formData, max_iterations: parseInt(e.target.value) })}
               className="w-full bg-background border border-border rounded px-3 py-2 text-text focus:outline-none focus:border-primary"
-            />
+            >
+              {[5, 10, 15, 20, 30, 40, 50, 75, 100].map((n) => (
+                <option key={n} value={n}>{n} iterations</option>
+              ))}
+            </select>
             <p className="text-xs text-text-secondary mt-1">
               Maximum number of AI design-train-refine cycles
             </p>
             <p className="text-xs text-text-secondary mt-1">
-              Estimated build time: ~{formData.max_iterations * 3}–{formData.max_iterations * 5} minutes
+              Estimated build time: ~{formData.max_iterations * 6} minutes
             </p>
           </div>
 

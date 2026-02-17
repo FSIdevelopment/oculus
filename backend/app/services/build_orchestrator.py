@@ -31,6 +31,9 @@ class BuildOrchestrator:
         self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.redis_client: Optional[redis.Redis] = None
         self.logs: List[str] = []
+        logger.info("BuildOrchestrator initialized")
+        logger.info(f"BuildOrchestrator initialized with build: {self.build.uuid}")
+        logger.info(f"BuildOrchestrator initialized with user: {self.user.uuid}")
 
     async def initialize(self):
         """Initialize Redis connection via Ngrok tunnel."""
@@ -48,6 +51,40 @@ class BuildOrchestrator:
         self.logs.append(log_entry)
         print(log_entry)
 
+    async def _publish_thinking_delta(self, thinking_content: str, block_number: int, is_complete: bool = False, iteration: int = 0):
+        """Publish thinking content (delta or complete) via Redis for WebSocket relay to frontend.
+
+        Args:
+            thinking_content: The thinking text to publish
+            block_number: Which thinking block this belongs to
+            is_complete: True if this is the final content for this block
+            iteration: Current iteration number (for clearing thinking blocks between iterations)
+        """
+        try:
+            # Create a fresh Redis connection for this publish (same pattern as _publish_progress)
+            redis_client = await redis.from_url(settings.REDIS_URL)
+
+            channel = f"oculus:training:progress:build:{self.build.uuid}"
+            message = {
+                "type": "thinking",
+                "block_number": block_number,
+                "content": thinking_content,
+                "is_complete": is_complete,
+                "iteration": iteration,
+                "timestamp": datetime.utcnow().isoformat(),
+                "phase": "llm_thinking"
+            }
+
+            # Publish to Redis (will be relayed to frontend via WebSocket)
+            await redis_client.publish(channel, json.dumps(message))
+            await redis_client.close()
+
+            status = "complete" if is_complete else "streaming"
+            logger.info(f"✓ Published thinking block {block_number} ({status}, {len(thinking_content)} chars)")
+        except Exception as e:
+            # Best-effort - don't crash build if publishing fails
+            logger.warning(f"Failed to publish thinking delta: {e}")
+
     async def design_strategy(
         self,
         strategy_name: str,
@@ -56,6 +93,7 @@ class BuildOrchestrator:
         timeframe: str,
         target_return: float,
         strategy_type: Optional[str] = None,
+        iteration: int = 0,
     ) -> Dict[str, Any]:
         """Call Claude API to design strategy.
 
@@ -84,15 +122,17 @@ class BuildOrchestrator:
         )
 
         try:
+            logger.debug(f"Sending design prompt to Claude: {prompt}")
             response = self.client.messages.create(
                 model="claude-opus-4-6",
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
+                stream=True,
             )
 
             # Extract design and thinking from response
-            result = self._parse_design_response(response)
+            result = await self._parse_design_response(response, iteration)
             desc_preview = result["design"].get("strategy_description", "N/A")[:100]
             self._log(f"Strategy design completed: {desc_preview}")
             return result
@@ -132,8 +172,14 @@ class BuildOrchestrator:
         self._log(f"Job dispatched with ID: {job_id}")
         return job_id
 
-    async def listen_for_results(self, job_id: str, timeout: int = 3600) -> Dict[str, Any]:
-        """Listen for training results from Redis."""
+    async def listen_for_results(self, job_id: str, timeout: int = 3600, stop_check_callback=None) -> Dict[str, Any]:
+        """Listen for training results from Redis.
+
+        Args:
+            job_id: Training job identifier
+            timeout: Maximum wait time in seconds
+            stop_check_callback: Optional async function that returns True if build should stop
+        """
         self._log(f"Listening for results on {job_id}")
 
         result_key = f"result:{job_id}"
@@ -147,6 +193,11 @@ class BuildOrchestrator:
                 # Clean up result key to prevent stale data in future re-runs
                 await self.redis_client.delete(result_key)
                 return result
+
+            # Check for stop signal
+            if stop_check_callback and await stop_check_callback():
+                logger.info(f"Build stopped while waiting for training results: {job_id}")
+                raise asyncio.CancelledError("Build stopped by user")
 
             # Check timeout
             elapsed = (datetime.utcnow() - start_time).total_seconds()
@@ -183,9 +234,10 @@ class BuildOrchestrator:
                 max_tokens=settings.CLAUDE_MAX_TOKENS,
                 thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": prompt}],
+                stream=True,
             )
 
-            result = self._parse_design_response(response)
+            result = await self._parse_design_response(response, iteration)
             self._log(f"Strategy refined (iteration {iteration})")
             return result
 
@@ -584,22 +636,84 @@ Make meaningful changes to parameters, features, and rules — don't just tweak 
             return False
         return True
 
-    def _parse_design_response(self, response) -> Dict[str, Any]:
+    async def _parse_design_response(self, response, iteration: int = 0) -> Dict[str, Any]:
         """Parse Claude response to extract design JSON and thinking content.
+
+        Handles both streaming and non-streaming responses.
 
         Returns a dict with keys:
         - "design": the parsed strategy design JSON
         - "thinking": concatenated thinking block text (empty string if none)
         - "thinking_blocks": list of individual thinking blocks
         """
-        # Extract text and thinking blocks from response
         text = ""
         thinking_parts: List[str] = []
-        for block in response.content:
-            if block.type == "thinking" and hasattr(block, "thinking"):
-                thinking_parts.append(block.thinking)
-            elif hasattr(block, "text"):
-                text += block.text
+
+        # Check if response is a stream or a complete Message
+        if hasattr(response, 'content'):
+            # Non-streaming response - has .content attribute
+            for block in response.content:
+                if block.type == "thinking" and hasattr(block, "thinking"):
+                    thinking_parts.append(block.thinking)
+                elif hasattr(block, "text"):
+                    text += block.text
+        else:
+            # Streaming response - iterate through events
+            current_block_type = None
+            current_block_content = ""
+            last_published_length = 0
+            publish_chunk_size = 200  # Publish every 200 characters to avoid too many tiny messages
+            logger.info("🔄 Starting to process streaming response...")
+
+            for event in response:
+                # New content block starting
+                if event.type == "content_block_start":
+                    current_block_type = event.content_block.type
+                    current_block_content = ""
+                    last_published_length = 0
+                    logger.info(f"📦 New content block started: {current_block_type}")
+
+                # Content within a block
+                elif event.type == "content_block_delta":
+                    if event.delta.type == "thinking_delta":
+                        current_block_content += event.delta.thinking
+
+                        # Publish incremental updates for thinking blocks as they stream in
+                        if len(current_block_content) - last_published_length >= publish_chunk_size:
+                            await self._publish_thinking_delta(
+                                current_block_content,
+                                len(thinking_parts) + 1,  # Block number (will be finalized when complete)
+                                is_complete=False,
+                                iteration=iteration
+                            )
+                            last_published_length = len(current_block_content)
+
+                    elif event.delta.type == "text_delta":
+                        current_block_content += event.delta.text
+
+                # Block finished - save it
+                elif event.type == "content_block_stop":
+                    if current_block_type == "thinking":
+                        # Save thinking block
+                        thinking_parts.append(current_block_content)
+                        logger.info(f"🧠 Thinking block #{len(thinking_parts)} completed ({len(current_block_content)} chars)")
+                        self._log(f"Thinking block completed ({len(current_block_content)} chars)")
+
+                        # Publish final complete version
+                        await self._publish_thinking_delta(
+                            current_block_content,
+                            len(thinking_parts),
+                            is_complete=True,
+                            iteration=iteration
+                        )
+                    elif current_block_type == "text":
+                        text += current_block_content
+                        logger.debug(f"📝 Text block completed ({len(current_block_content)} chars)")
+                    current_block_type = None
+                    current_block_content = ""
+                    last_published_length = 0
+
+            logger.info(f"✅ Streaming complete: {len(thinking_parts)} thinking blocks, {len(text)} chars of text")
 
         thinking_text = "\n".join(thinking_parts)
 
@@ -628,7 +742,7 @@ Make meaningful changes to parameters, features, and rules — don't just tweak 
 
         # If we got a design but rules are empty, retry once
         if design and not self._validate_design_rules(design):
-            logger.warning("Parsed design has blank rules — retrying Claude once")
+            logger.warning("Parsed design has blank rules — retrying AI once...")
             try:
                 retry_response = self.client.messages.create(
                     model="claude-opus-4-6",

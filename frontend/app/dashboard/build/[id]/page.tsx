@@ -642,6 +642,11 @@ export default function BuildDetailPage() {
   const [buildIterations, setBuildIterations] = useState<BuildIteration[]>([])
   const [_loadingIterations, setLoadingIterations] = useState(false)
 
+  // State for live thinking blocks (streaming from WebSocket)
+  const [thinkingBlocks, setThinkingBlocks] = useState<{[blockNumber: number]: {content: string, isComplete: boolean}}>({})
+  const [currentThinkingIteration, setCurrentThinkingIteration] = useState<number | null>(null)
+
+
   const wsRef = useRef<WebSocket | null>(null)
   const statusIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -650,6 +655,15 @@ export default function BuildDetailPage() {
   // Track the build UUID separately so WebSocket doesn't re-trigger on every poll update
   const [buildUuid, setBuildUuid] = useState<string | null>(null)
   const iterationsIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [elapsedTick, setElapsedTick] = useState(0)
+
+  // Tick every second for the Total Time counter
+  useEffect(() => {
+    const isTerminal = build?.status && ['completed', 'failed', 'stopped'].includes(build.status)
+    if (isTerminal) return
+    const timer = setInterval(() => setElapsedTick(t => t + 1), 1000)
+    return () => clearInterval(timer)
+  }, [build?.status])
 
   // Fetch per-iteration pricing from the backend on page load
   useEffect(() => {
@@ -918,6 +932,45 @@ export default function BuildDetailPage() {
 
             const progressData = newLog.data || {}
 
+            // Handle thinking blocks (streaming)
+            if (progressData.type === 'thinking') {
+              const blockNumber = progressData.block_number ?? 1
+              const content = progressData.content ?? ''
+              const isComplete = progressData.is_complete ?? false
+              const iteration = progressData.iteration
+
+              console.log(`🧠 Received thinking block #${blockNumber}: ${content.length} chars, complete=${isComplete}`)
+
+              // Clear thinking blocks when iteration changes (new iteration starting)
+              setCurrentThinkingIteration((prevIteration) => {
+                if (iteration !== undefined && prevIteration !== null && iteration !== prevIteration) {
+                  console.log(`🔄 New iteration detected (${prevIteration} → ${iteration}), clearing thinking blocks`)
+                  setThinkingBlocks({})
+                }
+                return iteration !== undefined ? iteration : prevIteration
+              })
+
+              setThinkingBlocks((prev) => {
+                const updated = {
+                  ...prev,
+                  [blockNumber]: { content, isComplete }
+                }
+                console.log('📊 Updated thinkingBlocks state:', Object.keys(updated).length, 'blocks')
+
+                // Auto-scroll to bottom when thinking is streaming (after state update)
+                if (!isComplete) {
+                  setTimeout(() => {
+                    const messagesContainer = document.querySelector('.design-thinking-messages')
+                    if (messagesContainer) {
+                      messagesContainer.scrollTop = messagesContainer.scrollHeight
+                    }
+                  }, 100)
+                }
+
+                return updated
+              })
+            }
+
             // Accumulate progress messages for rendering as individual bubbles
             if (newLog.message) {
               const message = newLog.message // Capture in const to satisfy TypeScript
@@ -1019,16 +1072,19 @@ export default function BuildDetailPage() {
   }
 
   // Helper: Calculate elapsed time — never show negative, stop counting on terminal states
-  const getElapsedTime = () => {
-    if (!build) return '0s'
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const getElapsedTime = (_tick?: number) => {
+    if (!build) return '0 00:00:00'
     const start = new Date(build.started_at).getTime()
     const end = build.completed_at ? new Date(build.completed_at).getTime() : Date.now()
-    const seconds = Math.max(0, Math.floor((end - start) / 1000))
-    if (seconds < 60) return `${seconds}s`
-    const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return `${minutes}m ${seconds % 60}s`
-    const hours = Math.floor(minutes / 60)
-    return `${hours}h ${minutes % 60}m`
+    const totalSeconds = Math.max(0, Math.floor((end - start) / 1000))
+    const days = Math.floor(totalSeconds / 86400)
+    const hours = Math.floor((totalSeconds % 86400) / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    if (days > 0) return `${days} Days ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
   }
 
   // Stop an active build
@@ -1467,19 +1523,14 @@ export default function BuildDetailPage() {
           )}
         </div>
 
-        {/* Est. Time / Build Duration - show for all build states when max_iterations is available */}
+        {/* Build Duration - estimated total build time based on iterations x 6 min */}
         {maxIterations != null && maxIterations > 0 && (
           <div className="bg-surface border border-border rounded-lg p-4">
-            <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">
-              {(build.status === 'running' || build.status === 'in_progress') ? 'Est. Time Left' : 'Build Duration'}
-            </p>
+            <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Build Duration</p>
             <div className="flex items-center gap-2">
               <Clock size={18} className="text-primary" />
               <p className="text-lg font-semibold text-text">
-                {(build.status === 'running' || build.status === 'in_progress')
-                  ? `~${Math.max(0, (maxIterations - (build.iteration_count ?? 0)) * 4)} min`
-                  : `~${(build.iteration_count ?? 0) * 4} min`
-                }
+                ~{maxIterations * 6} min
               </p>
             </div>
           </div>
@@ -1490,7 +1541,7 @@ export default function BuildDetailPage() {
           <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Total Time</p>
           <div className="flex items-center gap-2">
             <Clock size={18} className="text-primary" />
-            <p className="text-lg font-semibold text-text">{getElapsedTime()}</p>
+            <p className="text-lg font-semibold text-text">{getElapsedTime(elapsedTick)}</p>
           </div>
         </div>
       </div>
@@ -1691,7 +1742,7 @@ export default function BuildDetailPage() {
           {/* AI Chat Section — renamed heading (Change 1) */}
           <div className="bg-surface border border-border rounded-lg p-6">
             <h2 className="text-lg font-semibold text-text mb-6">Design Thinking</h2>
-            <div className="space-y-4 max-h-[600px] overflow-y-auto">
+            <div className="design-thinking-messages space-y-4 max-h-[600px] overflow-y-auto">
 
               {/* Chat messages - design output is the hero content */}
               {loadingChat ? (
@@ -1721,7 +1772,7 @@ export default function BuildDetailPage() {
                   return timeA - timeB
                 })
 
-                if (allMessages.length === 0) {
+                if (allMessages.length === 0 && Object.keys(thinkingBlocks).length === 0) {
                   return (
                     <div className="text-center py-12">
                       <p className="text-text-secondary">No design messages yet...</p>
@@ -1838,6 +1889,42 @@ export default function BuildDetailPage() {
                         </div>
                       )
                     })}
+
+                    {/* Live streaming thinking blocks - always at bottom (current thinking) */}
+                    {Object.keys(thinkingBlocks).length > 0 && (
+                      <>
+                        {Object.entries(thinkingBlocks)
+                          .sort(([a], [b]) => Number(a) - Number(b))
+                          .map(([blockNumber, block]) => (
+                            <div key={`thinking-${blockNumber}`} className="flex gap-3">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400 ${!block.isComplete ? 'animate-pulse' : ''}`}>
+                                <Brain size={16} />
+                              </div>
+                              <div className={`flex-1 bg-purple-500/10 border rounded-lg p-4 transition-all duration-300 ${!block.isComplete ? 'border-purple-500/40 shadow-lg shadow-purple-500/20' : 'border-purple-500/20'}`}>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide">
+                                    Thinking
+                                  </p>
+                                  {!block.isComplete && (
+                                    <div className="flex items-center gap-1">
+                                      <Loader className="animate-spin" size={12} />
+                                      <span className="text-xs text-purple-500">streaming...</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <p className="text-sm text-text break-words whitespace-pre-wrap">
+                                  {block.content}
+                                  {!block.isComplete && (
+                                    <span className="inline-flex ml-1">
+                                      <span className="animate-pulse text-purple-500 font-bold">...</span>
+                                    </span>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                      </>
+                    )}
                   </div>
                 )
               })()}

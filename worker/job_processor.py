@@ -56,6 +56,16 @@ class JobProcessor:
             except ImportError:
                 logger.warning("PyTorch not available, GPU acceleration disabled")
 
+    def _check_stop_signal(self, build_id: str) -> bool:
+        """Check if build should be stopped via Redis stop key."""
+        try:
+            stop_key = f"oculus:build:stop:{build_id}"
+            stop_flag = self.redis.get(stop_key)
+            return bool(stop_flag)
+        except Exception as e:
+            logger.warning(f"Failed to check stop signal: {e}")
+            return False
+
     async def process_job(self, job_data: Dict[str, Any], job_id: str) -> Dict[str, Any]:
         """Process a training job.
 
@@ -83,8 +93,17 @@ class JobProcessor:
             iteration_uuid = job_data.get('iteration_uuid')  # For BuildIteration DB persistence
 
             # Extract basic parameters (backward compatible with old job format)
-            years = design.get('years', 2) if design else 2
+            years = design.get('years', 0.25) if design else 0.25
             strategy_type = design.get('strategy_type', 'momentum') if design else 'momentum'
+
+            # Enforce minimum data periods based on timeframe
+            # Daily/weekly: at least 1 year; intraday (<1d): at least 6 months
+            if timeframe in ['1d', '1day', 'daily', '1w', 'weekly']:
+                years = max(years, 1.0)
+            else:
+                # Intraday (1m, 5m, 15m, 30m, 1h, 4h)
+                years = max(years, 0.5)
+            logger.info(f"[{job_id}] Timeframe {timeframe}: using {years} years of data")
 
             # Build ML config dynamically from LLM design
             # Top-level fields come directly from the design dict
@@ -146,6 +165,15 @@ class JobProcessor:
                         f"LSTM={'ON' if ml_training_config.train_lstm else 'OFF'}")
             logger.info(f"[{job_id}]   Config search model: {ml_training_config.config_search_model}")
             reporter.report_phase("job_received", "complete")
+
+            # Check for stop signal before starting training
+            if self._check_stop_signal(build_id):
+                logger.info(f"[{job_id}] Build stopped before training")
+                return {
+                    "status": "stopped",
+                    "message": "Build stopped by user before training",
+                    "design_config": design
+                }
 
             # Step 1: Train ML models using the design-driven config
             reporter.report_phase("training", "in_progress")

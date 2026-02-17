@@ -26,6 +26,8 @@ logger = logging.getLogger('DataProvider')
 # API Keys and Configuration
 ALPHAVANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY', 'PLACEHOLDER_ROTATE_ME')
 ALPHAVANTAGE_BASE_URL = "https://www.alphavantage.co/query"
+POLYGON_API_KEY = os.getenv('POLYGON_API_KEY', '')
+POLYGON_BASE_URL = "https://api.polygon.io"
 
 
 class DataProvider:
@@ -51,7 +53,7 @@ class DataProvider:
         Args:
             symbol: Stock ticker (e.g., 'AAPL', 'MSFT')
             days: Number of days of historical data
-            interval: 'daily', 'weekly', or 'monthly'
+            interval: 'daily', 'weekly', 'monthly', '1h', 'hourly'
 
         Returns:
             DataFrame with columns: Open, High, Low, Close, Volume
@@ -62,11 +64,21 @@ class DataProvider:
             logger.debug(f"Using cached data for {symbol}")
             return self.cache[cache_key]
 
-        # Try AlphaVantage first
+        # Use Polygon as PRIMARY data source for all timeframes
+        if POLYGON_API_KEY:
+            logger.info(f"Using Polygon (primary) for {symbol} [{interval}]")
+            df = await self._fetch_polygon(symbol, interval, days)
+            if df is not None and not df.empty:
+                self.cache[cache_key] = df
+                logger.info(f"Fetched {len(df)} bars for {symbol}")
+                return df
+            logger.warning(f"Polygon returned no data for {symbol}, falling back to free APIs")
+
+        # Fallback: AlphaVantage for daily data
         df = await self._fetch_alphavantage(symbol, interval)
 
         if df is None or df.empty:
-            # Fallback to Yahoo Finance
+            # Fallback: Yahoo Finance
             logger.warning(f"AlphaVantage failed for {symbol}, trying Yahoo Finance")
             df = await self._fetch_yahoo(symbol, days)
 
@@ -202,6 +214,81 @@ class DataProvider:
             df['Close'] = df['Adj Close']
 
         return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+    async def _fetch_polygon(
+        self,
+        symbol: str,
+        interval: str = '1h',
+        days: int = 90
+    ) -> Optional[pd.DataFrame]:
+        """Fetch intraday data from Polygon.io (premium data source for hourly/minute data)"""
+        if not POLYGON_API_KEY:
+            logger.warning("Polygon API key not configured")
+            return None
+
+        try:
+            import aiohttp
+
+            # Map interval to Polygon timespan and multiplier
+            timespan_map = {
+                '1m': ('minute', 1),
+                '5m': ('minute', 5),
+                '15m': ('minute', 15),
+                '30m': ('minute', 30),
+                '1h': ('hour', 1),
+                '1hour': ('hour', 1),
+                'hourly': ('hour', 1),
+                '4h': ('hour', 4),
+                '1d': ('day', 1),
+                '1day': ('day', 1),
+                'daily': ('day', 1),
+                '1w': ('week', 1),
+                'weekly': ('week', 1),
+            }
+
+            timespan, multiplier = timespan_map.get(interval.lower(), ('hour', 1))
+
+            # Calculate date range
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(days=days)
+
+            url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
+
+            params = {'apiKey': POLYGON_API_KEY, 'adjusted': 'true', 'sort': 'asc', 'limit': 50000}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status != 200:
+                        logger.error(f"Polygon API error for {symbol}: HTTP {response.status}")
+                        return None
+
+                    data = await response.json()
+
+                    if data.get('status') != 'OK' or not data.get('results'):
+                        logger.warning(f"No Polygon data for {symbol}")
+                        return None
+
+                    # Convert to DataFrame
+                    df = pd.DataFrame(data['results'])
+                    df['timestamp'] = pd.to_datetime(df['t'], unit='ms', utc=True)
+                    df = df.set_index('timestamp')
+
+                    # Rename columns to match expected format
+                    df = df.rename(columns={
+                        'o': 'Open',
+                        'h': 'High',
+                        'l': 'Low',
+                        'c': 'Close',
+                        'v': 'Volume'
+                    })
+
+                    df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+                    logger.info(f"Polygon: Fetched {len(df)} bars for {symbol}")
+                    return df
+
+        except Exception as e:
+            logger.error(f"Polygon fetch error for {symbol}: {e}")
+            return None
 
     async def _fetch_yahoo(
         self,

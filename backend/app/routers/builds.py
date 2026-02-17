@@ -530,13 +530,27 @@ async def _run_build_loop(
 
             # Iteration loop: design → train → refine → repeat
             # Starts from start_iteration to support resuming stopped/failed builds
-            for iteration in range(start_iteration, max_iterations):
-                # Check for stop signal via Redis key
+            async def check_stop_signal():
+                """Check if build should be stopped. Returns True if stop requested."""
+                stop_client = None
                 try:
                     stop_client = await redis_async.from_url(settings.REDIS_URL)
                     stop_flag = await stop_client.get(f"oculus:build:stop:{build_id}")
-                    await stop_client.close()
-                    if stop_flag:
+                    return bool(stop_flag)
+                except Exception as e:
+                    logger.warning(f"Failed to check stop signal: {e}")
+                    return False
+                finally:
+                    if stop_client:
+                        try:
+                            await stop_client.close()
+                        except Exception:
+                            pass  # Ignore cleanup errors
+
+            for iteration in range(start_iteration, max_iterations):
+                # Check for stop signal at start of iteration
+                try:
+                    if await check_stop_signal():
                         build.status = "stopped"
                         build.phase = "stopped"
                         build.completed_at = datetime.utcnow()
@@ -592,15 +606,32 @@ async def _run_build_loop(
                     logger.info("Build %s stopped at iteration %d due to insufficient tokens", build_id, iteration + 1)
                     return
 
-                # Create BuildIteration record for this iteration
+                # Create or reuse BuildIteration record for this iteration
+                # When restarting, an iteration record may already exist
                 iter_start_time = time.time()
-                iteration_record = BuildIteration(
-                    build_id=build_id,
-                    user_id=user_id,
-                    iteration_number=iteration,
-                    status="pending",
+                result = await bg_db.execute(
+                    select(BuildIteration).where(
+                        (BuildIteration.build_id == build_id) &
+                        (BuildIteration.iteration_number == iteration)
+                    )
                 )
-                bg_db.add(iteration_record)
+                iteration_record = result.scalar_one_or_none()
+
+                if iteration_record:
+                    # Reuse existing iteration record and reset its status
+                    iteration_record.status = "pending"
+                    iteration_record.duration_seconds = None
+                    iteration_record.updated_at = datetime.utcnow()
+                else:
+                    # Create new iteration record
+                    iteration_record = BuildIteration(
+                        build_id=build_id,
+                        user_id=user_id,
+                        iteration_number=iteration,
+                        status="pending",
+                    )
+                    bg_db.add(iteration_record)
+
                 await bg_db.commit()
                 await bg_db.refresh(iteration_record)
                 iteration_uuid = iteration_record.uuid
@@ -628,6 +659,16 @@ async def _run_build_loop(
                         iteration
                     )
 
+                    # Check stop signal before LLM call
+                    if await check_stop_signal():
+                        build.status = "stopped"
+                        build.phase = "stopped"
+                        build.completed_at = datetime.utcnow()
+                        iteration_record.status = "stopped"
+                        await bg_db.commit()
+                        logger.info("Build %s stopped before LLM design", build_id)
+                        return
+
                     llm_result = await orchestrator.design_strategy(
                         strategy_name=strategy_name,
                         symbols=strategy_symbols,
@@ -635,6 +676,7 @@ async def _run_build_loop(
                         timeframe=timeframe,
                         target_return=target_return,
                         strategy_type=strategy_type,
+                        iteration=iteration,
                     )
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
@@ -695,12 +737,31 @@ async def _run_build_loop(
                         iteration
                     )
 
-                    llm_result = await orchestrator.refine_strategy(
+                    # Run refinement + creation guide update in parallel (both are LLM calls)
+                    async def _guide_update_safe():
+                        """Update creation guide with its own DB session; never raises."""
+                        try:
+                            async with AsyncSessionLocal() as guide_db:
+                                await orchestrator.update_creation_guide(
+                                    db=guide_db,
+                                    strategy_type=strategy_type,
+                                    design=design,
+                                    training_results=training_results,
+                                    backtest_results=training_results.get("backtest_results", {}),
+                                )
+                                await guide_db.commit()
+                        except Exception as e:
+                            logger.warning(f"Creation guide update failed (non-fatal): {e}")
+
+                    refine_task = orchestrator.refine_strategy(
                         previous_design=design,
                         backtest_results=training_results.get("backtest_results", {}),
                         iteration=iteration,
                         strategy_type=strategy_type,
                     )
+                    guide_task = _guide_update_safe()
+                    results = await asyncio.gather(refine_task, guide_task)
+                    llm_result = results[0]
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
 
@@ -741,6 +802,16 @@ async def _run_build_loop(
 
                     iteration_logs.append(f"Iteration {iteration}: Strategy refined")
 
+                # Check stop signal before dispatching training
+                if await check_stop_signal():
+                    build.status = "stopped"
+                    build.phase = "stopped"
+                    build.completed_at = datetime.utcnow()
+                    iteration_record.status = "stopped"
+                    await bg_db.commit()
+                    logger.info("Build %s stopped before training dispatch", build_id)
+                    return
+
                 # Dispatch training job
                 build.phase = "training"
                 iteration_record.status = "training"
@@ -764,9 +835,23 @@ async def _run_build_loop(
                     design, strategy_symbols, timeframe, iteration_uuid=iteration_uuid
                 )
 
-                # Listen for training results
-                training_results = await orchestrator.listen_for_results(job_id)
-                iteration_logs.append(f"Iteration {iteration}: Training completed")
+                # Listen for training results (with stop signal checking every 5s)
+                try:
+                    training_results = await orchestrator.listen_for_results(job_id, stop_check_callback=check_stop_signal)
+                    iteration_logs.append(f"Iteration {iteration}: Training completed")
+                except asyncio.CancelledError:
+                    # Build stopped during training
+                    build.status = "stopped"
+                    build.phase = "stopped"
+                    build.completed_at = datetime.utcnow()
+                    iteration_record.status = "stopped"
+                    await bg_db.commit()
+                    await _publish_progress(build_id, {
+                        "phase": "stopped",
+                        "message": "Build stopped by user during training",
+                    })
+                    logger.info("Build %s stopped during training", build_id)
+                    return
 
                 # Persist training results to BuildIteration record
                 iteration_record.status = "complete" if training_results.get("status") == "success" else "failed"
@@ -813,19 +898,6 @@ async def _run_build_loop(
                         )
                     else:
                         raise  # Re-raise non-402 errors
-
-                # Non-blocking: update creation guide with lessons from this iteration
-                try:
-                    await orchestrator.update_creation_guide(
-                        db=bg_db,
-                        strategy_type=strategy_type,
-                        design=design,
-                        training_results=training_results,
-                        backtest_results=training_results.get("backtest_results", {}),
-                    )
-                    await bg_db.commit()
-                except Exception:
-                    pass  # update_creation_guide already logs warnings internally
 
                 # Publish per-iteration training results via Redis
                 await _publish_progress(build_id, {
@@ -1192,6 +1264,15 @@ async def trigger_build(
     build_id = build.uuid
     user_id = current_user.uuid
     strategy_name = strategy.name
+
+    # Clear any existing stop signal from previous builds (prevents immediate stops)
+    try:
+        redis_client = await redis_async.from_url(settings.REDIS_URL)
+        deleted_count = await redis_client.delete(f"oculus:build:stop:{build_id}")
+        await redis_client.close()
+        logger.info(f"Cleared stop signal for build {build_id} (deleted {deleted_count} keys)")
+    except Exception as e:
+        logger.error(f"Failed to clear stop signal for build {build_id}: {e}", exc_info=True)
 
     # Backward-compatible symbols guard: if symbols is a dict (old data),
     # extract the "symbols" list from it; if it's already a list, use as-is
@@ -1569,6 +1650,15 @@ async def restart_build(
     strat_type = strategy.strategy_type  # e.g. "Momentum", "Mean Reversion", etc.
 
     logger.info(f"Resuming build {build_id} from iteration {start_iteration} of {build.max_iterations}")
+
+    # Clear any existing stop signal from previous builds (prevents immediate stops)
+    try:
+        redis_client = await redis_async.from_url(settings.REDIS_URL)
+        deleted_count = await redis_client.delete(f"oculus:build:stop:{build_id}")
+        await redis_client.close()
+        logger.info(f"Cleared stop signal for build {build_id} (deleted {deleted_count} keys)")
+    except Exception as e:
+        logger.error(f"Failed to clear stop signal for build {build_id}: {e}", exc_info=True)
 
     # Launch the build loop as a background task, resuming from last completed iteration
     asyncio.create_task(

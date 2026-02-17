@@ -813,8 +813,12 @@ class EnhancedMLTrainer:
 
         days = self.period_years * 365 + 100
         print(f"  📊 Requesting {days} days of data for {len(self.symbols)} symbols...")
-        print(f"  📡 Using Polygon API (parallel fetch)...")
+        print(f"  📡 Using AlphaVantage/Yahoo Finance (parallel fetch)...")
         print(f"  ⏱️  Timeframe: {self.timeframe}")
+
+        # Warning for intraday timeframes
+        if self.timeframe in ['1h', '5m', '15m', '30m', '1m', '60min']:
+            print(f"  ⚠️  NOTE: Free APIs limit intraday data to ~30-60 days (not {self.period_years} years)")
 
         # Fetch all symbols in parallel for speed
         self.stock_data = await self.data_provider.get_multiple_symbols(
@@ -988,6 +992,26 @@ class EnhancedMLTrainer:
 
         elapsed = time.time() - start_time
         print(f"\n  ⏱️  Configuration search completed in {elapsed:.1f}s")
+
+        # Check if any valid configuration was found
+        if best_config is None:
+            error_msg = (
+                "\n  ❌ ERROR: No valid label configurations found!\n"
+                f"  📊 Data available: {len(self.stock_data.get(self.symbols[0], pd.DataFrame()))} bars\n"
+                "  \n"
+                "  💡 Possible causes:\n"
+                "     1. Insufficient data - hourly/intraday data from free APIs is limited to ~30-60 days\n"
+                "     2. Not enough price variation to create meaningful labels\n"
+                "     3. All samples have the same class (all profitable or all unprofitable)\n"
+                "  \n"
+                "  🔧 Solutions:\n"
+                "     • Use 'daily' or 'weekly' timeframe for longer historical periods\n"
+                "     • Reduce target period (e.g., 6 months instead of 2 years for hourly data)\n"
+                "     • Use a paid data provider (Polygon, Alpha Vantage Premium) for more intraday history\n"
+            )
+            print(error_msg)
+            raise ValueError("No valid label configurations found. Insufficient training data.")
+
         print(f"\n  ✓ Best config: forward={best_config['forward_days']}d, "
               f"profit={best_config['profit_threshold']}% (F1={best_score:.4f})")
 
