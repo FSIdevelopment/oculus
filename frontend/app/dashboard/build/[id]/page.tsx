@@ -644,7 +644,7 @@ export default function BuildDetailPage() {
 
   // State for live thinking blocks (streaming from WebSocket)
   const [thinkingBlocks, setThinkingBlocks] = useState<{[blockNumber: number]: {content: string, isComplete: boolean}}>({})
-  const [currentThinkingIteration, setCurrentThinkingIteration] = useState<number | null>(null)
+  const [, setCurrentThinkingIteration] = useState<number | null>(null)
 
 
   const wsRef = useRef<WebSocket | null>(null)
