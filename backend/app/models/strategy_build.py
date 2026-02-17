@@ -22,6 +22,7 @@ class StrategyBuild(Base):
     # Build metrics
     tokens_consumed: Mapped[float] = mapped_column(Float, default=0.0)
     iteration_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_iterations: Mapped[int | None] = mapped_column(Integer, nullable=True)
     
     # Foreign keys
     strategy_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategies.uuid"), nullable=False)

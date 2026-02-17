@@ -26,6 +26,7 @@ class BuildResponse(BaseModel):
     phase: Optional[str] = None
     tokens_consumed: float
     iteration_count: int
+    max_iterations: Optional[int] = None
     started_at: datetime
     completed_at: Optional[datetime] = None
     strategy_type: Optional[str] = None
