@@ -631,8 +631,7 @@ export default function BuildDetailPage() {
   const [loadingChat, setLoadingChat] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // New state for stop/restart, iteration results, and max iterations
-  const [stopping, setStopping] = useState(false)
+  // New state for restart, iteration results, and max iterations
   const [restarting, setRestarting] = useState(false)
   // Keep for backward compatibility with WebSocket data (prefixed with _ to indicate intentionally unused)
   const [_iterationResults, setIterationResults] = useState<IterationResult[]>([])
@@ -1028,16 +1027,15 @@ export default function BuildDetailPage() {
   // Stop an active build
   const handleStopBuild = async () => {
     if (!build) return
-    setStopping(true)
     try {
-      await api.post(`/api/builds/${build.uuid}/stop`)
-      // Refresh build status immediately
-      await fetchLatestBuild()
+      const response = await api.post(`/api/builds/${build.uuid}/stop`)
+      // Update build with response data to immediately show "stopping" status
+      if (response.data) {
+        setBuild(response.data)
+      }
     } catch (err: any) {
       console.error('Failed to stop build:', err)
       setError(err.response?.data?.detail || 'Failed to stop build')
-    } finally {
-      setStopping(false)
     }
   }
 
@@ -1066,6 +1064,8 @@ export default function BuildDetailPage() {
         return 'bg-red-500/20 text-red-700 dark:text-red-400 border-red-500/30'
       case 'building':
         return 'bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30'
+      case 'stopping':
+        return 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
       case 'stopped':
         return 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/30'
       default:
@@ -1346,14 +1346,14 @@ export default function BuildDetailPage() {
 
         <div className="flex items-center gap-3">
           {/* Stop button — visible only when build is active */}
-          {build.status.toLowerCase() === 'building' && (
+          {['building', 'stopping'].includes(build.status.toLowerCase()) && (
             <button
               onClick={handleStopBuild}
-              disabled={stopping}
+              disabled={build.status.toLowerCase() === 'stopping'}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/20 text-red-700 dark:text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {stopping ? <Loader size={16} className="animate-spin" /> : <Square size={16} />}
-              <span className="text-sm font-medium">{stopping ? 'Stopping...' : 'Stop Build'}</span>
+              {build.status.toLowerCase() === 'stopping' ? <Loader size={16} className="animate-spin" /> : <Square size={16} />}
+              <span className="text-sm font-medium">{build.status.toLowerCase() === 'stopping' ? 'Stopping...' : 'Stop Build'}</span>
             </button>
           )}
 
@@ -1409,6 +1409,7 @@ export default function BuildDetailPage() {
           <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-sm font-semibold ${getStatusColor(build.status)}`}>
             {build.status.toLowerCase() === 'complete' && <CheckCircle2 size={16} />}
             {build.status.toLowerCase() === 'building' && <Loader size={16} className="animate-spin" />}
+            {build.status.toLowerCase() === 'stopping' && <Loader size={16} className="animate-spin" />}
             {build.status.toLowerCase() === 'failed' && <AlertCircle size={16} />}
             {build.status.toLowerCase() === 'stopped' && <Square size={16} />}
             <span className="capitalize">{build.status}</span>
