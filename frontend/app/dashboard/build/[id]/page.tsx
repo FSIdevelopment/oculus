@@ -89,6 +89,8 @@ interface BuildIteration {
     max_drawdown: number
     total_trades: number
     profit_factor: number
+    avg_win?: number
+    avg_loss?: number
   } | null
   created_at: string
   updated_at: string
@@ -445,7 +447,19 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Sharpe Ratio</p>
               <p className="text-sm font-semibold text-text">
-                {(iteration.backtest_results?.sharpe_ratio ?? 0).toFixed(2)}
+                {(() => {
+                  const storedSharpe = iteration.backtest_results?.sharpe_ratio ?? 0
+                  if (storedSharpe !== 0) {
+                    return storedSharpe.toFixed(2)
+                  }
+                  // Fallback: total_return / max_drawdown when stored value is 0
+                  const totalReturn = iteration.backtest_results?.total_return ?? 0
+                  const maxDrawdown = iteration.backtest_results?.max_drawdown ?? 0
+                  if (totalReturn > 0 && maxDrawdown > 0) {
+                    return (totalReturn / maxDrawdown).toFixed(2)
+                  }
+                  return '0.00'
+                })()}
               </p>
             </div>
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
@@ -463,7 +477,19 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Profit Factor</p>
               <p className="text-sm font-semibold text-text">
-                {(iteration.backtest_results?.profit_factor ?? 0).toFixed(2)}
+                {(() => {
+                  const storedProfitFactor = iteration.backtest_results?.profit_factor ?? 0
+                  if (storedProfitFactor !== 0) {
+                    return storedProfitFactor.toFixed(2)
+                  }
+                  // Fallback: Math.abs(avg_win / avg_loss) when stored value is 0
+                  const avgWin = iteration.backtest_results?.avg_win
+                  const avgLoss = iteration.backtest_results?.avg_loss
+                  if (avgWin !== undefined && avgLoss !== undefined && avgLoss !== 0) {
+                    return Math.abs(avgWin / avgLoss).toFixed(2)
+                  }
+                  return '—'
+                })()}
               </p>
             </div>
           </div>
@@ -1424,14 +1450,19 @@ export default function BuildDetailPage() {
           )}
         </div>
 
-        {/* Est. Time Left - only show when build is running */}
-        {(build.status === 'running' || build.status === 'in_progress') && build.max_iterations && (
+        {/* Est. Time / Build Duration - show for all build states when max_iterations is available */}
+        {build.max_iterations && (
           <div className="bg-surface border border-border rounded-lg p-4">
-            <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">Est. Time Left</p>
+            <p className="text-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">
+              {(build.status === 'running' || build.status === 'in_progress') ? 'Est. Time Left' : 'Build Duration'}
+            </p>
             <div className="flex items-center gap-2">
               <Clock size={18} className="text-primary" />
               <p className="text-lg font-semibold text-text">
-                ~{Math.max(0, ((build.max_iterations ?? 0) - (build.iteration_count ?? 0)) * 4)} min
+                {(build.status === 'running' || build.status === 'in_progress')
+                  ? `~${Math.max(0, ((build.max_iterations ?? 0) - (build.iteration_count ?? 0)) * 4)} min`
+                  : `~${(build.iteration_count ?? 0) * 4} min`
+                }
               </p>
             </div>
           </div>

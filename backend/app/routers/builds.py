@@ -1435,6 +1435,7 @@ async def stop_build(
         phase=build.phase,
         tokens_consumed=build.tokens_consumed,
         iteration_count=build.iteration_count,
+        max_iterations=build.max_iterations,
         started_at=build.started_at,
         completed_at=build.completed_at,
     )
