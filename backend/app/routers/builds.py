@@ -1027,7 +1027,7 @@ async def _run_build_loop(
                         test_result = await docker_builder.test_container(image_tag, strategy_output_dir)
 
                         if test_result["passed"]:
-                            # Push to Docker Hub
+                            # Push to Digital Ocean Container Registry
                             push_success = await docker_builder.push_image(image_tag, build)
                             if push_success:
                                 iteration_logs.append(f"Iteration {iteration}: Docker image built, tested, and pushed")

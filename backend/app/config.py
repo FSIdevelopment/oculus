@@ -47,9 +47,9 @@ class Settings(BaseSettings):
     # Email
     RESEND_API_KEY: str = ""
 
-    # Docker Hub
-    DOCKER_HUB_USERNAME: str = "forefrontsolutions"
-    DOCKER_HUB_PAT: str = ""
+    # Digital Ocean Container Registry
+    DO_REGISTRY_URL: str = "registry.digitalocean.com/oculus-strategies"
+    DO_REGISTRY_TOKEN: str = ""
 
     # LLM and Build Orchestration
     ANTHROPIC_API_KEY: str = ""

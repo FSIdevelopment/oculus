@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 class DockerBuilder:
-    """Service for building and pushing Docker images to Docker Hub."""
+    """Service for building and pushing Docker images to Digital Ocean Container Registry."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.docker_hub_username = settings.DOCKER_HUB_USERNAME
-        self.docker_hub_pat = settings.DOCKER_HUB_PAT
+        self.registry_url = settings.DO_REGISTRY_URL
+        self.registry_token = settings.DO_REGISTRY_TOKEN
 
     def _sanitize_docker_tag(self, name: str) -> str:
         """Sanitize strategy name for Docker tag (lowercase, alphanumeric, hyphens)."""
@@ -55,8 +55,8 @@ class DockerBuilder:
             # Sanitize strategy name for Docker tag
             tag_name = self._sanitize_docker_tag(strategy.name)
             version = strategy.version or 1
-            image_tag = f"{self.docker_hub_username}/{tag_name}:{version}"
-            latest_tag = f"{self.docker_hub_username}/{tag_name}:latest"
+            image_tag = f"{self.registry_url}/{tag_name}:{version}"
+            latest_tag = f"{self.registry_url}/{tag_name}:latest"
 
             # Build image
             logger.info(f"Building image: {image_tag}")
@@ -166,18 +166,18 @@ class DockerBuilder:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"Pushing image to Docker Hub: {image_tag}")
+            logger.info(f"Pushing image to Digital Ocean Container Registry: {image_tag}")
 
-            # Login to Docker Hub
-            if self.docker_hub_pat:
-                logger.info("Logging in to Docker Hub")
+            # Login to Digital Ocean Container Registry
+            if self.registry_token:
+                logger.info("Logging in to Digital Ocean Container Registry")
                 login_start = datetime.utcnow()
-                login_cmd = f"echo '{self.docker_hub_pat}' | docker login -u {self.docker_hub_username} --password-stdin"
+                login_cmd = f"echo '{self.registry_token}' | docker login registry.digitalocean.com --username unused --password-stdin"
                 result = await self._run_command(login_cmd, timeout=300)
                 login_duration = (datetime.utcnow() - login_start).total_seconds()
                 logger.info(f"Docker login completed in {login_duration:.1f}s")
                 if result != 0:
-                    error_msg = "Docker login failed"
+                    error_msg = "Digital Ocean Container Registry login failed"
                     logger.error(error_msg)
                     build.logs = f"{build.logs or ''}\n\n{error_msg}"
                     await self.db.commit()
@@ -251,7 +251,7 @@ class DockerBuilder:
                 return False
 
             # Update strategy record
-            strategy.docker_registry = self.docker_hub_username
+            strategy.docker_registry = self.registry_url
             strategy.docker_image_url = image_tag
             build.status = "complete"
             build.completed_at = datetime.utcnow()

@@ -54,11 +54,10 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: PLACEHOLDER_ROTATE_ME
-      - key: DOCKER_HUB_USERNAME
+      - key: DO_REGISTRY_URL
         scope: RUN_TIME
-        type: SECRET
-        value: PLACEHOLDER_ROTATE_ME
-      - key: DOCKER_HUB_PAT
+        value: registry.digitalocean.com/oculus-strategies
+      - key: DO_REGISTRY_TOKEN
         scope: RUN_TIME
         type: SECRET
         value: PLACEHOLDER_ROTATE_ME
