@@ -238,10 +238,64 @@ class RuleExtractor:
 
         return distributions
 
+    def _compute_volatility_adjustment(self, feature_name: str) -> float:
+        """Compute volatility-based threshold adjustment factor.
+
+        For high-volatility features, widen thresholds to avoid whipsaws.
+        For low-volatility features, tighten thresholds for precision.
+        Returns a multiplier: >1 widens, <1 tightens.
+        """
+        if feature_name not in self.feature_names:
+            return 1.0
+
+        feature_idx = self.feature_names.index(feature_name)
+        values = self.X_train[:, feature_idx]
+
+        # Coefficient of variation (normalized volatility)
+        mean_val = np.mean(values)
+        std_val = np.std(values)
+        if abs(mean_val) < 1e-8:
+            cv = std_val  # Use raw std if mean is near zero
+        else:
+            cv = std_val / abs(mean_val)
+
+        # Map CV to adjustment: high CV -> widen threshold (1.1-1.3), low CV -> tighten (0.8-0.95)
+        if cv > 1.0:
+            return min(1.3, 1.0 + cv * 0.1)
+        elif cv < 0.3:
+            return max(0.8, 0.95 - (0.3 - cv) * 0.5)
+        return 1.0
+
+    def _compute_confidence_score(self, feature_name: str, dist: Dict) -> float:
+        """Compute confidence score for a rule based on distribution separation.
+
+        Higher confidence when buy/no-buy distributions are clearly separated.
+        Returns 0.0 to 1.0.
+        """
+        buy_mean = dist.get('buy_mean', 0)
+        no_buy_mean = dist.get('no_buy_mean', 0)
+        buy_std = dist.get('buy_std', 1)
+        no_buy_std = dist.get('no_buy_std', 1)
+
+        # Cohen's d effect size: how well separated are buy vs no-buy distributions
+        pooled_std = np.sqrt((buy_std**2 + no_buy_std**2) / 2)
+        if pooled_std < 1e-8:
+            return 0.5
+
+        cohens_d = abs(buy_mean - no_buy_mean) / pooled_std
+
+        # Map Cohen's d to confidence: 0.2=low, 0.5=medium, 0.8+=high
+        confidence = min(1.0, cohens_d / 1.0)  # Saturate at d=1.0
+        return round(confidence, 3)
+
     def generate_entry_rules(self, top_features: List[Dict],
                              thresholds: Dict[str, List[float]],
                              distributions: Dict[str, Dict]) -> List[ExtractedRule]:
-        """Generate entry rules from feature analysis."""
+        """Generate entry rules from feature analysis.
+
+        Uses volatility-aware thresholds (Item 8) and confidence-weighted
+        scoring (Item 10) to improve rule quality.
+        """
         rules = []
 
         for feature_info in top_features[:10]:  # Top 10 features for entry
@@ -254,31 +308,48 @@ class RuleExtractor:
             dist = distributions[feature_name]
             direction = dist['direction']
 
+            # Compute volatility adjustment and confidence score
+            vol_adj = self._compute_volatility_adjustment(feature_name)
+            confidence = self._compute_confidence_score(feature_name, dist)
+
+            # Weight importance by confidence (Item 10)
+            adjusted_importance = importance * (0.5 + 0.5 * confidence)
+
             # Determine optimal threshold based on distribution analysis
             if direction == 'higher':
                 # For features where higher = buy signal
-                threshold = dist['buy_25th']  # Use 25th percentile of buy signals
+                base_threshold = dist['buy_25th']
+                # Volatility adjustment: widen threshold in volatile conditions
+                threshold = base_threshold * vol_adj
                 operator = '>='
-                desc = f"Enter when {feature_name} >= {threshold:.4f} (bullish signal)"
+                desc = f"Enter when {feature_name} >= {threshold:.4f} (confidence: {confidence:.2f})"
             else:
                 # For features where lower = buy signal
-                threshold = dist['buy_75th']  # Use 75th percentile of buy signals
+                base_threshold = dist['buy_75th']
+                # For "lower is better", widening means allowing higher values
+                threshold = base_threshold * (2 - vol_adj)  # Inverse adjustment
                 operator = '<='
-                desc = f"Enter when {feature_name} <= {threshold:.4f} (oversold signal)"
+                desc = f"Enter when {feature_name} <= {threshold:.4f} (confidence: {confidence:.2f})"
 
             rules.append(ExtractedRule(
                 feature=feature_name,
                 operator=operator,
                 threshold=round(threshold, 4),
-                importance=importance,
+                importance=round(adjusted_importance, 4),
                 description=desc
             ))
+
+        # Sort by adjusted importance (highest confidence + importance first)
+        rules.sort(key=lambda r: r.importance, reverse=True)
 
         return rules
 
     def generate_exit_rules(self, top_features: List[Dict],
                             distributions: Dict[str, Dict]) -> List[ExtractedRule]:
-        """Generate exit rules (inverse of entry conditions)."""
+        """Generate exit rules (inverse of entry conditions).
+
+        Uses volatility-aware thresholds and confidence weighting.
+        """
         rules = []
 
         for feature_info in top_features[:8]:  # Top 8 features for exit
@@ -291,27 +362,130 @@ class RuleExtractor:
             dist = distributions[feature_name]
             direction = dist['direction']
 
+            vol_adj = self._compute_volatility_adjustment(feature_name)
+            confidence = self._compute_confidence_score(feature_name, dist)
+            adjusted_importance = importance * (0.5 + 0.5 * confidence)
+
             # Exit rules are inverse of entry
             if direction == 'higher':
                 # Exit when feature drops (was bullish, now losing momentum)
-                threshold = dist['no_buy_75th'] if 'no_buy_75th' in dist else dist['no_buy_mean']
+                base_threshold = dist['no_buy_75th'] if 'no_buy_75th' in dist else dist['no_buy_mean']
+                threshold = base_threshold * vol_adj
                 operator = '<='
-                desc = f"Exit when {feature_name} <= {threshold:.4f} (momentum fading)"
+                desc = f"Exit when {feature_name} <= {threshold:.4f} (confidence: {confidence:.2f})"
             else:
                 # Exit when feature rises (was oversold, now overbought)
-                threshold = dist['no_buy_25th'] if 'no_buy_25th' in dist else dist['no_buy_mean']
+                base_threshold = dist['no_buy_25th'] if 'no_buy_25th' in dist else dist['no_buy_mean']
+                threshold = base_threshold * (2 - vol_adj)
                 operator = '>='
-                desc = f"Exit when {feature_name} >= {threshold:.4f} (overbought)"
+                desc = f"Exit when {feature_name} >= {threshold:.4f} (confidence: {confidence:.2f})"
 
             rules.append(ExtractedRule(
                 feature=feature_name,
                 operator=operator,
                 threshold=round(threshold, 4),
-                importance=importance,
+                importance=round(adjusted_importance, 4),
                 description=desc
             ))
 
+        rules.sort(key=lambda r: r.importance, reverse=True)
+
         return rules
+
+    def validate_rules_with_shap(self, entry_rules: List[ExtractedRule],
+                                exit_rules: List[ExtractedRule]) -> Tuple[List[ExtractedRule], List[ExtractedRule]]:
+        """Validate extracted rules using SHAP values (Item 15).
+
+        Filters out rules where SHAP analysis disagrees with the rule direction.
+        Returns validated (entry_rules, exit_rules).
+        """
+        try:
+            import shap
+        except ImportError:
+            print("    SHAP not installed — skipping rule validation (pip install shap)")
+            return entry_rules, exit_rules
+
+        # SHAP works best with tree-based models
+        is_tree_model = hasattr(self.model, 'feature_importances_')
+
+        try:
+            if is_tree_model:
+                explainer = shap.TreeExplainer(self.model)
+                # Use a sample of test data for speed
+                sample_size = min(200, len(self.X_test))
+                X_sample = self.X_test[:sample_size]
+                shap_values = explainer.shap_values(X_sample)
+            else:
+                # For non-tree models, use KernelExplainer with small background
+                background = shap.sample(self.X_train, min(50, len(self.X_train)))
+                explainer = shap.KernelExplainer(
+                    self.model.predict_proba if hasattr(self.model, 'predict_proba') else self.model.predict,
+                    background
+                )
+                sample_size = min(50, len(self.X_test))
+                X_sample = self.X_test[:sample_size]
+                shap_values = explainer.shap_values(X_sample)
+
+            # For binary classification, shap_values may be a list [class_0, class_1]
+            if isinstance(shap_values, list):
+                shap_values = shap_values[1]  # Use class 1 (positive/buy) SHAP values
+
+            # Compute mean SHAP value per feature
+            mean_shap = np.mean(shap_values, axis=0)
+            shap_direction = {}
+            for i, fname in enumerate(self.feature_names):
+                if i < len(mean_shap):
+                    shap_direction[fname] = mean_shap[i]
+
+            print(f"    SHAP validation: computed SHAP values for {len(shap_direction)} features")
+
+            # Validate entry rules
+            validated_entry = []
+            for rule in entry_rules:
+                shap_val = shap_direction.get(rule.feature, 0)
+                # Rule says >= (higher is bullish) -> SHAP should be positive
+                # Rule says <= (lower is bullish) -> SHAP should be negative
+                rule_expects_positive = rule.operator in ('>=', '>')
+                shap_agrees = (rule_expects_positive and shap_val >= 0) or \
+                              (not rule_expects_positive and shap_val <= 0)
+
+                if shap_agrees or abs(shap_val) < 1e-4:  # Keep if SHAP agrees or is negligible
+                    validated_entry.append(rule)
+                else:
+                    print(f"    SHAP rejected entry rule: {rule.feature} {rule.operator} {rule.threshold} "
+                          f"(SHAP direction: {'positive' if shap_val > 0 else 'negative'})")
+
+            # Validate exit rules (inverse logic)
+            validated_exit = []
+            for rule in exit_rules:
+                shap_val = shap_direction.get(rule.feature, 0)
+                # Exit rule says <= (dropping is bearish) -> SHAP for buy should be positive for this feature
+                # i.e., if SHAP says feature positively contributes to buy, then dropping below threshold = exit
+                rule_expects_drop = rule.operator in ('<=', '<')
+                shap_agrees = (rule_expects_drop and shap_val >= 0) or \
+                              (not rule_expects_drop and shap_val <= 0)
+
+                if shap_agrees or abs(shap_val) < 1e-4:
+                    validated_exit.append(rule)
+                else:
+                    print(f"    SHAP rejected exit rule: {rule.feature} {rule.operator} {rule.threshold} "
+                          f"(SHAP direction: {'positive' if shap_val > 0 else 'negative'})")
+
+            # Don't remove ALL rules — keep at least 2 entry and 2 exit
+            if len(validated_entry) < 2:
+                print(f"    SHAP would remove too many entry rules — keeping originals")
+                validated_entry = entry_rules
+            if len(validated_exit) < 2:
+                print(f"    SHAP would remove too many exit rules — keeping originals")
+                validated_exit = exit_rules
+
+            print(f"    SHAP validation: {len(entry_rules)}->{len(validated_entry)} entry, "
+                  f"{len(exit_rules)}->{len(validated_exit)} exit rules")
+            return validated_entry, validated_exit
+
+        except Exception as e:
+            print(f"    SHAP validation failed (non-fatal): {e}")
+            return entry_rules, exit_rules
 
     def extract_all_rules(self, strategy_name: str, symbols: List[str],
                           timeframe: str, model_metrics: Dict[str, float] = None,
@@ -395,7 +569,11 @@ class RuleExtractor:
         else:
             print(f"    Generated {len(exit_rules)} exit rules")
 
-        # Step 6: Extract optimal parameters
+        # Step 6: SHAP-based rule validation (Item 15)
+        print("  Validating rules with SHAP analysis...", flush=True)
+        entry_rules, exit_rules = self.validate_rules_with_shap(entry_rules, exit_rules)
+
+        # Step 7: Extract optimal parameters
         optimal_params = self._extract_optimal_params(distributions)
 
         # Use LLM score thresholds if provided

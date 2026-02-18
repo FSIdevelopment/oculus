@@ -389,6 +389,39 @@ class FeatureEngineer:
         # Consolidation detection (low volatility before potential breakout)
         df['BB_SQUEEZE'] = (df['BB_WIDTH'] < df['BB_WIDTH'].rolling(50).quantile(0.2)).astype(int)
 
+        # =====================================================================
+        # FEATURE INTERACTION TERMS (Item 14) - Cross-indicator signals
+        # =====================================================================
+
+        # RSI + Volume: Oversold with high volume = stronger reversal signal
+        if 'RSI_14' in df.columns and 'VOLUME_RATIO' in df.columns:
+            df['RSI_VOL_INTERACTION'] = (100 - df['RSI_14']) * df['VOLUME_RATIO']
+
+        # ADX + Momentum: Strong trend + momentum = trend continuation signal
+        if 'ADX' in df.columns and 'MOMENTUM_21D' in df.columns:
+            df['ADX_MOM_INTERACTION'] = df['ADX'] * np.sign(df['MOMENTUM_21D'])
+
+        # BB position + RSI: Price at lower band + oversold RSI = mean reversion signal
+        if 'BB_PCT_B' in df.columns and 'RSI_14' in df.columns:
+            df['BB_RSI_INTERACTION'] = (1 - df['BB_PCT_B']) * (100 - df['RSI_14']) / 100
+
+        # Volume + Price Change: High volume on big moves = conviction
+        if 'VOLUME_RATIO' in df.columns:
+            price_chg = df['Close'].pct_change() * 100
+            df['VOLUME_PRICE_CONVICTION'] = df['VOLUME_RATIO'] * abs(price_chg)
+
+        # EMA trend alignment + ATR: Aligned trend with low volatility = high quality trend
+        if 'EMA_STACK_SCORE' in df.columns and 'ATR_PCT' in df.columns:
+            df['TREND_QUALITY'] = df['EMA_STACK_SCORE'] / (df['ATR_PCT'] + 1e-10)
+
+        # Stochastic + CCI: Double oversold/overbought confirmation
+        if 'STOCH_K_14' in df.columns and 'CCI_20' in df.columns:
+            df['STOCH_CCI_OVERSOLD'] = ((100 - df['STOCH_K_14']) / 100) * ((-df['CCI_20']) / 200).clip(0, 1)
+
+        # MACD momentum + RSI direction: Confirming momentum signals
+        if 'MACD_HIST' in df.columns and 'RSI_CHG_5' in df.columns:
+            df['MACD_RSI_CONFIRM'] = np.sign(df['MACD_HIST']) * np.sign(df['RSI_CHG_5'])
+
         return df
 
     def create_labels(self, df: pd.DataFrame, config: MLConfig) -> pd.DataFrame:

@@ -148,6 +148,7 @@ async def _build_strategy_container(
     max_iterations: int,
     iteration_logs: list,
     iteration_id: str,
+    timeframe: str = "1d",
 ) -> str:
     """
     Build the strategy container files: copy static templates,
@@ -194,6 +195,7 @@ async def _build_strategy_container(
         design=design,
         training_results=training_results,
         strategy_type=strategy_type or "",
+        timeframe=timeframe,
     )
 
     # Parse config for downstream use and inject build_info metadata
@@ -217,6 +219,7 @@ async def _build_strategy_container(
     if "trading" not in config:
         config["trading"] = {}
     config["trading"]["symbols"] = strategy_symbols
+    config["trading"]["timeframe"] = timeframe
     # Re-write with corrected values
     (output_path / "config.json").write_text(json.dumps(config, indent=2))
 
@@ -558,6 +561,7 @@ async def _run_build_loop(
                             "message": "Build stopped by user",
                             "iterations_completed": iteration,
                             "iteration_logs": iteration_logs,
+                            "timeframe": timeframe,
                         })
                         # Mark current iteration as stopped if one exists
                         if 'iteration_record' in locals() and iteration_record:
@@ -593,6 +597,7 @@ async def _run_build_loop(
                         "message": f"Build stopped at iteration {iteration + 1}. Please purchase more tokens to continue.",
                         "iterations_completed": iteration,
                         "tokens_consumed": build.tokens_consumed,
+                        "timeframe": timeframe,
                     })
                     await bg_db.commit()
                     await _publish_progress(build_id, {
@@ -737,6 +742,41 @@ async def _run_build_loop(
                         iteration
                     )
 
+                    # Build iteration history from completed iterations (Item 5)
+                    iter_history_result = await bg_db.execute(
+                        sa_select(BuildIteration)
+                        .where(
+                            BuildIteration.build_id == build_id,
+                            BuildIteration.status == "complete",
+                            BuildIteration.iteration_number < iteration,
+                        )
+                        .order_by(BuildIteration.iteration_number)
+                    )
+                    past_iterations = iter_history_result.scalars().all()
+                    iteration_history = []
+                    for past_iter in past_iterations:
+                        bt = past_iter.backtest_results or {}
+                        # Extract feature names from entry/exit rules
+                        entry_feats = [r.get("feature", "") for r in (past_iter.entry_rules or [])]
+                        exit_feats = [r.get("feature", "") for r in (past_iter.exit_rules or [])]
+                        # Extract top feature names
+                        feats = past_iter.features or {}
+                        top_feat_names = [
+                            f.get("name", f.get("feature", "")) for f in (feats.get("top_features", []) if isinstance(feats, dict) else [])[:5]
+                        ]
+                        iteration_history.append({
+                            "iteration": past_iter.iteration_number,
+                            "total_return": bt.get("total_return", 0),
+                            "win_rate": bt.get("win_rate", 0),
+                            "sharpe_ratio": bt.get("sharpe_ratio", 0),
+                            "max_drawdown": bt.get("max_drawdown", 0),
+                            "total_trades": bt.get("total_trades", 0),
+                            "best_model": (past_iter.best_model or {}).get("name", "?"),
+                            "top_features": top_feat_names,
+                            "entry_features": entry_feats[:5],
+                            "exit_features": exit_feats[:5],
+                        })
+
                     # Run refinement + creation guide update in parallel (both are LLM calls)
                     async def _guide_update_safe():
                         """Update creation guide with its own DB session; never raises."""
@@ -758,6 +798,8 @@ async def _run_build_loop(
                         backtest_results=training_results.get("backtest_results", {}),
                         iteration=iteration,
                         strategy_type=strategy_type,
+                        training_results=training_results,
+                        iteration_history=iteration_history if iteration_history else None,
                     )
                     guide_task = _guide_update_safe()
                     results = await asyncio.gather(refine_task, guide_task)
@@ -772,7 +814,8 @@ async def _run_build_loop(
 
                     # Save refinement to ChatHistory
                     refinement_prompt = orchestrator._build_refinement_prompt(
-                        design, training_results.get("backtest_results", {}), iteration, "", strategy_type or ""
+                        design, training_results.get("backtest_results", {}), iteration, "", strategy_type or "",
+                        training_results=training_results, iteration_history=iteration_history if iteration_history else None,
                     )
                     await _save_chat_history(
                         bg_db, user_id, strategy_id,
@@ -954,6 +997,7 @@ async def _run_build_loop(
                         max_iterations=max_iterations,
                         iteration_logs=iteration_logs,
                         iteration_id=iteration_record.uuid,
+                        timeframe=timeframe,
                     )
 
                     # Transition to testing phase (58.4 will implement the testing logic)
@@ -1019,6 +1063,57 @@ async def _run_build_loop(
                         f"Iteration {iteration}: Below target ({total_return}% < {target_return}%), refining..."
                     )
 
+                    # --- Diminishing returns detection (Item 12) ---
+                    # If we have 3+ completed iterations, check if performance has plateaued
+                    if iteration >= 2:
+                        recent_returns = []
+                        for past_log in iteration_logs:
+                            # Parse returns from logs like "Iteration X: Below target (Y% < Z%)"
+                            pass  # We'll check from the DB instead
+
+                        dim_result = await bg_db.execute(
+                            sa_select(BuildIteration)
+                            .where(
+                                BuildIteration.build_id == build_id,
+                                BuildIteration.status == "complete",
+                            )
+                            .order_by(BuildIteration.iteration_number.desc())
+                            .limit(3)
+                        )
+                        recent_iters = dim_result.scalars().all()
+
+                        if len(recent_iters) >= 3:
+                            recent_returns = [
+                                (it.backtest_results or {}).get("total_return", 0)
+                                for it in recent_iters
+                            ]
+                            # Check if improvement has stalled (< 1% absolute improvement across last 3)
+                            max_recent = max(recent_returns)
+                            min_recent = min(recent_returns)
+                            improvement_range = abs(max_recent - min_recent)
+
+                            if improvement_range < 1.0 and iteration >= 3:
+                                logger.info(
+                                    "Build %s: diminishing returns detected at iteration %d "
+                                    "(last 3 returns: %s, range: %.2f%%)",
+                                    build_id, iteration, recent_returns, improvement_range
+                                )
+                                iteration_logs.append(
+                                    f"Iteration {iteration}: Diminishing returns detected "
+                                    f"(last 3 returns vary by only {improvement_range:.2f}%) — "
+                                    f"stopping early to use best iteration"
+                                )
+                                await _publish_progress(build_id, {
+                                    "phase": "diminishing_returns",
+                                    "iteration": iteration,
+                                    "message": f"Diminishing returns detected — performance plateaued "
+                                               f"(range: {improvement_range:.2f}% across last 3 iterations)",
+                                    "tokens_consumed": build.tokens_consumed,
+                                    "iteration_count": build.iteration_count,
+                                    "max_iterations": max_iterations,
+                                })
+                                break  # Exit build loop, will fall through to best-iteration selection
+
             # --- Best iteration selection (target not met after all iterations) ---
             # Only run if the target was NOT met (build.status != "complete")
             if build.status != "complete":
@@ -1031,22 +1126,53 @@ async def _run_build_loop(
                 completed_iterations = iter_result.scalars().all()
 
                 if completed_iterations:
-                    # Find the best iteration by total_return (from backtest_results)
-                    best_iter = max(
-                        completed_iterations,
-                        key=lambda it: (it.backtest_results or {}).get("total_return", float("-inf"))
-                    )
+                    # Composite scoring: weighted combination of return, sharpe, win_rate, drawdown
+                    def _composite_score(it) -> float:
+                        bt = it.backtest_results or {}
+                        total_return = bt.get("total_return", 0)
+                        sharpe = bt.get("sharpe_ratio", 0)
+                        win_rate = bt.get("win_rate", 0)
+                        max_drawdown = abs(bt.get("max_drawdown", 0))
+                        total_trades = bt.get("total_trades", 0)
+
+                        # Normalize components to comparable scales
+                        # Return: use directly (already percentage)
+                        return_score = total_return
+
+                        # Sharpe: scale by 10 to make it comparable to return %
+                        sharpe_score = sharpe * 10
+
+                        # Win rate: 50% is break-even, reward above that
+                        win_score = (win_rate - 50) * 0.5  # e.g. 60% -> 5 points
+
+                        # Drawdown penalty: higher drawdown = lower score
+                        drawdown_penalty = max_drawdown * 0.3  # e.g. 10% drawdown -> -3 points
+
+                        # Trade count bonus: penalize too few trades (unreliable)
+                        trade_bonus = min(total_trades / 10, 5)  # max 5 points for 50+ trades
+
+                        return return_score + sharpe_score + win_score - drawdown_penalty + trade_bonus
+
+                    best_iter = max(completed_iterations, key=_composite_score)
                     best_return = (best_iter.backtest_results or {}).get("total_return", 0)
                     best_iter_num = best_iter.iteration_number
+                    best_score = _composite_score(best_iter)
 
+                    bt = best_iter.backtest_results or {}
+                    best_sharpe = bt.get("sharpe_ratio", 0)
+                    best_win_rate = bt.get("win_rate", 0)
+                    best_drawdown = bt.get("max_drawdown", 0)
                     iteration_logs.append(
-                        f"All {len(completed_iterations)} iterations complete. Best: iteration {best_iter_num} ({best_return}% return)"
+                        f"All {len(completed_iterations)} iterations complete. "
+                        f"Best: iteration {best_iter_num} (score={best_score:.1f}, "
+                        f"return={best_return}%, sharpe={best_sharpe}, "
+                        f"win_rate={best_win_rate}%, drawdown={best_drawdown}%)"
                     )
 
                     # Publish selection decision via WebSocket
                     await _publish_progress(build_id, {
                         "phase": "selecting_best",
-                        "message": f"Selecting best iteration: #{best_iter_num + 1} with {best_return}% return",
+                        "message": f"Selecting best iteration: #{best_iter_num + 1} with {best_return}% return (composite score: {best_score:.1f})",
                         "best_iteration": best_iter_num,
                         "best_return": best_return,
                         "tokens_consumed": build.tokens_consumed,
@@ -1092,7 +1218,21 @@ async def _run_build_loop(
 
                     # Use the best iteration's design and training results for Docker build
                     design = best_iter.llm_design or design
-                    training_results = best_iter.backtest_results or training_results
+                    # Reconstruct full training_results from BuildIteration columns
+                    # (best_iter.backtest_results alone only has performance metrics;
+                    # we also need extracted_rules, best_model, features, etc.)
+                    training_results = {
+                        "status": "success",
+                        "backtest_results": best_iter.backtest_results or {},
+                        "best_model": best_iter.best_model or {},
+                        "extracted_rules": {
+                            "entry_rules": best_iter.entry_rules or [],
+                            "exit_rules": best_iter.exit_rules or [],
+                        },
+                        "features": best_iter.features or {},
+                        "model_evaluations": best_iter.model_evaluations or {},
+                        "model_metrics": (best_iter.best_model or {}).get("metrics", {}),
+                    }
 
                     # --- NEW: Template-based strategy container build ---
                     build.phase = "building_docker"
@@ -1120,6 +1260,7 @@ async def _run_build_loop(
                         max_iterations=max_iterations,
                         iteration_logs=iteration_logs,
                         iteration_id=best_iter.uuid,
+                        timeframe=timeframe,
                     )
 
                     # Transition to testing phase
@@ -1188,6 +1329,7 @@ async def _run_build_loop(
                 "training_results": training_results,
                 "iteration_logs": iteration_logs,
                 "logs": orchestrator.logs,
+                "timeframe": timeframe,
             })
 
             await bg_db.commit()
@@ -1196,7 +1338,7 @@ async def _run_build_loop(
             # Mark build as failed — do NOT crash the background task
             build.status = "failed"
             build.completed_at = datetime.utcnow()
-            build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs})
+            build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs, "timeframe": timeframe})
             # Mark current iteration as failed if one was in progress
             if 'iteration_record' in locals() and iteration_record:
                 iteration_record.status = "failed"
@@ -1649,7 +1791,16 @@ async def restart_build(
     strategy_description = strategy.description or ""
     strat_type = strategy.strategy_type  # e.g. "Momentum", "Mean Reversion", etc.
 
-    logger.info(f"Resuming build {build_id} from iteration {start_iteration} of {build.max_iterations}")
+    # Recover the original timeframe from the build's logs
+    recovered_timeframe = "1d"  # fallback default
+    try:
+        if build.logs:
+            logs_data = json.loads(build.logs)
+            recovered_timeframe = logs_data.get("timeframe", recovered_timeframe)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    logger.info(f"Resuming build {build_id} from iteration {start_iteration} of {build.max_iterations} (timeframe={recovered_timeframe})")
 
     # Clear any existing stop signal from previous builds (prevents immediate stops)
     try:
@@ -1670,7 +1821,7 @@ async def restart_build(
             strategy_symbols=strategy_symbols,
             description=strategy_description,
             target_return=strategy.target_return or 10.0,
-            timeframe="1d",
+            timeframe=recovered_timeframe,
             max_iterations=build.max_iterations,
             strategy_type=strat_type,
             start_iteration=start_iteration,  # Resume from here

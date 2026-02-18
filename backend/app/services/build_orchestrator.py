@@ -212,6 +212,8 @@ class BuildOrchestrator:
         backtest_results: Dict[str, Any],
         iteration: int,
         strategy_type: Optional[str] = None,
+        training_results: Optional[Dict[str, Any]] = None,
+        iteration_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Refine strategy based on backtest results.
 
@@ -225,7 +227,8 @@ class BuildOrchestrator:
         creation_guide = await self._load_creation_guide(strategy_type)
 
         prompt = self._build_refinement_prompt(
-            previous_design, backtest_results, iteration, creation_guide, strategy_type or ""
+            previous_design, backtest_results, iteration, creation_guide, strategy_type or "",
+            training_results=training_results, iteration_history=iteration_history,
         )
 
         try:
@@ -398,6 +401,11 @@ class BuildOrchestrator:
         "HIGHER_HIGH", "HIGHER_LOW",
         "RSI_OVERSOLD_ZONE", "RSI_OVERBOUGHT_ZONE",
         "STOCH_OVERSOLD_ZONE", "STOCH_OVERBOUGHT_ZONE",
+        # Feature interaction terms (cross-indicator signals)
+        "RSI_VOL_INTERACTION", "ADX_MOM_INTERACTION",
+        "BB_RSI_INTERACTION", "VOLUME_PRICE_CONVICTION",
+        "TREND_QUALITY", "STOCH_CCI_OVERSOLD",
+        "MACD_RSI_CONFIRM",
     ]
 
     # Full JSON schema template for the LLM output format.
@@ -545,15 +553,157 @@ The JSON must follow this exact schema:
         iteration: int,
         creation_guide: str = "",
         strategy_type: str = "",
+        training_results: Optional[Dict[str, Any]] = None,
+        iteration_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
-        """Build strategy refinement prompt with full schema and analysis guidance."""
+        """Build strategy refinement prompt with full schema and analysis guidance.
+
+        Now includes ML-extracted rules, feature importance, iteration history,
+        and trade-level feedback to close the information loop between
+        LLM design and ML training.
+        """
         # Extract key metrics from backtest results for the prompt
         total_return = backtest_results.get("total_return", 0)
         win_rate = backtest_results.get("win_rate", 0)
         max_drawdown = backtest_results.get("max_drawdown", 0)
         num_trades = backtest_results.get("total_trades", 0)
+        sharpe_ratio = backtest_results.get("sharpe_ratio", 0)
 
         features_list = "\n".join(f"  - {f}" for f in self.AVAILABLE_FEATURES)
+
+        # --- Build ML-extracted rules section (Items 1 & 2) ---
+        ml_rules_section = ""
+        feature_importance_section = ""
+        if training_results:
+            # Extracted rules from ML training
+            extracted = training_results.get("extracted_rules", {})
+            ml_entry_rules = extracted.get("entry_rules", [])
+            ml_exit_rules = extracted.get("exit_rules", [])
+
+            if ml_entry_rules or ml_exit_rules:
+                ml_rules_section = "\n## ML-Extracted Rules (from actual training)\n"
+                ml_rules_section += "These rules were discovered by the ML pipeline during training.\n"
+                ml_rules_section += "They represent what the model actually learned works — USE THESE as your primary guide.\n\n"
+
+                if ml_entry_rules:
+                    ml_rules_section += "### ML Entry Rules:\n"
+                    for i, rule in enumerate(ml_entry_rules[:10], 1):
+                        feat = rule.get("feature", "?")
+                        op = rule.get("operator", "?")
+                        thresh = rule.get("threshold", "?")
+                        imp = rule.get("importance", 0)
+                        ml_rules_section += f"  {i}. {feat} {op} {thresh} (importance: {imp:.4f})\n"
+
+                if ml_exit_rules:
+                    ml_rules_section += "\n### ML Exit Rules:\n"
+                    for i, rule in enumerate(ml_exit_rules[:8], 1):
+                        feat = rule.get("feature", "?")
+                        op = rule.get("operator", "?")
+                        thresh = rule.get("threshold", "?")
+                        imp = rule.get("importance", 0)
+                        ml_rules_section += f"  {i}. {feat} {op} {thresh} (importance: {imp:.4f})\n"
+
+            # Feature importance rankings
+            features_data = training_results.get("features", {})
+            top_features = features_data.get("top_features", []) if isinstance(features_data, dict) else []
+            if top_features:
+                feature_importance_section = "\n## Feature Importance Rankings (from ML training)\n"
+                feature_importance_section += "These features had the highest predictive power during training:\n\n"
+                for i, feat in enumerate(top_features[:15], 1):
+                    # Worker uses "name" key, rule extractor uses "feature" key
+                    name = feat.get("name", feat.get("feature", "?"))
+                    imp = feat.get("importance", 0)
+                    feature_importance_section += f"  {i}. {name}: {imp:.4f}\n"
+                feature_importance_section += "\nPRIORITIZE features with high importance scores in your design.\n"
+                feature_importance_section += "Features NOT in this list had low predictive power — avoid relying on them.\n"
+
+            # Best model info
+            best_model = training_results.get("best_model", {})
+            if best_model:
+                model_name = best_model.get("name", "Unknown")
+                model_metrics = best_model.get("metrics", {})
+                ml_rules_section += f"\n### Best ML Model: {model_name}\n"
+                if model_metrics:
+                    ml_rules_section += f"  - F1: {model_metrics.get('f1', 0):.4f}\n"
+                    ml_rules_section += f"  - Precision: {model_metrics.get('precision', 0):.4f}\n"
+                    ml_rules_section += f"  - Recall: {model_metrics.get('recall', 0):.4f}\n"
+                    ml_rules_section += f"  - AUC: {model_metrics.get('auc', 0):.4f}\n"
+
+        # --- Build iteration history section (Item 5) ---
+        history_section = ""
+        if iteration_history:
+            history_section = "\n## Iteration History (DO NOT repeat failed approaches)\n"
+            history_section += "Review ALL previous iterations. Learn from what worked and what failed.\n\n"
+            for hist in iteration_history:
+                iter_num = hist.get("iteration", "?")
+                iter_return = hist.get("total_return", 0)
+                iter_win_rate = hist.get("win_rate", 0)
+                iter_sharpe = hist.get("sharpe_ratio", 0)
+                iter_trades = hist.get("total_trades", 0)
+                iter_drawdown = hist.get("max_drawdown", 0)
+                iter_features = hist.get("top_features", [])
+                iter_model = hist.get("best_model", "?")
+
+                history_section += f"### Iteration {iter_num}:\n"
+                history_section += f"  Return: {iter_return}% | Win Rate: {iter_win_rate}% | "
+                history_section += f"Sharpe: {iter_sharpe} | Drawdown: {iter_drawdown}% | Trades: {iter_trades}\n"
+                history_section += f"  Best Model: {iter_model}\n"
+                if iter_features:
+                    history_section += f"  Top Features: {', '.join(iter_features[:5])}\n"
+
+                # Entry/exit rules tried
+                iter_entry = hist.get("entry_features", [])
+                iter_exit = hist.get("exit_features", [])
+                if iter_entry:
+                    history_section += f"  Entry Features Used: {', '.join(iter_entry[:5])}\n"
+                if iter_exit:
+                    history_section += f"  Exit Features Used: {', '.join(iter_exit[:5])}\n"
+                history_section += "\n"
+
+        # --- Build trade-level feedback section (Item 9) ---
+        trade_feedback_section = ""
+        if backtest_results:
+            trades = backtest_results.get("trades", [])
+            if trades:
+                winning = [t for t in trades if t.get("pnl", 0) > 0]
+                losing = [t for t in trades if t.get("pnl", 0) <= 0]
+
+                trade_feedback_section = "\n## Trade-Level Feedback\n"
+                trade_feedback_section += f"Total: {len(trades)} trades | "
+                trade_feedback_section += f"Winners: {len(winning)} | Losers: {len(losing)}\n\n"
+
+                if winning:
+                    avg_win = sum(t.get("pnl", 0) for t in winning) / len(winning)
+                    max_win = max(t.get("pnl", 0) for t in winning)
+                    avg_hold_win = sum(t.get("hold_days", 0) for t in winning) / len(winning)
+                    trade_feedback_section += f"### Winners: Avg PnL: {avg_win:.2f}% | Max: {max_win:.2f}% | Avg Hold: {avg_hold_win:.1f} days\n"
+
+                if losing:
+                    avg_loss = sum(t.get("pnl", 0) for t in losing) / len(losing)
+                    max_loss = min(t.get("pnl", 0) for t in losing)
+                    avg_hold_loss = sum(t.get("hold_days", 0) for t in losing) / len(losing)
+                    trade_feedback_section += f"### Losers: Avg PnL: {avg_loss:.2f}% | Max: {max_loss:.2f}% | Avg Hold: {avg_hold_loss:.1f} days\n"
+
+                # Analyze exit reasons if available
+                exit_reasons = {}
+                for t in trades:
+                    reason = t.get("exit_reason", "unknown")
+                    exit_reasons[reason] = exit_reasons.get(reason, 0) + 1
+                if exit_reasons:
+                    trade_feedback_section += "\n### Exit Reason Distribution:\n"
+                    for reason, count in sorted(exit_reasons.items(), key=lambda x: -x[1]):
+                        trade_feedback_section += f"  - {reason}: {count} trades\n"
+
+                # Show worst trades for analysis
+                if losing:
+                    trade_feedback_section += "\n### Worst 3 Trades (learn from these):\n"
+                    worst = sorted(losing, key=lambda t: t.get("pnl", 0))[:3]
+                    for t in worst:
+                        trade_feedback_section += (
+                            f"  - {t.get('symbol', '?')}: {t.get('pnl', 0):.2f}% | "
+                            f"Hold: {t.get('hold_days', '?')}d | "
+                            f"Exit: {t.get('exit_reason', '?')}\n"
+                        )
 
         return f"""You are an expert quantitative trading strategy designer refining a strategy based on backtest results.
 
@@ -567,30 +717,39 @@ The JSON must follow this exact schema:
 - Total Return: {total_return}%
 - Win Rate: {win_rate}%
 - Max Drawdown: {max_drawdown}%
+- Sharpe Ratio: {sharpe_ratio}
 - Total Trades: {num_trades}
 
 Full results:
 {json.dumps(backtest_results, indent=2)}
-
+{ml_rules_section}
+{feature_importance_section}
+{history_section}
+{trade_feedback_section}
 ## Available Feature Names
 You MUST select from these exact feature names:
 
 {features_list}
 
 ## CRITICAL INSTRUCTIONS
-1. Analyze what specifically failed or underperformed in the previous design and why.
-2. DO NOT repeat approaches that have already been tried. Each iteration MUST try something meaningfully different.
-3. If features were tried before and didn't work well, use DIFFERENT features.
-4. If thresholds were too tight or too loose, adjust them significantly (not just +-5%).
-5. Consider different features, thresholds, and ML configurations — but NEVER change the core strategy type.
+1. Analyze what specifically failed or underperformed in the previous designs (all iterations) and why.
+2. If features were tried before and didn't work well, use DIFFERENT features.
+3. If thresholds were too tight or too loose, adjust them significantly (not just +-0.5%).
+4. Consider different features, thresholds, and ML configurations — but NEVER change the core strategy type.
+5. If the strategy performance is much greater than the previous iteration, fine tune the strategy further keeping the features but adjusting the thresholds and risk parameters to optimize the strategy.
+6. PRIORITIZE features that had high ML importance scores. The ML model already tested these features against real data.
+7. If ML-extracted rules are provided, use them as your PRIMARY guide for threshold values. These are data-driven, not theoretical.
+8. Review the iteration history and AVOID repeating approaches that produced poor results.
+9. If trade-level feedback shows most losses come from a specific pattern (e.g., stop-loss exits), address that specifically.
 
 ## Analysis Questions (answer these in your thinking before designing)
 1. What pattern do you see in the results? Is the strategy improving or stuck?
-2. Which features contributed most to winning trades vs losing trades?
+2. Which features contributed most to winning trades vs losing trades? (Check ML feature importance!)
 3. Are the entry rules too loose (too many bad entries) or too tight (missing opportunities)?
 4. Are the exit rules triggering too early (cutting winners) or too late (letting losers run)?
-5. What HASN'T been tried yet that could work better?
+5. What HASN'T been tried yet that could work better? (Check iteration history!)
 6. Should the ML training parameters (forward_returns_days, profit_thresholds) be changed?
+7. What does the trade-level feedback tell you about the strategy's weaknesses?
 
 ## Output Format
 You MUST respond with a JSON block wrapped in ```json ... ``` tags.
@@ -1175,11 +1334,15 @@ Return ONLY the markdown content, no code fences wrapping it."""
             # Read template file for reference
             template_code = self._read_template_file("strategy.py")
 
-            # Build prompt
-            entry_rules = json.dumps(design.get("entry_rules", []), indent=2)
-            exit_rules = json.dumps(design.get("exit_rules", []), indent=2)
+            # Build prompt — prefer ML-extracted rules over LLM-designed rules
+            extracted = training_results.get("extracted_rules", {})
+            entry_rules_data = extracted.get("entry_rules") or design.get("entry_rules", [])
+            exit_rules_data = extracted.get("exit_rules") or design.get("exit_rules", [])
+            entry_rules = json.dumps(entry_rules_data, indent=2)
+            exit_rules = json.dumps(exit_rules_data, indent=2)
             features = design.get("priority_features", [])
             indicators = design.get("indicators", {})
+            rules_source = "ML training pipeline" if extracted.get("entry_rules") else "LLM design"
 
             prompt = f"""You are generating a complete custom trading strategy file (strategy.py) for a production trading system.
 
@@ -1189,11 +1352,11 @@ Return ONLY the markdown content, no code fences wrapping it."""
 - Symbols: {', '.join(symbols)}
 - Description: {design.get("strategy_description", "N/A")}
 
-## Entry Rules
+## Entry Rules (from {rules_source} — implement these EXACTLY)
 {entry_rules}
 Entry Score Threshold: {design.get("entry_score_threshold", 3)}
 
-## Exit Rules
+## Exit Rules (from {rules_source} — implement these EXACTLY)
 {exit_rules}
 Exit Score Threshold: {design.get("exit_score_threshold", 3)}
 
@@ -1208,27 +1371,33 @@ The ML training achieved:
 
 ## CRITICAL REQUIREMENTS
 
-1. **Class Structure**: The class MUST be named `TradingStrategy` with this exact API:
+1. **EXACT RULES**: The entry/exit rules above are the EXACT rules that produced the training results.
+   You MUST implement them precisely — use the exact feature names, operators, and thresholds.
+   Do NOT substitute different indicators or change thresholds. Each rule has a "feature" name
+   (e.g. "MOMENTUM_63D", "ADX", "EMA_21"), an "operator" (e.g. "<=", ">="), and a "threshold" value.
+   Your calculate_indicators() method MUST compute every feature referenced in the rules.
+
+2. **Class Structure**: The class MUST be named `TradingStrategy` with this exact API:
    - `__init__(self)` - Load config from config.json
    - `analyze(self, symbols: List[str]) -> List[Dict]` - Main analysis method that returns signals
 
-2. **Imports**: You MUST use these imports:
+3. **Imports**: You MUST use these imports:
    - `from data_provider import DataProvider` for fetching market data
    - `import json` to load config.json
    - Standard libraries: pandas, numpy, ta (technical analysis)
 
-3. **Data Fetching**: Use `DataProvider` class, NOT direct API calls:
+4. **Data Fetching**: Use `DataProvider` class, NOT direct API calls:
    ```python
    data_provider = DataProvider()
    df = data_provider.get_historical_data(symbol, interval=self.config['trading']['timeframe'])
    ```
 
-4. **Strategy Type Consideration**: This is a {strategy_type} strategy.
+5. **Strategy Type Consideration**: This is a {strategy_type} strategy.
    - Momentum strategies: Faster entry signals, ride trends
    - Mean reversion: Wait for extremes, enter on reversals
    - Adjust indicator thresholds and timing accordingly
 
-5. **Return Format**: The `analyze()` method must return a list of signal dicts:
+6. **Return Format**: The `analyze()` method must return a list of signal dicts:
    ```python
    [{{
        "symbol": "AAPL",
@@ -1249,8 +1418,8 @@ Here is the template strategy.py structure to follow:
 
 ## Instructions
 Generate a COMPLETE, PRODUCTION-READY strategy.py file that:
-1. Implements the entry/exit rules from the design
-2. Calculates the required technical indicators
+1. Implements the EXACT entry/exit rules listed above (same features, operators, thresholds)
+2. Calculates ALL technical indicators referenced in the rules
 3. Uses the DataProvider for data fetching
 4. Follows the exact class structure and API
 5. Includes proper error handling
@@ -1290,6 +1459,7 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
         design: Dict[str, Any],
         training_results: Dict[str, Any],
         strategy_type: str,
+        timeframe: str = "1d",
     ) -> str:
         """Generate custom config.json file using Claude.
 
@@ -1299,6 +1469,7 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
             design: Strategy design dict
             training_results: Training results
             strategy_type: Type of strategy
+            timeframe: Trading timeframe (e.g. "1h", "1d", "5m")
 
         Returns:
             Valid JSON string for config.json
@@ -1318,12 +1489,23 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
                 "max_daily_loss_pct": 2.0,
             }
 
+            # Collect feature names from extracted rules for the indicators section
+            extracted = training_results.get("extracted_rules", {})
+            entry_rules_data = extracted.get("entry_rules") or design.get("entry_rules", [])
+            exit_rules_data = extracted.get("exit_rules") or design.get("exit_rules", [])
+            rule_features = set()
+            for rule in entry_rules_data + exit_rules_data:
+                if isinstance(rule, dict) and "feature" in rule:
+                    rule_features.add(rule["feature"])
+            rule_features_str = ", ".join(sorted(rule_features)) if rule_features else "N/A"
+
             prompt = f"""Generate a custom config.json file for a trading strategy.
 
 ## Strategy Details
 - Name: {strategy_name}
 - Type: {strategy_type}
 - Symbols: {', '.join(symbols)}
+- Timeframe: {timeframe}
 
 ## Template Schema
 Use this template structure as reference:
@@ -1332,18 +1514,17 @@ Use this template structure as reference:
 ## Requirements
 1. Set "strategy_name" to "{strategy_name}"
 2. Set "symbols" to {json.dumps(symbols)}
-3. Populate "indicators" section with parameters from the design:
-   - RSI period: {design.get('entry_rules', [{}])[0].get('threshold', 14) if design.get('entry_rules') else 14}
-   - SMA/EMA periods from the priority features
-   - Any other indicator parameters mentioned in the design
-4. Set "risk_management" parameters:
+3. IMPORTANT: Set "timeframe" to "{timeframe}" in the trading section
+4. Populate "indicators" section with parameters relevant to these features used in trading rules:
+   {rule_features_str}
+5. Set "risk_management" parameters:
    - stop_loss_pct: {risk_params['stop_loss_pct']:.1f}
    - trailing_stop_pct: {risk_params['trailing_stop_pct']:.1f}
    - max_position_loss_pct: {risk_params['max_position_loss_pct']:.1f}
    - max_daily_loss_pct: {risk_params['max_daily_loss_pct']:.1f}
-5. Set "max_positions" to {design.get('recommended_max_positions', 3)}
-6. Set "position_size_pct" to {design.get('recommended_position_size', 0.10) * 100:.0f}
-7. Keep the schedule, data_source, and logging sections from the template
+6. Set "max_positions" to {design.get('recommended_max_positions', 3)}
+7. Set "position_size_pct" to {design.get('recommended_position_size', 0.10) * 100:.0f}
+8. Keep the schedule and logging sections from the template
 
 Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
 

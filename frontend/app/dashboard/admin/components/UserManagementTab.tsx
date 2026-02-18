@@ -5,6 +5,7 @@ import { adminAPI } from '@/lib/api'
 import { Search, Edit2, Trash2, RotateCcw, Eye, Plus } from 'lucide-react'
 import UserDetailModal from './UserDetailModal'
 import UserCreateModal from './UserCreateModal'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface User {
   uuid: string
@@ -18,6 +19,7 @@ interface User {
 }
 
 export default function UserManagementTab() {
+  const { refreshUser } = useAuth()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -216,6 +218,7 @@ export default function UserManagementTab() {
           }}
           onUpdate={() => {
             fetchUsers()
+            refreshUser()
             setShowModal(false)
             setSelectedUser(null)
           }}

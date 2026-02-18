@@ -27,6 +27,7 @@ export default function UserDetailModal({ user, onClose, onUpdate }: UserDetailM
     phone_number: user.phone_number || '',
     user_role: user.user_role,
     status: user.status,
+    balance: user.balance,
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -127,6 +128,20 @@ export default function UserDetailModal({ user, onClose, onUpdate }: UserDetailM
               <option value="inactive">Inactive</option>
               <option value="deleted">Deleted</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-text mb-2">Credits / Balance</label>
+            <input
+              type="number"
+              name="balance"
+              value={formData.balance}
+              onChange={(e) => setFormData((prev) => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
+              step="0.01"
+              min="0"
+              className="w-full px-3 py-2 bg-surface-hover border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <p className="text-xs text-text-secondary mt-1">Manually set the user&apos;s token balance</p>
           </div>
 
           {/* Buttons */}

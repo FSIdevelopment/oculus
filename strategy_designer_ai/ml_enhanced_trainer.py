@@ -1088,6 +1088,28 @@ class EnhancedMLTrainer:
         print(f"  Training samples: {len(X_train)}, Test samples: {len(X_test)}")
         print(f"  Features: {len(self.feature_names)}")
 
+        # SMOTE: Handle class imbalance in training data (Item 7)
+        positive_ratio = y_train.sum() / len(y_train) if len(y_train) > 0 else 0.5
+        print(f"  Class balance: {positive_ratio:.1%} positive, {1-positive_ratio:.1%} negative")
+        if positive_ratio < 0.3 or positive_ratio > 0.7:
+            try:
+                from imblearn.over_sampling import SMOTE
+                print(f"  Applying SMOTE to balance classes (ratio: {positive_ratio:.1%})...")
+                smote = SMOTE(random_state=self.config.random_state, k_neighbors=min(5, int(y_train.sum()) - 1))
+                X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
+                new_ratio = y_train_balanced.sum() / len(y_train_balanced)
+                print(f"  SMOTE: {len(X_train)} -> {len(X_train_balanced)} samples "
+                      f"(new balance: {new_ratio:.1%} positive)")
+                X_train = X_train_balanced
+                y_train = y_train_balanced
+                # Update stored training data for rule extraction
+                self.X_train = X_train
+                self.y_train = y_train
+            except ImportError:
+                print(f"  imblearn not installed — skipping SMOTE (pip install imbalanced-learn)")
+            except ValueError as e:
+                print(f"  SMOTE failed (not enough minority samples): {e}")
+
         # DATA LEAKAGE CHECK: Ensure no forward-looking features
         forward_features = [f for f in self.feature_names if 'FORWARD' in f.upper()]
         if forward_features:
@@ -1396,8 +1418,56 @@ class EnhancedMLTrainer:
         combined_data = self.best_config['combined_data']
         all_results = self.train_all_models(combined_data)
 
-        # Step 4: Create ensemble (optional)
-        # ensemble = self.create_ensemble(top_n=3)
+        # Step 4: Create ensemble from top 3 models (Item 4)
+        try:
+            if self.all_results and len(self.all_results) >= 2:
+                # Filter to only sklearn-compatible models (exclude PyTorch LSTM)
+                sklearn_models = {
+                    name: data for name, data in self.all_results.items()
+                    if hasattr(data.get('model'), 'predict_proba') and not (
+                        HAS_PYTORCH and isinstance(data.get('model'), torch.nn.Module)
+                    )
+                }
+                if len(sklearn_models) >= 2:
+                    # Temporarily set all_results to sklearn-only for ensemble creation
+                    orig_results = self.all_results
+                    self.all_results = sklearn_models
+                    ensemble = self.create_ensemble(top_n=min(3, len(sklearn_models)))
+                    self.all_results = orig_results
+
+                    # Fit and evaluate ensemble
+                    ensemble.fit(self.X_train, self.y_train)
+                    y_pred = ensemble.predict(self.X_test)
+                    y_proba = ensemble.predict_proba(self.X_test)[:, 1]
+                    ensemble_metrics = {
+                        'accuracy': accuracy_score(self.y_test, y_pred),
+                        'precision': precision_score(self.y_test, y_pred, zero_division=0),
+                        'recall': recall_score(self.y_test, y_pred, zero_division=0),
+                        'f1': f1_score(self.y_test, y_pred, zero_division=0),
+                        'auc': roc_auc_score(self.y_test, y_proba) if len(np.unique(self.y_test)) > 1 else 0.5,
+                    }
+                    print(f"  Ensemble F1={ensemble_metrics['f1']:.4f}, AUC={ensemble_metrics['auc']:.4f}")
+
+                    # Use ensemble as best model if it outperforms the current best
+                    if ensemble_metrics['f1'] > all_results[self.best_model_name]['metrics']['f1']:
+                        print(f"  Ensemble outperforms {self.best_model_name} — using ensemble as best model")
+                        self.best_model = ensemble
+                        self.best_model_name = "Ensemble_Top3"
+                        self.all_results["Ensemble_Top3"] = {
+                            'model': ensemble,
+                            'metrics': ensemble_metrics,
+                            'params': {},
+                        }
+                        all_results["Ensemble_Top3"] = self.all_results["Ensemble_Top3"]
+                    else:
+                        print(f"  Ensemble ({ensemble_metrics['f1']:.4f}) did not beat {self.best_model_name} "
+                              f"({all_results[self.best_model_name]['metrics']['f1']:.4f}) — keeping best individual model")
+                else:
+                    print("  Skipping ensemble: not enough sklearn-compatible models")
+            else:
+                print("  Skipping ensemble: not enough models trained")
+        except Exception as e:
+            print(f"  Ensemble creation failed (non-fatal): {e}")
 
         # Step 5: Save model (skip in worker context — results sent via Redis)
         model_path = None
