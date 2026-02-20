@@ -20,6 +20,31 @@ class LicenseWebhookUpdate(BaseModel):
     webhook_url: str = Field(..., min_length=1, max_length=255)
 
 
+class LicenseCheckoutResponse(BaseModel):
+    """Schema returned when a Stripe checkout session is created for a license."""
+    checkout_url: str
+    session_id: str
+
+
+class LicenseSetupIntentResponse(BaseModel):
+    """Schema returned when a Stripe SetupIntent is created for in-app license payment."""
+    client_secret: str
+    publishable_key: str
+
+
+class LicenseSubscribeRequest(BaseModel):
+    """Schema for creating a subscription with a confirmed payment method."""
+    license_type: str = Field(..., pattern="^(monthly|annual)$")
+    payment_method_id: str = Field(..., min_length=1)
+
+
+class LicensePriceResponse(BaseModel):
+    """Calculated license prices for a strategy based on backtest performance."""
+    monthly_price: int
+    annual_price: int
+    performance_score: float  # curved score in [0.0, 1.0]
+
+
 class LicenseResponse(BaseModel):
     """Schema for license detail response."""
     uuid: str
@@ -54,7 +79,26 @@ class LicenseValidationResponse(BaseModel):
     # Data provider keys (if license is active)
     polygon_api_key: Optional[str] = None
     alphavantage_api_key: Optional[str] = None
-    
+
+    class Config:
+        from_attributes = True
+
+
+class AtlasLicenseValidationResponse(BaseModel):
+    """Schema for Atlas Trade AI license validation response.
+
+    Returns all fields required by Atlas Trade AI to confirm a license is valid
+    and to identify the strategy being traded.
+    """
+    is_active: bool
+    license_id: str
+    license_status: str
+    user_uuid: str
+    strategy_name: str
+    strategy_description: Optional[str] = None
+    backtest_results: Optional[dict] = None
+    expires_at: datetime
+
     class Config:
         from_attributes = True
 

@@ -34,7 +34,7 @@ import asyncio
 import json
 import pickle
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Callable, Dict, List, Any, Tuple, Optional
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
@@ -55,7 +55,7 @@ _sklearn_parallel.delayed = _patched_delayed
 import sklearn
 sklearn.set_config(assume_finite=True)
 
-from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV, cross_val_score
+from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV, cross_val_score, train_test_split
 from sklearn.preprocessing import RobustScaler, StandardScaler
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from sklearn.neural_network import MLPClassifier
@@ -281,7 +281,11 @@ class HyperparameterTuner:
                 n_jobs=n_workers,  # Use limited workers instead of -1
                 random_state=self.config.random_state,
                 verbose=0,
-                error_score='raise'  # Fail fast on errors instead of silently continuing
+                error_score=0.0  # Score failed folds as 0 instead of crashing; small datasets
+                                  # can produce single-class folds in TimeSeriesSplit which
+                                  # cause GradientBoosting/XGBoost to raise.  A 0 score on
+                                  # those folds is averaged with the passing folds so the
+                                  # search still finds the best surviving parameter set.
             )
 
             search.fit(X_train, y_train)
@@ -327,7 +331,11 @@ class HyperparameterTuner:
             ),
             'MLP': MLPClassifier(
                 max_iter=500,
-                early_stopping=True,
+                # early_stopping requires a held-out validation split.  With small
+                # datasets the per-fold training set is too tiny to afford that split,
+                # so disable it here.  early_stopping is re-enabled in the dedicated
+                # NeuralNetworkTrainer where dataset sizes are larger/controlled.
+                early_stopping=False,
                 random_state=self.config.random_state
             ),
         }
@@ -872,7 +880,10 @@ class EnhancedMLTrainer:
         print(f"  📈 Profit thresholds: {self.config.profit_threshold_options}")
         print(f"  🧠 Config search model: {self.config.config_search_model}")
 
-        best_score = 0
+        # Use AUC as primary metric — it is robust even when the model predicts
+        # all-zeros (F1 collapses to 0 in that case).  Initialise to -1 so that
+        # any config that has two classes will become the new best.
+        best_score = -1.0
         best_config = None
         config_results = []
         config_num = 0
@@ -894,19 +905,31 @@ class EnhancedMLTrainer:
                     print(f"    Skipping - only one class in labels")
                     continue
 
-                # Scale and split
+                # Scale features
                 scaler = RobustScaler()
                 X_scaled = scaler.fit_transform(X)
                 X_scaled = np.nan_to_num(X_scaled, nan=0.0, posinf=0.0, neginf=0.0)
 
-                split_idx = int(len(X_scaled) * 0.8)
-                X_train, X_test = X_scaled[:split_idx], X_scaled[split_idx:]
-                y_train, y_test = y[:split_idx], y[split_idx:]
+                # Stratified split: ensures both train and test contain proportional
+                # positive/negative examples, avoiding the sequential-concat bias
+                # (e.g. all of symbol-3's recent data landing in the test set only).
+                try:
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X_scaled, y, test_size=0.2, random_state=42, stratify=y
+                    )
+                except ValueError:
+                    # Stratify fails when a class has < 2 members; fall back
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X_scaled, y, test_size=0.2, random_state=42
+                    )
 
                 # Quick evaluation with configurable model
                 import multiprocessing as mp
                 quick_jobs = max(2, mp.cpu_count() // 2)
                 search_model_name = self.config.config_search_model
+
+                # Default metric values; updated below per model path
+                f1, precision, recall, auc = 0.0, 0.0, 0.0, 0.5
 
                 if search_model_name == "LSTM" and HAS_PYTORCH:
                     # LSTM needs special handling: create sequences, train, predict
@@ -966,10 +989,17 @@ class EnhancedMLTrainer:
                     f1 = f1_score(y_test, y_pred, zero_division=0)
                     precision = precision_score(y_test, y_pred, zero_division=0)
                     recall = recall_score(y_test, y_pred, zero_division=0)
+                    # AUC is more robust than F1 when the model defaults to
+                    # predicting all-zeros (e.g. extreme class imbalance in test).
+                    if len(np.unique(y_test)) > 1 and hasattr(model, 'predict_proba'):
+                        y_proba = model.predict_proba(X_test)[:, 1]
+                        auc = roc_auc_score(y_test, y_proba)
+                    else:
+                        auc = 0.5  # random baseline
 
                 label_ratio = y.sum() / len(y) * 100
 
-                print(f"    F1: {f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}")
+                print(f"    F1: {f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, AUC: {auc:.4f}")
                 print(f"    Positive labels: {label_ratio:.1f}%")
 
                 config_results.append({
@@ -978,11 +1008,16 @@ class EnhancedMLTrainer:
                     'f1': f1,
                     'precision': precision,
                     'recall': recall,
+                    'auc': auc,
                     'label_ratio': label_ratio
                 })
 
-                if f1 > best_score:
-                    best_score = f1
+                # Use AUC as the primary ranking metric; tiebreak with F1.
+                # best_score is initialised to -1 so the very first valid config
+                # is always accepted, even when AUC == 0.5 and F1 == 0.
+                config_score = auc if auc > 0.5 else f1
+                if config_score > best_score:
+                    best_score = config_score
                     best_config = {
                         'forward_days': forward_days,
                         'profit_threshold': profit_threshold,
@@ -993,35 +1028,52 @@ class EnhancedMLTrainer:
         elapsed = time.time() - start_time
         print(f"\n  ⏱️  Configuration search completed in {elapsed:.1f}s")
 
-        # Check if any valid configuration was found
+        # Check if any valid configuration was found.
+        # best_config is None only if EVERY config was skipped because the
+        # label column contained a single class for that combination.
         if best_config is None:
             error_msg = (
                 "\n  ❌ ERROR: No valid label configurations found!\n"
                 f"  📊 Data available: {len(self.stock_data.get(self.symbols[0], pd.DataFrame()))} bars\n"
                 "  \n"
-                "  💡 Possible causes:\n"
-                "     1. Insufficient data - hourly/intraday data from free APIs is limited to ~30-60 days\n"
-                "     2. Not enough price variation to create meaningful labels\n"
-                "     3. All samples have the same class (all profitable or all unprofitable)\n"
+                "  💡 All tested configurations produced only one label class.\n"
+                "     This usually means there is not enough price variation to create\n"
+                "     both profitable and unprofitable examples.\n"
                 "  \n"
                 "  🔧 Solutions:\n"
-                "     • Use 'daily' or 'weekly' timeframe for longer historical periods\n"
-                "     • Reduce target period (e.g., 6 months instead of 2 years for hourly data)\n"
-                "     • Use a paid data provider (Polygon, Alpha Vantage Premium) for more intraday history\n"
+                "     • Lower the profit threshold options (e.g. try 1.0–2.0%)\n"
+                "     • Increase the forward return window options\n"
+                "     • Use symbols with higher historical volatility\n"
             )
             print(error_msg)
-            raise ValueError("No valid label configurations found. Insufficient training data.")
+            raise ValueError("No valid label configurations found. All configurations produced only one label class.")
 
         print(f"\n  ✓ Best config: forward={best_config['forward_days']}d, "
-              f"profit={best_config['profit_threshold']}% (F1={best_score:.4f})")
+              f"profit={best_config['profit_threshold']}% (score={best_score:.4f})")
 
         self.best_config = best_config
         return {'best': best_config, 'all_results': config_results}
 
-    def train_all_models(self, combined_data: pd.DataFrame) -> Dict[str, Any]:
-        """Train all models with hyperparameter tuning."""
+    def train_all_models(self, combined_data: pd.DataFrame,
+                         progress_callback: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+        """Train all models with hyperparameter tuning.
+
+        Args:
+            combined_data: Feature/label dataframe from the best label config.
+            progress_callback: Optional callable invoked with a human-readable
+                status string at each major training stage.  Used by the worker
+                to stream real-time updates to the UI Design Thinking section.
+        """
         import time
         start_time = time.time()
+
+        def _cb(msg: str) -> None:
+            """Fire progress_callback safely, swallowing any exceptions."""
+            if progress_callback is not None:
+                try:
+                    progress_callback(msg)
+                except Exception:
+                    pass
 
         print(f"\n{'='*60}")
         print("STEP 3: TRAINING MODELS WITH HYPERPARAMETER TUNING")
@@ -1031,6 +1083,7 @@ class EnhancedMLTrainer:
         print(f"  📊 Cross-validation folds: {self.config.cv_folds}")
 
         # Prepare features and labels
+        _cb("Preparing features and engineering indicators for training...")
         X, self.feature_names = self.feature_engineer.prepare_features(combined_data)
         y = combined_data['LABEL_ENTRY'].values
 
@@ -1122,6 +1175,8 @@ class EnhancedMLTrainer:
         print(f"  Sample features: {self.feature_names[:5]}...")
 
         # Initialize tuner and train tree-based models
+        _cb(f"Running hyperparameter optimization across tree-based models "
+            f"({self.config.n_iter_search} iterations) — this may take a few minutes...")
         tuner = HyperparameterTuner(self.config)
         tuned_models = tuner.tune_all_models(X_train, y_train)
 
@@ -1131,6 +1186,7 @@ class EnhancedMLTrainer:
         nn_trainer = NeuralNetworkTrainer(self.config)
 
         if self.config.train_neural_networks:
+            _cb("Training neural network models (MLP ensemble)...")
             nn_results = nn_trainer.train_mlp_ensemble(X_train, y_train, X_test, y_test)
         else:
             print(f"\n  ⏭️  Skipping MLP training (disabled in config)")
@@ -1138,6 +1194,7 @@ class EnhancedMLTrainer:
         # Train LSTM SEPARATELY - this is critical for time series!
         # LSTM should ALWAYS be trained as it's the best model for sequential data
         if self.config.train_lstm:
+            _cb("Training LSTM model — best for detecting time series patterns...")
             print(f"\n  🧠 Training LSTM (best for time series patterns)...")
             lstm_results = nn_trainer.train_lstm(
                 X_train, y_train, X_test, y_test,
@@ -1152,6 +1209,7 @@ class EnhancedMLTrainer:
             print(f"\n  ⏭️  Skipping LSTM training (disabled in config)")
 
         # Evaluate all models on test set
+        _cb("Evaluating all models on the hold-out test set...")
         print(f"\n{'='*60}")
         print("MODEL EVALUATION ON TEST SET")
         print(f"{'='*60}")
@@ -1189,6 +1247,7 @@ class EnhancedMLTrainer:
                   f"Precision={m['precision']:.4f}, Recall={m['recall']:.4f}")
 
         # Find best model
+        _cb("Selecting best model based on F1 score...")
         best_name = max(all_results.keys(), key=lambda k: all_results[k]['metrics']['f1'])
         self.best_model = all_results[best_name]['model']
         self.best_model_name = best_name
@@ -1384,7 +1443,8 @@ class EnhancedMLTrainer:
 
         return config
 
-    async def run_full_pipeline(self, skip_disk_writes: bool = False) -> Dict[str, Any]:
+    async def run_full_pipeline(self, skip_disk_writes: bool = False,
+                                progress_callback: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """Run the complete enhanced ML training pipeline.
 
         Args:
@@ -1392,7 +1452,18 @@ class EnhancedMLTrainer:
                 Used in worker context where results are sent via Redis and
                 hardcoded disk paths don't exist. Default False preserves
                 standalone behavior.
+            progress_callback: Optional callable invoked with a human-readable
+                status string at each major pipeline stage.  Used by the worker
+                to stream real-time updates to the UI Design Thinking section.
         """
+        def _cb(msg: str) -> None:
+            """Fire progress_callback safely, swallowing any exceptions."""
+            if progress_callback is not None:
+                try:
+                    progress_callback(msg)
+                except Exception:
+                    pass
+
         print("\n" + "="*70)
         print("ENHANCED ML STRATEGY TRAINER")
         print("="*70)
@@ -1403,22 +1474,27 @@ class EnhancedMLTrainer:
         print("="*70)
 
         # Step 1: Fetch data
+        _cb(f"Fetching market data for {', '.join(self.symbols)}...")
         await self.fetch_all_data()
 
         if len(self.stock_data) == 0:
             raise ValueError("No data fetched!")
 
         # Step 2: Search for best label configuration
+        _cb("Searching for optimal label configuration (forward days & profit thresholds)...")
         config_results = self.run_configuration_search()
 
         if self.best_config is None:
             raise ValueError("No valid configuration found!")
 
-        # Step 3: Train all models with best config
+        # Step 3: Train all models with best config — pass callback so each
+        # sub-stage (HP tuning, neural nets, evaluation, selection) is surfaced.
+        _cb("Starting model training — this can take several minutes, please be patient...")
         combined_data = self.best_config['combined_data']
-        all_results = self.train_all_models(combined_data)
+        all_results = self.train_all_models(combined_data, progress_callback=progress_callback)
 
         # Step 4: Create ensemble from top 3 models (Item 4)
+        _cb("Creating ensemble from top-performing models...")
         try:
             if self.all_results and len(self.all_results) >= 2:
                 # Filter to only sklearn-compatible models (exclude PyTorch LSTM)

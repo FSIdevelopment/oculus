@@ -38,6 +38,37 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Stripe License Price IDs — no longer used for checkout (dynamic price_data is
+    # used instead), but kept here in case a fixed-price fallback is ever needed.
+    STRIPE_LICENSE_MONTHLY_PRICE_ID: str = ""
+    STRIPE_LICENSE_ANNUAL_PRICE_ID: str = ""
+
+    # ── Dynamic License Pricing ────────────────────────────────────────────────
+    # Price bounds (whole USD).  Strategies at or below the minimum performance
+    # thresholds are charged LICENSE_MONTHLY_MIN_PRICE; those at or above the
+    # maximum thresholds are charged LICENSE_MONTHLY_MAX_PRICE.
+    LICENSE_MONTHLY_MIN_PRICE: int = 50     # $ floor — minimum monthly price
+    LICENSE_MONTHLY_MAX_PRICE: int = 1999  # $ ceiling — maximum monthly price
+    # Annual price = monthly * multiplier  (10 ≈ 2 months free, ~17% discount)
+    LICENSE_ANNUAL_MULTIPLIER: int = 10
+
+    # Performance thresholds that define the min/max of the pricing curve.
+    # total_return is expressed as a percentage (e.g. 10.0 = 10%).
+    PERF_MIN_RETURN: float = 10.0   # % — maps to LICENSE_MONTHLY_MIN_PRICE
+    PERF_MAX_RETURN: float = 350.0  # % — maps to LICENSE_MONTHLY_MAX_PRICE
+    PERF_MIN_SHARPE: float = 0.5    # — maps to LICENSE_MONTHLY_MIN_PRICE
+    PERF_MAX_SHARPE: float = 5.0    # — maps to LICENSE_MONTHLY_MAX_PRICE
+
+    # Metric weights (must be > 0; normalised internally so they don't need to sum to 1).
+    PERF_RETURN_WEIGHT: float = 0.85
+    PERF_SHARPE_WEIGHT: float = 0.15
+
+    # Power-curve exponent applied to the combined performance score.
+    # < 1 gives an ease-in curve (steeper at the low end, rewards early improvement).
+    # > 1 gives an ease-out curve (steeper near the top, rewards excellence).
+    # 0.65 produces a gentle ease-in that feels natural across the range.
+    PERF_CURVE_EXPONENT: float = 0.9
+
     # Data Provider Keys (centrally managed)
     POLYGON_API_KEY: str = ""
     ALPHAVANTAGE_API_KEY: str = ""

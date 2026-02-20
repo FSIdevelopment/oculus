@@ -94,6 +94,7 @@ class BuildOrchestrator:
         target_return: float,
         strategy_type: Optional[str] = None,
         iteration: int = 0,
+        prior_iteration_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Call Claude API to design strategy.
 
@@ -118,7 +119,7 @@ class BuildOrchestrator:
         # Create prompt
         prompt = self._build_design_prompt(
             strategy_name, strategy_type, symbols, description, timeframe, target_return, context,
-            creation_guide
+            creation_guide, prior_iteration_history=prior_iteration_history
         )
 
         try:
@@ -138,7 +139,12 @@ class BuildOrchestrator:
             return result
 
         except anthropic.APIError as e:
-            self._log(f"Claude API error: {e}")
+            self._log(f"Claude API error in design_strategy: {e}")
+            logger.error("Claude API error in design_strategy (build=%s): %s", self.build.uuid, e, exc_info=True)
+            raise
+        except Exception as e:
+            self._log(f"Unexpected error in design_strategy: {e}")
+            logger.error("Unexpected error in design_strategy (build=%s): %s", self.build.uuid, e, exc_info=True)
             raise
 
     async def dispatch_training_job(
@@ -245,7 +251,18 @@ class BuildOrchestrator:
             return result
 
         except anthropic.APIError as e:
-            self._log(f"Claude API error during refinement: {e}")
+            self._log(f"Claude API error during refinement (iteration {iteration}): {e}")
+            logger.error(
+                "Claude API error in refine_strategy (build=%s, iteration=%d): %s",
+                self.build.uuid, iteration, e, exc_info=True,
+            )
+            raise
+        except Exception as e:
+            self._log(f"Unexpected error during refinement (iteration {iteration}): {e}")
+            logger.error(
+                "Unexpected error in refine_strategy (build=%s, iteration=%d): %s",
+                self.build.uuid, iteration, e, exc_info=True,
+            )
             raise
 
     async def deduct_tokens(self, amount: float, description: str):
@@ -471,9 +488,60 @@ class BuildOrchestrator:
         target_return: float,
         context: str,
         creation_guide: str = "",
+        prior_iteration_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Build initial strategy design prompt with full features list, JSON schema, and rules."""
         features_list = "\n".join(f"  - {f}" for f in self.AVAILABLE_FEATURES)
+
+        # Build prior iteration history section if retrain context is available.
+        # Entries arrive pre-sorted: oldest build first, iterations within each
+        # build in ascending order (guaranteed by the strategies.py retrain endpoint).
+        # We assign sequential numbers (Build #1, Build #2, …) so the LLM can refer
+        # to specific prior builds without having to parse raw UUIDs.
+        prior_history_section = ""
+        if prior_iteration_history:
+            prior_history_section = "\n## Prior Build History (from previous builds — DO NOT repeat failed approaches)\n"
+            prior_history_section += "This strategy has been built before. Builds are listed oldest → newest.\n"
+            prior_history_section += "Learn from what worked and what failed. Build on the best results.\n\n"
+
+            # First pass: assign a sequential number to each distinct build UUID
+            # in the order they appear (which is chronological after the query fix).
+            prior_build_seq: dict[str, int] = {}
+            seq_counter = 0
+            for hist in prior_iteration_history:
+                bid = hist.get("build_id")
+                if bid and bid not in prior_build_seq:
+                    seq_counter += 1
+                    prior_build_seq[bid] = seq_counter
+
+            # Second pass: render each entry with a human-readable build label
+            for hist in prior_iteration_history:
+                iter_num = hist.get("iteration", "?")
+                bid = hist.get("build_id")
+                build_label = f"Build #{prior_build_seq[bid]}" if bid and bid in prior_build_seq else "Build"
+                iter_return = hist.get("total_return", 0)
+                iter_win_rate = hist.get("win_rate", 0)
+                iter_sharpe = hist.get("sharpe_ratio", 0)
+                iter_trades = hist.get("total_trades", 0)
+                iter_drawdown = hist.get("max_drawdown", 0)
+                iter_features = hist.get("top_features", [])
+                iter_model = hist.get("best_model", "?")
+
+                prior_history_section += f"### {build_label}, Iteration {iter_num}:\n"
+                prior_history_section += (
+                    f"  Return: {iter_return}% | Win Rate: {iter_win_rate}% | "
+                    f"Sharpe: {iter_sharpe} | Drawdown: {iter_drawdown}% | Trades: {iter_trades}\n"
+                )
+                prior_history_section += f"  Best Model: {iter_model}\n"
+                if iter_features:
+                    prior_history_section += f"  Top Features: {', '.join(iter_features[:5])}\n"
+                iter_entry = hist.get("entry_features", [])
+                iter_exit = hist.get("exit_features", [])
+                if iter_entry:
+                    prior_history_section += f"  Entry Features Used: {', '.join(iter_entry[:5])}\n"
+                if iter_exit:
+                    prior_history_section += f"  Exit Features Used: {', '.join(iter_exit[:5])}\n"
+                prior_history_section += "\n"
 
         return f"""You are an expert quantitative trading strategy designer. Your role is to design
 highly profitable algorithmic trading strategies using technical indicators and ML-optimized parameters.
@@ -489,7 +557,7 @@ Design a trading strategy with these specifications:
 
 ## Previous Builds Context
 {context}
-
+{prior_history_section}
 ## Available Feature Names for ML Training
 The ML pipeline calculates the following features from price data. You MUST select from these
 exact feature names when specifying priority_features and entry/exit rules:
@@ -617,8 +685,15 @@ The JSON must follow this exact schema:
                 feature_importance_section += "\nPRIORITIZE features with high importance scores in your design.\n"
                 feature_importance_section += "Features NOT in this list had low predictive power — avoid relying on them.\n"
 
-            # Best model info
-            best_model = training_results.get("best_model", {})
+            # Best model info — worker may send a plain string (model name) or a
+            # dict {"name": ..., "metrics": ...}.  Normalise to dict form here.
+            _best_model_raw = training_results.get("best_model", {})
+            if isinstance(_best_model_raw, dict):
+                best_model = _best_model_raw
+            elif _best_model_raw:
+                best_model = {"name": str(_best_model_raw), "metrics": {}}
+            else:
+                best_model = {}
             if best_model:
                 model_name = best_model.get("name", "Unknown")
                 model_metrics = best_model.get("metrics", {})
@@ -633,7 +708,24 @@ The JSON must follow this exact schema:
         history_section = ""
         if iteration_history:
             history_section = "\n## Iteration History (DO NOT repeat failed approaches)\n"
-            history_section += "Review ALL previous iterations. Learn from what worked and what failed.\n\n"
+            history_section += (
+                "Each entry belongs to a distinct build attempt. "
+                "'Current Build' means the iterations already run in THIS build. "
+                "'Prior Build #N' means a previous, separate build run.\n"
+                "Learn from what worked and what failed across ALL builds.\n\n"
+            )
+
+            # Assign sequential numbers to prior builds so the LLM can refer to them
+            # unambiguously. Prior build entries carry a 'build_id' but NOT
+            # 'is_current_build'. Current-build entries carry both.
+            prior_build_seq: dict[str, int] = {}
+            seq_counter = 0
+            for hist in iteration_history:
+                bid = hist.get("build_id")
+                if bid and not hist.get("is_current_build") and bid not in prior_build_seq:
+                    seq_counter += 1
+                    prior_build_seq[bid] = seq_counter
+
             for hist in iteration_history:
                 iter_num = hist.get("iteration", "?")
                 iter_return = hist.get("total_return", 0)
@@ -644,7 +736,16 @@ The JSON must follow this exact schema:
                 iter_features = hist.get("top_features", [])
                 iter_model = hist.get("best_model", "?")
 
-                history_section += f"### Iteration {iter_num}:\n"
+                # Build a human-readable label so the LLM can tell builds apart
+                bid = hist.get("build_id")
+                if hist.get("is_current_build"):
+                    build_label = "Current Build"
+                elif bid and bid in prior_build_seq:
+                    build_label = f"Prior Build #{prior_build_seq[bid]}"
+                else:
+                    build_label = "Prior Build"
+
+                history_section += f"### {build_label}, Iteration {iter_num}:\n"
                 history_section += f"  Return: {iter_return}% | Win Rate: {iter_win_rate}% | "
                 history_section += f"Sharpe: {iter_sharpe} | Drawdown: {iter_drawdown}% | Trades: {iter_trades}\n"
                 history_section += f"  Best Model: {iter_model}\n"
@@ -1026,6 +1127,13 @@ Make meaningful changes to parameters, features, and rules — don't just tweak 
             bt = backtest_results or {}
             entry_rules_str = json.dumps(design.get("entry_rules", []), indent=2)
             exit_rules_str = json.dumps(design.get("exit_rules", []), indent=2)
+            # best_model may be a dict {"name": ..., "metrics": ...} or a plain string (model name)
+            _best_model_raw = (training_results or {}).get("best_model", "Unknown")
+            best_model_name = (
+                _best_model_raw.get("name", "Unknown")
+                if isinstance(_best_model_raw, dict)
+                else (_best_model_raw or "Unknown")
+            )
 
             prompt = f"""You are maintaining a Strategy Creation Guide that helps an AI design winning trading strategies.
 This guide is referenced BEFORE starting any new strategy build, so it must contain actionable lessons.
@@ -1046,7 +1154,7 @@ Exit Rules: {exit_rules_str}
 Total Return: {bt.get("total_return", 0)}%
 Win Rate: {bt.get("win_rate", 0)}%
 Max Drawdown: {bt.get("max_drawdown", 0)}%
-Best Model: {training_results.get("best_model", "Unknown")}
+Best Model: {best_model_name}
 
 ML Config: {json.dumps(design.get("ml_training_config", {}), indent=2)}
 
@@ -1306,6 +1414,48 @@ Return ONLY the markdown content, no code fences wrapping it."""
         template_path = template_dir / filename
         return template_path.read_text()
 
+    @staticmethod
+    def _ensure_async_interface(code: str) -> str:
+        """Post-process generated strategy code to guarantee async method signatures.
+
+        The LLM occasionally emits synchronous `def calculate_indicators` or
+        `def check_entry_conditions` despite being told not to.  This method:
+        1. Converts both methods to `async def` if they are not already.
+        2. Fixes `check_entry_conditions` signature when the LLM uses the
+           wrong parameter list (e.g. `(self, df: pd.DataFrame)`).
+
+        The backtest runner always calls these with `await`, so they MUST be
+        coroutines.  The method intentionally only patches these two names to
+        minimise the risk of unintended side-effects.
+        """
+        import re
+
+        # --- Fix calculate_indicators: ensure it is async ---
+        # Only matches `def` (not already-correct `async def`), so idempotent.
+        code = re.sub(
+            r'\n(    )def (calculate_indicators\s*\(self)',
+            r'\n\1async def \2',
+            code,
+        )
+
+        # --- Fix check_entry_conditions: ensure it is async ---
+        code = re.sub(
+            r'\n(    )def (check_entry_conditions\s*\()',
+            r'\n\1async def \2',
+            code,
+        )
+
+        # --- Fix check_entry_conditions parameter list when it is wrong ---
+        # Wrong form:  check_entry_conditions(self, df: pd.DataFrame) -> ...
+        # Correct form: check_entry_conditions(self, symbol: str, indicators: Dict, current_date=None) -> Optional[str]:
+        code = re.sub(
+            r'(async def check_entry_conditions\s*\(\s*self\s*,\s*)df\s*:\s*pd\.DataFrame[^)]*\)',
+            r'\1symbol: str, indicators: Dict, current_date=None) -> Optional[str]',
+            code,
+        )
+
+        return code
+
     async def generate_strategy_code(
         self,
         strategy_name: str,
@@ -1381,23 +1531,46 @@ The ML training achieved:
    - `__init__(self)` - Load config from config.json
    - `analyze(self, symbols: List[str]) -> List[Dict]` - Main analysis method that returns signals
 
-3. **Imports**: You MUST use these imports:
+3. **ASYNC METHODS — NON-NEGOTIABLE**: The following TWO methods MUST use `async def` (not `def`):
+
+   ```python
+   async def calculate_indicators(self, df: pd.DataFrame) -> Dict[str, Any]:
+       \"\"\"Calculate technical indicators. Returns a dict of indicator values.\"\"\"
+       ...  # your implementation here
+
+   async def check_entry_conditions(
+       self,
+       symbol: str,
+       indicators: Dict,
+       current_date=None
+   ) -> Optional[str]:
+       \"\"\"Check entry/exit conditions. Returns 'BUY', 'SELL', or None.\"\"\"
+       ...  # your implementation here
+   ```
+
+   - `calculate_indicators` receives a **DataFrame** (OHLCV slice) and returns a **dict** of computed indicator values.
+   - `check_entry_conditions` receives `symbol` (str), `indicators` (pre-computed dict from calculate_indicators),
+     and optional `current_date`. It returns the string `'BUY'`, `'SELL'`, or `None` — NOT a dict.
+   - The backtest runner calls these with `await`, so they MUST be declared `async def`.
+
+4. **Imports**: You MUST use these imports:
    - `from data_provider import DataProvider` for fetching market data
    - `import json` to load config.json
    - Standard libraries: pandas, numpy, ta (technical analysis)
+   - `from typing import Dict, Any, List, Optional`
 
-4. **Data Fetching**: Use `DataProvider` class, NOT direct API calls:
+5. **Data Fetching**: Use `DataProvider` class, NOT direct API calls:
    ```python
    data_provider = DataProvider()
    df = data_provider.get_historical_data(symbol, interval=self.config['trading']['timeframe'])
    ```
 
-5. **Strategy Type Consideration**: This is a {strategy_type} strategy.
+6. **Strategy Type Consideration**: This is a {strategy_type} strategy.
    - Momentum strategies: Faster entry signals, ride trends
    - Mean reversion: Wait for extremes, enter on reversals
    - Adjust indicator thresholds and timing accordingly
 
-6. **Return Format**: The `analyze()` method must return a list of signal dicts:
+7. **Return Format**: The `analyze()` method must return a list of signal dicts:
    ```python
    [{{
        "symbol": "AAPL",
@@ -1434,22 +1607,40 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
                 messages=[{"role": "user", "content": prompt}],
             )
 
-            # Extract text from response
+            # Extract text from response (skip ThinkingBlock objects which have
+            # a .thinking attribute but no .text attribute)
             code = ""
             for block in response.content:
                 if hasattr(block, 'text'):
                     code += block.text
 
-            if code:
+            # Validate the generated code is non-trivial and contains the
+            # required TradingStrategy class.  A bare truthy check is not
+            # sufficient — the LLM can return a near-empty text block (e.g. a
+            # single newline) that passes `if code:` but produces an invalid
+            # strategy.py.
+            if len(code) > 500 and "class TradingStrategy" in code:
+                # Post-process: guarantee async interface regardless of what
+                # the LLM emitted (convert sync methods, fix signatures).
+                code = self._ensure_async_interface(code)
                 self._log(f"Strategy code generated ({len(code)} chars)")
                 return code
             else:
-                raise ValueError("No code generated in response")
+                logger.warning(
+                    "Strategy code validation failed: length=%d, has_class=%s",
+                    len(code),
+                    "class TradingStrategy" in code,
+                )
+                raise ValueError(
+                    f"Generated strategy code failed validation: "
+                    f"length={len(code)}, "
+                    f"has TradingStrategy class: {'class TradingStrategy' in code}"
+                )
 
         except Exception as e:
             logger.error("Strategy code generation failed: %s", e)
             self._log(f"Warning: Strategy code generation failed: {e}")
-            # Return template as fallback
+            # Return template as fallback (already has correct async interface)
             return self._read_template_file("strategy.py")
 
     async def generate_strategy_config(
@@ -1483,10 +1674,13 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
             # Extract design parameters
             indicators = design.get("indicators", {})
             risk_params = {
-                "stop_loss_pct": design.get("recommended_stop_loss", 0.05) * 100,
-                "trailing_stop_pct": design.get("recommended_trailing_stop", 0.03) * 100,
-                "max_position_loss_pct": 1.0,
-                "max_daily_loss_pct": 2.0,
+                # IMPORTANT: all *_pct fields in config.json are stored as decimal fractions
+                # (e.g. 0.05 means 5%). Runtime code may accept whole-percent inputs for
+                # backward compatibility, but the canonical config representation is 0-1.
+                "stop_loss_pct": design.get("recommended_stop_loss", 0.05),
+                "trailing_stop_pct": design.get("recommended_trailing_stop", 0.03),
+                "max_position_loss_pct": 0.01,
+                "max_daily_loss_pct": 0.02,
             }
 
             # Collect feature names from extracted rules for the indicators section
@@ -1506,6 +1700,7 @@ Return ONLY the raw Python source code. Do NOT wrap it in markdown code fences."
 - Type: {strategy_type}
 - Symbols: {', '.join(symbols)}
 - Timeframe: {timeframe}
+- Indicator features used in rules: {rule_features_str}
 
 ## Template Schema
 Use this template structure as reference:
@@ -1513,18 +1708,26 @@ Use this template structure as reference:
 
 ## Requirements
 1. Set "strategy_name" to "{strategy_name}"
-2. Set "symbols" to {json.dumps(symbols)}
-3. IMPORTANT: Set "timeframe" to "{timeframe}" in the trading section
-4. Populate "indicators" section with parameters relevant to these features used in trading rules:
+2. Set "description" to a precise, indicator-specific sentence using this pattern:
+   "A {strategy_type} strategy that uses {rule_features_str} to identify trading opportunities on a {timeframe} timeframe for {', '.join(symbols)}."
+   Do NOT use generic phrases like "Signal Synk", "template strategy", or "customize this".
+3. Set "symbols" to {json.dumps(symbols)}
+4. IMPORTANT: Set "timeframe" to "{timeframe}" in the trading section
+5. Populate "indicators" section with parameters relevant to these features used in trading rules:
    {rule_features_str}
-5. Set "risk_management" parameters:
-   - stop_loss_pct: {risk_params['stop_loss_pct']:.1f}
-   - trailing_stop_pct: {risk_params['trailing_stop_pct']:.1f}
-   - max_position_loss_pct: {risk_params['max_position_loss_pct']:.1f}
-   - max_daily_loss_pct: {risk_params['max_daily_loss_pct']:.1f}
-6. Set "max_positions" to {design.get('recommended_max_positions', 3)}
-7. Set "position_size_pct" to {design.get('recommended_position_size', 0.10) * 100:.0f}
-8. Keep the schedule and logging sections from the template
+6. Set "risk_management" parameters:
+   IMPORTANT: All *_pct fields MUST be decimal fractions (0-1), NOT whole percent points.
+   Examples:
+   - 0.05 means 5%
+   - 0.10 means 10%
+   Do NOT output 5.0 to mean 5%.
+   - stop_loss_pct: {risk_params['stop_loss_pct']:.4f}
+   - trailing_stop_pct: {risk_params['trailing_stop_pct']:.4f}
+   - max_position_loss_pct: {risk_params['max_position_loss_pct']:.4f}
+   - max_daily_loss_pct: {risk_params['max_daily_loss_pct']:.4f}
+7. Set "max_positions" to {design.get('recommended_max_positions', 3)}
+8. Set "position_size_pct" to {design.get('recommended_position_size', 0.10):.4f} (decimal fraction 0-1)
+9. Keep the schedule and logging sections from the template
 
 Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
 
@@ -1543,7 +1746,11 @@ Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
 
             # Validate JSON
             if config_json:
-                json.loads(config_json)  # Will raise if invalid
+                parsed = json.loads(config_json)  # Will raise if invalid
+                # Defense-in-depth: normalize any percent-like fields to decimal fractions.
+                # This prevents 0.05 -> 5.0 style unit drift from breaking verification backtests.
+                parsed = self.normalize_config_percent_fractions(parsed)
+                config_json = json.dumps(parsed, indent=2)
                 self._log(f"Config JSON generated ({len(config_json)} chars)")
                 return config_json
             else:
@@ -1554,6 +1761,117 @@ Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
             self._log(f"Warning: Config generation failed: {e}")
             return self._read_template_file("config.json")
 
+    @staticmethod
+    def _coerce_pct_fraction(value: Any, *, default: float) -> float:
+        """Coerce a percent-like value into a decimal fraction (0-1).
+
+        Accepted inputs:
+        - Decimal fractions: 0.05
+        - Whole percent points: 5.0 (interpreted as 5%)
+        - Strings: "5%", "0.05", "5"
+
+        This helper is intentionally conservative: it only performs unit conversion
+        for values whose absolute magnitude is > 1.
+        """
+        if value is None:
+            return default
+
+        # Avoid treating booleans as numbers
+        if isinstance(value, bool):
+            return default
+
+        if isinstance(value, str):
+            s = value.strip()
+            if not s:
+                return default
+            try:
+                if s.endswith("%"):
+                    num = float(s[:-1].strip())
+                    return num / 100.0
+                return float(s)
+            except Exception:
+                return default
+
+        try:
+            v = float(value)
+        except Exception:
+            return default
+
+        # If user/LLM provided percent points (e.g. 5.0 meaning 5%), convert.
+        if abs(v) > 1.0:
+            v = v / 100.0
+
+        # Clamp to a sane range to prevent accidental 500% style values.
+        if v > 1.0:
+            return 1.0
+        if v < -1.0:
+            return -1.0
+
+        return v
+
+    @classmethod
+    def normalize_config_percent_fractions(cls, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize known percent fields in a strategy config to decimal fractions.
+
+        This is used as a post-processing step on LLM-produced config.json to
+        ensure canonical units even if the model outputs whole-percent numbers.
+
+        Only normalizes percent-like fields in the `risk_management` section and
+        `trading.position_size_pct`.
+        """
+        if not isinstance(config, dict):
+            return config
+
+        cfg = dict(config)  # shallow copy
+
+        # trading.position_size_pct
+        trading = cfg.get("trading")
+        if isinstance(trading, dict) and "position_size_pct" in trading:
+            trading2 = dict(trading)
+            trading2["position_size_pct"] = cls._coerce_pct_fraction(
+                trading.get("position_size_pct"),
+                default=0.10,
+            )
+            cfg["trading"] = trading2
+
+
+        # risk_management: normalize all keys ending with _pct
+        risk = cfg.get("risk_management")
+        if isinstance(risk, dict):
+            risk2 = dict(risk)
+            for k, v in list(risk2.items()):
+                if isinstance(k, str) and k.endswith("_pct"):
+                    # Provide reasonable defaults per key.
+                    defaults = {
+                        "stop_loss_pct": 0.05,
+                        "take_profit_pct": 0.10,
+                        "trailing_stop_pct": 0.03,
+                        "max_daily_loss_pct": 0.02,
+                        "max_position_loss_pct": 0.01,
+                        "max_drawdown_pct": 0.10,
+                    }
+                    risk2[k] = cls._coerce_pct_fraction(v, default=defaults.get(k, 0.0))
+
+            # Also normalize a few commonly-used percent-like keys that do not
+            # follow the *_pct naming convention (worker-generated configs).
+            #
+            # Examples:
+            # - max_daily_loss: 5.0  -> 0.05
+            # - max_drawdown: 20     -> 0.20
+            extra_defaults = {
+                "max_daily_loss": 0.02,
+                "max_drawdown": 0.10,
+                # This is typically a fraction of equity (0-1). Treating whole
+                # numbers as percent points is a safe defense-in-depth.
+                "max_position_size": 0.10,
+            }
+            for key, default in extra_defaults.items():
+                if key in risk2:
+                    risk2[key] = cls._coerce_pct_fraction(risk2.get(key), default=default)
+            cfg["risk_management"] = risk2
+
+        return cfg
+
     async def generate_risk_manager_code(
         self,
         strategy_name: str,
@@ -1562,91 +1880,27 @@ Return ONLY valid JSON. Do NOT wrap in markdown code fences."""
         strategy_type: str,
         config: Dict[str, Any],
     ) -> str:
-        """Generate custom risk_manager.py file using Claude.
+        """Return the canonical risk_manager.py template verbatim.
 
-        Args:
-            strategy_name: Name of the strategy
-            design: Strategy design dict with risk parameters
-            training_results: Training results
-            strategy_type: Type of strategy
-            config: Strategy configuration
+        The template already reads all risk parameters (stop_loss_pct,
+        trailing_stop_pct, max_daily_loss_pct, max_drawdown_pct, etc.) from
+        the config dict at runtime, so no LLM customisation is required.
 
-        Returns:
-            Complete Python source code for risk_manager.py
+        Using the template verbatim guarantees that the full interface expected
+        by backtest.py is always present:
+            start_new_day, register_position, unregister_position,
+            update_position_price, check_position_risk,
+            check_daily_loss_limit, check_drawdown_limit, can_open_new_position.
+
+        Previous LLM-based generation was producing simplified variants that
+        omitted methods from the interface, causing AttributeError at runtime.
         """
-        self._log(f"Generating risk_manager.py for {strategy_name}")
-
-        try:
-            # Read template
-            template_code = self._read_template_file("risk_manager.py")
-
-            # Extract risk parameters
-            stop_loss = design.get("recommended_stop_loss", 0.05)
-            trailing_stop = design.get("recommended_trailing_stop", 0.03)
-            max_drawdown = training_results.get('backtest_results', {}).get('max_drawdown', 10)
-
-            prompt = f"""Generate a custom risk_manager.py file for a trading strategy.
-
-## Strategy Details
-- Name: {strategy_name}
-- Type: {strategy_type}
-- Stop Loss: {stop_loss * 100:.1f}%
-- Trailing Stop: {trailing_stop * 100:.1f}%
-- Max Drawdown (from training): {max_drawdown:.1f}%
-
-## Risk Parameters from Design
-- Stop Loss: {stop_loss} (as decimal)
-- Trailing Stop: {trailing_stop} (as decimal)
-- Max Positions: {design.get('recommended_max_positions', 3)}
-- Position Size: {design.get('recommended_position_size', 0.10)}
-
-## Strategy Type Considerations
-This is a {strategy_type} strategy. Adjust risk tolerances accordingly:
-- Momentum: May need wider stops to avoid whipsaws
-- Mean Reversion: Tighter stops, faster exits
-- Trend Following: Trailing stops are critical
-
-## Template Reference
-Here is the template risk_manager.py structure:
-
-```python
-{template_code[:2000]}
-... (template continues)
-```
-
-## CRITICAL REQUIREMENTS
-1. Class MUST be named `RiskManager`
-2. Must match the template's interface (same methods and signatures)
-3. Implement position sizing based on the design parameters
-4. Implement stop loss and trailing stop logic
-5. Include max drawdown protection
-6. Load config from config.json
-
-Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
-
-            response = self.client.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=settings.CLAUDE_MAX_TOKENS,
-                thinking={"type": "adaptive"},
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            # Extract code
-            code = ""
-            for block in response.content:
-                if hasattr(block, 'text'):
-                    code += block.text
-
-            if code:
-                self._log(f"Risk manager code generated ({len(code)} chars)")
-                return code
-            else:
-                raise ValueError("No code generated")
-
-        except Exception as e:
-            logger.error("Risk manager generation failed: %s", e)
-            self._log(f"Warning: Risk manager generation failed: {e}")
-            return self._read_template_file("risk_manager.py")
+        template_code = self._read_template_file("risk_manager.py")
+        self._log(
+            f"risk_manager.py: using canonical template verbatim "
+            f"({len(template_code)} chars)"
+        )
+        return template_code
 
     async def generate_backtest_code(
         self,
@@ -1874,17 +2128,27 @@ Return ONLY the raw Python source code. Do NOT wrap in markdown code fences."""
                 messages=[{"role": "user", "content": prompt}],
             )
 
-            # Extract code
+            # Extract code (skip ThinkingBlock objects which lack .text)
             code = ""
             for block in response.content:
                 if hasattr(block, 'text'):
                     code += block.text
 
-            if code:
+            # Validate the code is non-trivial and contains the required class.
+            if len(code) > 500 and "class BacktestRunner" in code:
                 self._log(f"Backtest code generated ({len(code)} chars)")
                 return code
             else:
-                raise ValueError("No code generated")
+                logger.warning(
+                    "Backtest code validation failed: length=%d, has_class=%s",
+                    len(code),
+                    "class BacktestRunner" in code,
+                )
+                raise ValueError(
+                    f"Generated backtest code failed validation: "
+                    f"length={len(code)}, "
+                    f"has BacktestRunner class: {'class BacktestRunner' in code}"
+                )
 
         except Exception as e:
             logger.error("Backtest generation failed: %s", e)

@@ -1,4 +1,8 @@
 """Strategy CRUD router for user endpoints."""
+import asyncio
+import json
+import logging
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,11 +13,16 @@ from app.database import get_db
 from app.models.user import User
 from app.models.strategy import Strategy
 from app.models.strategy_build import StrategyBuild
+from app.models.build_iteration import BuildIteration
 from app.schemas.strategies import (
     StrategyCreate, StrategyUpdate, StrategyResponse,
-    StrategyListResponse, BuildResponse, DockerInfoResponse
+    StrategyListResponse, BuildResponse, StrategyInternalResponse,
+    MarketplaceListRequest
 )
 from app.auth.dependencies import get_current_active_user
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -129,7 +138,7 @@ async def list_marketplace_strategies(
     # Build query for published strategies
     query = select(Strategy).where(
         Strategy.status == "complete",
-        Strategy.docker_image_url.isnot(None)  # Only strategies with built Docker images
+        Strategy.marketplace_listed == True  # Only explicitly listed strategies
     )
 
     # Filter by strategy type if provided
@@ -154,7 +163,7 @@ async def list_marketplace_strategies(
     # Count total (with strategy_type filter)
     count_query = select(func.count(Strategy.uuid)).where(
         Strategy.status == "complete",
-        Strategy.docker_image_url.isnot(None)
+        Strategy.marketplace_listed == True
     )
     if strategy_type:
         count_query = count_query.where(Strategy.strategy_type == strategy_type)
@@ -182,12 +191,52 @@ async def get_marketplace_strategy(strategy_id: str, db: AsyncSession = Depends(
         select(Strategy).where(
             Strategy.uuid == strategy_id,
             Strategy.status == "complete",
-            Strategy.docker_image_url.isnot(None)
+            Strategy.marketplace_listed == True
         )
     )
     strategy = result.scalar_one_or_none()
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
+    return strategy
+
+
+@router.put("/{strategy_id}/marketplace", response_model=StrategyResponse)
+async def update_marketplace_listing(
+    strategy_id: str,
+    listing_data: MarketplaceListRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List or unlist a strategy on the marketplace (owner only).
+    Strategy must be complete and have a built Docker image to be listed.
+    """
+    result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
+            Strategy.user_id == current_user.uuid,
+            Strategy.status != "deleted"
+        )
+    )
+    strategy = result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    # Can only list if strategy build is complete
+    if listing_data.listed and strategy.status != "complete":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Strategy must be complete before listing on marketplace"
+        )
+
+    strategy.marketplace_listed = listing_data.listed
+    if listing_data.price is not None:
+        strategy.marketplace_price = listing_data.price
+    strategy.updated_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(strategy)
     return strategy
 
 
@@ -331,17 +380,300 @@ async def get_strategy_builds(
     }
 
 
-@router.get("/{strategy_id}/docker", response_model=DockerInfoResponse)
-async def get_docker_info(
+@router.post("/{strategy_id}/retrain", response_model=BuildResponse)
+async def retrain_strategy(
     strategy_id: str,
+    target_return: float = Query(10.0, description="Target return percentage"),
+    timeframe: str = Query("1d", description="Trading timeframe"),
+    max_iterations: int = Query(5, ge=1, le=20, description="Max build iterations"),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get Docker pull instructions and usage guide for a strategy."""
+    """
+    Trigger a retrain (new build) for an existing strategy.
+
+    Increments the strategy version and launches a new build loop in the background.
+    Returns BuildResponse immediately with status='queued'.
+    """
+    import redis.asyncio as redis_async
+    from app.routers.builds import _run_build_loop
+
+    # Fetch and validate strategy ownership
     result = await db.execute(
         select(Strategy).where(
             Strategy.uuid == strategy_id,
             Strategy.user_id == current_user.uuid,
+            Strategy.status != "deleted",
+        )
+    )
+    strategy = result.scalar_one_or_none()
+    if not strategy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    # Validate token balance
+    if current_user.balance < settings.TOKENS_PER_ITERATION:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"Insufficient tokens. Need at least {settings.TOKENS_PER_ITERATION}. Balance: {current_user.balance}",
+        )
+
+    # Increment strategy version to signal a new build is starting
+    strategy.version = strategy.version + 1
+    strategy.updated_at = datetime.utcnow()
+
+    # Create a new build record
+    build = StrategyBuild(
+        strategy_id=strategy_id,
+        user_id=current_user.uuid,
+        status="queued",
+        phase="initializing",
+        started_at=datetime.utcnow(),
+        max_iterations=max_iterations,
+    )
+    db.add(build)
+    await db.commit()
+    await db.refresh(build)
+
+    build_id = build.uuid
+    user_id = current_user.uuid
+    strategy_name = strategy.name
+
+    # Clear any stale stop signal from previous builds
+    try:
+        redis_client = await redis_async.from_url(settings.REDIS_URL)
+        await redis_client.delete(f"oculus:build:stop:{build_id}")
+        await redis_client.close()
+    except Exception as exc:
+        logger.warning("Could not clear stop signal for retrain build %s: %s", build_id, exc)
+
+    # Resolve symbols list (handle both list and dict formats)
+    raw_symbols = strategy.symbols
+    if isinstance(raw_symbols, dict):
+        strategy_symbols = raw_symbols.get("symbols", [])
+    elif isinstance(raw_symbols, list):
+        strategy_symbols = raw_symbols
+    else:
+        strategy_symbols = []
+
+    # Collect all completed iterations from all previous builds on this strategy
+    # so the AI can learn from every prior attempt when designing the new build.
+    # Builds are fetched in chronological order (oldest → newest via started_at) so
+    # that the LLM always sees the full timeline: Build #1 (all its iters) → Build #2
+    # (all its iters) → … rather than a timestamp-interleaved soup.
+    prior_builds_result = await db.execute(
+        select(StrategyBuild)
+        .where(
+            StrategyBuild.strategy_id == strategy_id,
+            StrategyBuild.status == "complete",
+        )
+        .order_by(StrategyBuild.started_at)  # chronological build order, oldest first
+    )
+    prior_builds = prior_builds_result.scalars().all()
+
+    prior_iteration_history = []
+    for prior_build in prior_builds:
+        # Fetch this build's iterations in iteration order so the LLM reads them
+        # as a coherent sequence: iter 0 → iter 1 → iter 2 → …
+        iter_result = await db.execute(
+            select(BuildIteration)
+            .where(
+                BuildIteration.build_id == prior_build.uuid,
+                BuildIteration.status == "complete",
+            )
+            .order_by(BuildIteration.iteration_number)
+        )
+        past_iterations = iter_result.scalars().all()
+
+        for past_iter in past_iterations:
+            bt = past_iter.backtest_results or {}
+            entry_feats = [r.get("feature", "") for r in (past_iter.entry_rules or [])]
+            exit_feats = [r.get("feature", "") for r in (past_iter.exit_rules or [])]
+            feats = past_iter.features or {}
+            top_feat_names = [
+                f.get("name", f.get("feature", ""))
+                for f in (feats.get("top_features", []) if isinstance(feats, dict) else [])[:5]
+            ]
+            prior_iteration_history.append({
+                "iteration": past_iter.iteration_number,
+                "build_id": str(prior_build.uuid),
+                "total_return": bt.get("total_return", 0),
+                "win_rate": bt.get("win_rate", 0),
+                "sharpe_ratio": bt.get("sharpe_ratio", 0),
+                "max_drawdown": bt.get("max_drawdown", 0),
+                "total_trades": bt.get("total_trades", 0),
+                "best_model": (past_iter.best_model or {}).get("name", "?"),
+                "top_features": top_feat_names,
+                "entry_features": entry_feats[:5],
+                "exit_features": exit_feats[:5],
+            })
+
+    logger.info(
+        "Retrain for strategy %s: found %d prior iterations from %d completed builds",
+        strategy_id, len(prior_iteration_history), len(prior_builds),
+    )
+
+    # Launch the build loop as a background task
+    asyncio.create_task(
+        _run_build_loop(
+            build_id=build_id,
+            strategy_id=strategy_id,
+            user_id=user_id,
+            strategy_name=strategy_name,
+            strategy_symbols=strategy_symbols,
+            description=strategy.description or "",
+            target_return=target_return,
+            timeframe=timeframe,
+            max_iterations=max_iterations,
+            strategy_type=strategy.strategy_type,
+            prior_iteration_history=prior_iteration_history if prior_iteration_history else None,
+        )
+    )
+
+    return BuildResponse(
+        uuid=build.uuid,
+        strategy_id=build.strategy_id,
+        status=build.status,
+        phase=build.phase,
+        tokens_consumed=build.tokens_consumed,
+        iteration_count=build.iteration_count,
+        max_iterations=build.max_iterations,
+        started_at=build.started_at,
+        completed_at=build.completed_at,
+        strategy_type=strategy.strategy_type,
+        strategy_name=strategy.name,
+    )
+
+
+@router.get("/{strategy_id}/builds/{build_id}/backtest")
+async def get_build_best_backtest(
+    strategy_id: str,
+    build_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return the best iteration's backtest results for a specific completed build.
+
+    'Best' is the completed iteration with the highest total_return_pct.
+    """
+    # Verify strategy ownership
+    strat_result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
+            Strategy.user_id == current_user.uuid,
+            Strategy.status != "deleted",
+        )
+    )
+    if not strat_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    # Verify build belongs to this strategy
+    build_result = await db.execute(
+        select(StrategyBuild).where(
+            StrategyBuild.uuid == build_id,
+            StrategyBuild.strategy_id == strategy_id,
+        )
+    )
+    build = build_result.scalar_one_or_none()
+    if not build:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build not found")
+
+    # Fetch all completed iterations for this build
+    iter_result = await db.execute(
+        select(BuildIteration).where(
+            BuildIteration.build_id == build_id,
+            BuildIteration.status == "complete",
+        )
+    )
+    iterations = iter_result.scalars().all()
+
+    if not iterations:
+        return {"backtest_results": None, "iteration_number": None}
+
+    # Pick the iteration with the highest total_return_pct
+    def _return_score(it: BuildIteration) -> float:
+        br = it.backtest_results or {}
+        return float(br.get("total_return_pct") or br.get("total_return") or 0)
+
+    best = max(iterations, key=_return_score)
+    return {"backtest_results": best.backtest_results, "iteration_number": best.iteration_number}
+
+
+@router.get("/{strategy_id}/builds/{build_id}/config")
+async def get_build_config(
+    strategy_id: str,
+    build_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return the config.json generated for a specific build.
+
+    The file lives at backend/strategy_outputs/{build_id}/config.json.
+    """
+    # Verify strategy ownership
+    strat_result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
+            Strategy.user_id == current_user.uuid,
+            Strategy.status != "deleted",
+        )
+    )
+    if not strat_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    # Verify build belongs to this strategy
+    build_result = await db.execute(
+        select(StrategyBuild).where(
+            StrategyBuild.uuid == build_id,
+            StrategyBuild.strategy_id == strategy_id,
+        )
+    )
+    if not build_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build not found")
+
+    # Construct path: backend/strategy_outputs/{build_id}/config.json
+    config_path = Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id / "config.json"
+
+    if not config_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Config file not found for this build",
+        )
+
+    try:
+        with open(config_path) as f:
+            config_data = json.load(f)
+        return {"config": config_data}
+    except Exception as exc:
+        logger.error("Failed to read config for build %s: %s", build_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to read config file")
+
+
+@router.get("/{strategy_id}/internal", response_model=StrategyInternalResponse)
+async def get_strategy_internal(
+    strategy_id: str,
+    api_key: str = Query(..., description="Internal API key for SignalSynk"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get strategy with Docker info for internal use by SignalSynk.
+    This endpoint is for internal system use only and requires an API key.
+    """
+    # TODO: Validate API key against a secure internal API key
+    # For now, this is a placeholder - you should implement proper API key validation
+    from app.config import settings
+
+    # You'll need to add SIGNALSYNK_API_KEY to your config
+    # if api_key != settings.SIGNALSYNK_API_KEY:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_401_UNAUTHORIZED,
+    #         detail="Invalid API key"
+    #     )
+
+    result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
             Strategy.status != "deleted"
         )
     )
@@ -359,34 +691,5 @@ async def get_docker_info(
             detail="Strategy Docker image not yet built"
         )
 
-    image_url = strategy.docker_image_url
-    pull_command = f"docker pull {image_url}"
-    run_command = (
-        f"docker run -e LICENSE_ID=<your_license_id> "
-        f"-e WEBHOOK_URL=<your_webhook_url> {image_url}"
-    )
-
-    terms_of_use = """
-This strategy container is proprietary and licensed for authorized use only.
-By running this container, you agree to:
-1. Use this strategy only for authorized trading purposes
-2. Not reverse-engineer, modify, or redistribute this strategy
-3. Maintain confidentiality of strategy logic and parameters
-4. Comply with all applicable financial regulations
-5. Accept all trading risks and losses
-
-For full terms, visit: https://oculusalgorithms.com/terms
-"""
-
-    return {
-        "image_url": image_url,
-        "pull_command": pull_command,
-        "run_command": run_command,
-        "environment_variables": {
-            "LICENSE_ID": "Your strategy license ID (required)",
-            "WEBHOOK_URL": "URL to stream strategy output (optional)",
-            "OCULUS_API_URL": "Oculus API endpoint (default: https://api.oculusalgorithms.com)",
-        },
-        "terms_of_use": terms_of_use,
-    }
+    return strategy
 

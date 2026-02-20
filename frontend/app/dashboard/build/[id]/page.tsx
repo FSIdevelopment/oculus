@@ -399,8 +399,8 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
   return (
     <div
       className={`rounded-lg p-6 border ${isBest
-          ? 'bg-primary/5 border-primary/40'
-          : 'bg-surface border-border'
+        ? 'bg-primary/5 border-primary/40'
+        : 'bg-surface border-border'
         } ${isCurrent && isRunning ? 'animate-pulse-subtle' : ''}`}
     >
       {/* Header */}
@@ -432,8 +432,8 @@ function IterationCard({ iteration, isBest, isCurrent, isRunning }: IterationCar
             <div className="bg-surface-hover rounded-lg p-3 border border-border">
               <p className="text-xs text-text-secondary mb-1">Total Return</p>
               <p className={`text-lg font-bold ${(iteration.backtest_results?.total_return ?? 0) >= 0
-                  ? 'text-green-600 dark:text-green-400'
-                  : 'text-red-600 dark:text-red-400'
+                ? 'text-green-600 dark:text-green-400'
+                : 'text-red-600 dark:text-red-400'
                 }`}>
                 {(iteration.backtest_results?.total_return ?? 0).toFixed(2)}%
               </p>
@@ -624,7 +624,7 @@ export default function BuildDetailPage() {
   const [build, setBuild] = useState<BuildStatus | null>(null)
   const [latestProgress, setLatestProgress] = useState<LogMessage | null>(null)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
-  const [progressMessages, setProgressMessages] = useState<{message: string, iteration?: number, timestamp: string}[]>([])
+  const [progressMessages, setProgressMessages] = useState<{ message: string, iteration?: number, timestamp: string }[]>([])
   const [wsConnected, setWsConnected] = useState(false)
   const [wsRetriesExhausted, setWsRetriesExhausted] = useState(false)
   const [loadingBuild, setLoadingBuild] = useState(true)
@@ -643,7 +643,7 @@ export default function BuildDetailPage() {
   const [_loadingIterations, setLoadingIterations] = useState(false)
 
   // State for live thinking blocks (streaming from WebSocket)
-  const [thinkingBlocks, setThinkingBlocks] = useState<{[blockNumber: number]: {content: string, isComplete: boolean}}>({})
+  const [thinkingBlocks, setThinkingBlocks] = useState<{ [blockNumber: number]: { content: string, isComplete: boolean } }>({})
   const [, setCurrentThinkingIteration] = useState<number | null>(null)
 
 
@@ -1049,6 +1049,10 @@ export default function BuildDetailPage() {
 
   const getCurrentPhaseIndex = () => {
     if (!build?.phase) return 0
+    // A failed build: return -1 so getPhaseStatus marks all phases as "pending"
+    // (nothing highlighted), which is more accurate than falsely implying a phase
+    // is still active.
+    if (build.status === 'failed') return -1
     const phaseMap: { [key: string]: number } = {
       'queued': 0,
       'designing': 1,
@@ -1150,14 +1154,15 @@ export default function BuildDetailPage() {
     const descriptions: { [key: string]: string } = {
       'queued': 'Queued for processing',
       'designing': 'Designing strategy with Oculus AI...',
-      'refining': 'Refining strategy based on previous results...',     // NEW
-      'selecting_best': 'Selecting the best iteration...',               // NEW
+      'refining': 'Refining strategy based on previous results...',
+      'selecting_best': 'Selecting the best iteration...',
       'training': 'Training ML models...',
       'optimizing': 'Optimizing parameters...',
       'building_docker': 'Writing algorithm...',
       'testing_algorithm': 'Testing algorithm container...',
       'complete': 'Build complete',
-      'completed': 'Build complete',                                     // NEW alias
+      'completed': 'Build complete',
+      'failed': 'Build failed — no viable strategy was found',
     }
     return descriptions[phase?.toLowerCase() || ''] || 'Processing...'
   }
@@ -1167,14 +1172,15 @@ export default function BuildDetailPage() {
     const emojis: { [key: string]: string } = {
       'queued': '⏳',
       'designing': '🧠',
-      'refining': '🔄',          // NEW
-      'selecting_best': '🏆',    // NEW
+      'refining': '🔄',
+      'selecting_best': '🏆',
       'training': '🤖',
       'optimizing': '⚙️',
       'building_docker': '✍️',
       'testing_algorithm': '🧪',
       'complete': '✅',
-      'completed': '✅',          // NEW alias
+      'completed': '✅',
+      'failed': '❌',
     }
     return emojis[phase?.toLowerCase() || ''] || '⏳'
   }
@@ -1564,10 +1570,10 @@ export default function BuildDetailPage() {
                     <div className="flex flex-col items-center">
                       <div
                         className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isComplete
-                            ? 'bg-green-500 text-white'
-                            : isActive
-                              ? 'bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white animate-pulse'
-                              : 'bg-border text-text-secondary'
+                          ? 'bg-green-500 text-white'
+                          : isActive
+                            ? 'bg-gradient-to-r from-[#007cf0] to-[#00dfd8] text-white animate-pulse'
+                            : 'bg-border text-text-secondary'
                           }`}
                       >
                         {isComplete ? (
@@ -1627,10 +1633,10 @@ export default function BuildDetailPage() {
             {/* Latest Progress Data */}
             {latestProgress && latestProgress.type === 'progress' && latestProgress.data && (
               <div className="space-y-4">
-                {latestProgress.data.details && (
+                {latestProgress.data.details && safeRenderValue(latestProgress.data.details) !== '{}' && (
                   <div>
                     <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-2">Details</p>
-                    <p className="text-sm text-text">{latestProgress.data.details}</p>
+                    <p className="text-sm text-text">{safeRenderValue(latestProgress.data.details)}</p>
                   </div>
                 )}
 
@@ -1668,6 +1674,23 @@ export default function BuildDetailPage() {
                 </div>
                 <p className="text-sm text-green-700 dark:text-green-300">
                   Your strategy has been successfully built and is ready for deployment.
+                </p>
+              </div>
+            )}
+
+            {/* Failed State */}
+            {build.status.toLowerCase() === 'failed' && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle size={18} className="text-red-500" />
+                  <p className="font-semibold text-red-700 dark:text-red-300">Build Failed</p>
+                </div>
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  {/* Show the specific reason from the last progress message when available,
+                      otherwise fall back to a generic message with actionable advice. */}
+                  {latestProgress?.data?.phase === 'failed' && latestProgress?.data?.message
+                    ? latestProgress.data.message
+                    : 'No viable strategy was found. Check the activity feed below for details. Consider adjusting your target return, date range, or symbol.'}
                 </p>
               </div>
             )}

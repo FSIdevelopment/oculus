@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/lib/api'
-import { AlertCircle, Loader2, X } from 'lucide-react'
+import { AlertCircle, Loader2, X, Coins } from 'lucide-react'
+import TokenTopUpModal from '@/components/TokenTopUpModal'
 
 const STRATEGY_TYPES = [
   'Bollinger Band Breakout',
@@ -18,7 +19,6 @@ const STRATEGY_TYPES = [
   'Price Action',
   'RSI Overbought/Oversold',
   'Scalping',
-  'Sentiment Analysis',
   'Statistical Arbitrage',
   'Support/Resistance Breakout',
   'Swing Trading',
@@ -43,6 +43,7 @@ export default function CreateStrategyPage() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showTopUp, setShowTopUp] = useState(false)
   const [symbolInput, setSymbolInput] = useState('')
   const [symbols, setSymbols] = useState<string[]>([])
   const [tokensPerIteration, setTokensPerIteration] = useState<number | null>(null)
@@ -158,6 +159,27 @@ export default function CreateStrategyPage() {
           Design a new trading strategy with AI assistance
         </p>
       </div>
+
+      {/* Token Balance CTA Banner */}
+      <div className="flex items-center justify-between bg-surface border border-border rounded-lg px-5 py-3">
+        <div className="flex items-center gap-3">
+          <Coins size={18} className="text-primary flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-text">
+              🪙 {(user?.balance ?? 0).toLocaleString()} tokens available
+            </p>
+            <p className="text-xs text-text-secondary">Each iteration consumes tokens from your balance</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowTopUp(true)}
+          className="flex-shrink-0 px-4 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors"
+        >
+          Top Up
+        </button>
+      </div>
+
+      <TokenTopUpModal isOpen={showTopUp} onClose={() => setShowTopUp(false)} />
 
       {/* Error Alert */}
       {error && (

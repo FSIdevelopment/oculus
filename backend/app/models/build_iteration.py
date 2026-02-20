@@ -52,6 +52,11 @@ class BuildIteration(Base):
     # Backtest Results
     backtest_results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Worker-generated strategy files (filename → source code string).
+    # Persisted so the Docker-build phase can use the exact ML-rule implementation
+    # even when training_results is reconstructed from the DB (Path 2 builds).
+    strategy_files: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -1,7 +1,7 @@
 """Strategy model for Oculus platform."""
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import String, Integer, Float, DateTime, Text, JSON, ForeignKey, Index
+from sqlalchemy import String, Integer, Float, DateTime, Text, JSON, ForeignKey, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -29,6 +29,10 @@ class Strategy(Base):
     docker_registry: Mapped[str | None] = mapped_column(String(255), nullable=True)
     docker_image_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     
+    # Marketplace
+    marketplace_listed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    marketplace_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # Metrics
     version: Mapped[int] = mapped_column(Integer, default=1)
     subscriber_count: Mapped[int] = mapped_column(Integer, default=0)

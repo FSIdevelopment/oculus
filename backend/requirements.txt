@@ -20,3 +20,4 @@ anthropic>=0.7.0
 redis[hiredis]>=7.0.0
 slowapi==0.1.9
 psycopg2-binary
+apscheduler>=3.10.0,<4.0.0

@@ -2,6 +2,7 @@
 FastAPI application entry point for Oculus Strategy Platform.
 """
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -10,6 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.logging_config import setup_logging
 from app.routers import auth, users, admin, chat, balance, products, ratings, strategies, licenses, subscriptions, payments, builds, connect
+from app.services.scheduler import start_scheduler, stop_scheduler
 
 # Get logger for request logging
 logger = logging.getLogger(__name__)
@@ -17,10 +19,24 @@ logger = logging.getLogger(__name__)
 # Configure logging
 setup_logging()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
+    logger.info("Starting up Oculus Strategy API...")
+    start_scheduler()
+    yield
+    # Shutdown
+    logger.info("Shutting down Oculus Strategy API...")
+    stop_scheduler()
+
+
 app = FastAPI(
     title="Oculus Strategy API",
     description="Backend API for the Oculus Strategy Platform",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # Configure rate limiter

@@ -12,8 +12,12 @@ from app.models.license import License
 from app.models.strategy import Strategy
 from app.schemas.licenses import (
     LicensePurchaseRequest, LicenseRenewRequest, LicenseWebhookUpdate,
-    LicenseResponse, LicenseListResponse, LicenseValidationResponse
+    LicenseResponse, LicenseListResponse, LicenseValidationResponse,
+    LicenseCheckoutResponse, LicensePriceResponse,
+    LicenseSetupIntentResponse, LicenseSubscribeRequest,
+    AtlasLicenseValidationResponse
 )
+from app.services.pricing import calculate_license_price
 from app.auth.dependencies import get_current_active_user, admin_required
 
 router = APIRouter()
@@ -73,6 +77,301 @@ async def purchase_license(
     await db.commit()
     await db.refresh(license_obj)
     
+    return license_obj
+
+
+@router.get("/api/strategies/{strategy_id}/license/price", response_model=LicensePriceResponse)
+async def get_license_price(
+    strategy_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Return the calculated monthly and annual license prices for a strategy.
+
+    Prices are derived from the strategy's latest backtest results using a
+    normalised, weighted, power-curve formula.  Strategies with no backtest
+    data are returned at the minimum price.  No authentication required so
+    the frontend can call this before the user decides to purchase.
+    """
+    result = await db.execute(select(Strategy).where(Strategy.uuid == strategy_id))
+    strategy = result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    if not strategy.backtest_results:
+        # No backtest data — fall back to the floor price
+        return LicensePriceResponse(
+            monthly_price=settings.LICENSE_MONTHLY_MIN_PRICE,
+            annual_price=settings.LICENSE_MONTHLY_MIN_PRICE * settings.LICENSE_ANNUAL_MULTIPLIER,
+            performance_score=0.0,
+        )
+
+    monthly, annual, score = calculate_license_price(strategy.backtest_results)
+    return LicensePriceResponse(
+        monthly_price=monthly,
+        annual_price=annual,
+        performance_score=score,
+    )
+
+
+@router.post("/api/strategies/{strategy_id}/license/checkout", response_model=LicenseCheckoutResponse, status_code=status.HTTP_200_OK)
+async def create_license_checkout(
+    strategy_id: str,
+    license_data: LicensePurchaseRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a Stripe Checkout Session to purchase a strategy license.
+
+    - Validates the strategy exists
+    - Creates or reuses a Stripe customer for the user
+    - Creates a Stripe Checkout Session in subscription mode
+    - Returns the hosted checkout URL to redirect the user to
+    - The license record is created by the Stripe webhook after payment succeeds
+    """
+    # Verify strategy exists
+    result = await db.execute(select(Strategy).where(Strategy.uuid == strategy_id))
+    strategy = result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found"
+        )
+
+    # Require Stripe to be configured
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe is not configured on this server"
+        )
+
+    # Calculate dynamic price from strategy backtest performance
+    if strategy.backtest_results:
+        monthly_price, _, _ = calculate_license_price(strategy.backtest_results)
+    else:
+        monthly_price = settings.LICENSE_MONTHLY_MIN_PRICE
+
+    if license_data.license_type == "monthly":
+        unit_amount = monthly_price * 100  # Stripe uses cents
+        interval = "month"
+        price_label = f"${monthly_price}/month"
+    else:
+        annual_total = monthly_price * settings.LICENSE_ANNUAL_MULTIPLIER
+        unit_amount = annual_total * 100
+        interval = "year"
+        price_label = f"${annual_total}/year"
+
+    # Create Stripe customer if the user doesn't have one
+    if not current_user.stripe_customer_id:
+        try:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                name=current_user.name
+            )
+            current_user.stripe_customer_id = customer.id
+            await db.commit()
+        except stripe.error.StripeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to create Stripe customer: {str(e)}"
+            )
+
+    # Create Stripe Checkout Session using inline price_data (no pre-created Price ID needed)
+    try:
+        session = stripe.checkout.Session.create(
+            customer=current_user.stripe_customer_id,
+            mode="subscription",
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {
+                        "name": f"Oculus Strategy License — {strategy.name}",
+                        "description": (
+                            f"{license_data.license_type.capitalize()} license for "
+                            f"the {strategy.name} strategy ({price_label})"
+                        ),
+                    },
+                    "unit_amount": unit_amount,
+                    "recurring": {"interval": interval},
+                },
+                "quantity": 1,
+            }],
+            metadata={
+                "event_type": "license_purchase",
+                "user_id": current_user.uuid,
+                "strategy_id": strategy_id,
+                "license_type": license_data.license_type,
+            },
+            success_url=(
+                f"{settings.FRONTEND_URL}/dashboard/strategies"
+                "?license_success=1&session_id={CHECKOUT_SESSION_ID}"
+            ),
+            cancel_url=f"{settings.FRONTEND_URL}/dashboard/strategies?license_cancelled=1",
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create checkout session: {str(e)}"
+        )
+
+    return LicenseCheckoutResponse(
+        checkout_url=session.url,
+        session_id=session.id
+    )
+
+
+@router.post("/api/licenses/setup-intent", response_model=LicenseSetupIntentResponse, status_code=status.HTTP_200_OK)
+async def create_license_setup_intent(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a Stripe SetupIntent so the frontend can collect a payment method
+    in-app using Stripe Elements.  The confirmed payment method is then passed
+    to POST /api/strategies/{id}/license/subscribe to create the subscription.
+    """
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stripe is not configured on this server"
+        )
+
+    # Create Stripe customer if the user doesn't have one
+    if not current_user.stripe_customer_id:
+        try:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                name=current_user.name
+            )
+            current_user.stripe_customer_id = customer.id
+            await db.commit()
+        except stripe.error.StripeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to create Stripe customer: {str(e)}"
+            )
+
+    try:
+        setup_intent = stripe.SetupIntent.create(
+            customer=current_user.stripe_customer_id,
+            payment_method_types=["card"],
+            usage="off_session",  # stored for recurring subscription billing
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create setup intent: {str(e)}"
+        )
+
+    return LicenseSetupIntentResponse(
+        client_secret=setup_intent.client_secret,
+        publishable_key=settings.STRIPE_PUBLISHABLE_KEY,
+    )
+
+
+@router.post("/api/strategies/{strategy_id}/license/subscribe", response_model=LicenseResponse, status_code=status.HTTP_201_CREATED)
+async def create_license_subscription(
+    strategy_id: str,
+    subscribe_data: LicenseSubscribeRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a Stripe Subscription and issue a License using a payment method
+    that was already confirmed via a SetupIntent.
+
+    - Attaches the payment method to the Stripe customer as the default
+    - Creates a Stripe Subscription with inline price_data (dynamic pricing)
+    - Creates a License record immediately (no webhook dependency)
+    """
+    # Verify strategy exists
+    result = await db.execute(select(Strategy).where(Strategy.uuid == strategy_id))
+    strategy = result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found"
+        )
+
+    if not current_user.stripe_customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User does not have a Stripe customer account"
+        )
+
+    # Calculate dynamic price from backtest performance
+    if strategy.backtest_results:
+        monthly_price, _, _ = calculate_license_price(strategy.backtest_results)
+    else:
+        monthly_price = settings.LICENSE_MONTHLY_MIN_PRICE
+
+    if subscribe_data.license_type == "annual":
+        unit_amount = int(monthly_price * settings.LICENSE_ANNUAL_MULTIPLIER * 100)
+        interval = "year"
+    else:
+        unit_amount = int(monthly_price * 100)
+        interval = "month"
+
+    try:
+        # Set as the customer's default payment method
+        stripe.Customer.modify(
+            current_user.stripe_customer_id,
+            invoice_settings={"default_payment_method": subscribe_data.payment_method_id}
+        )
+
+        # stripe.Subscription.create does not support product_data inside price_data;
+        # a Product must be created first and its ID passed as `product`.
+        stripe_product = stripe.Product.create(
+            name=f"Oculus Strategy License — {strategy.name}",
+        )
+
+        # Create the subscription referencing the product ID
+        subscription = stripe.Subscription.create(
+            customer=current_user.stripe_customer_id,
+            items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product": stripe_product.id,
+                    "unit_amount": unit_amount,
+                    "recurring": {"interval": interval},
+                }
+            }],
+            default_payment_method=subscribe_data.payment_method_id,
+            metadata={
+                "event_type": "license_purchase",
+                "user_id": current_user.uuid,
+                "strategy_id": strategy_id,
+                "license_type": subscribe_data.license_type,
+            },
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create subscription: {str(e)}"
+        )
+
+    # Calculate expiration and create license record immediately
+    if subscribe_data.license_type == "annual":
+        expires_at = datetime.utcnow() + timedelta(days=365)
+    else:
+        expires_at = datetime.utcnow() + timedelta(days=30)
+
+    license_obj = License(
+        status="active",
+        license_type=subscribe_data.license_type,
+        strategy_id=strategy_id,
+        user_id=current_user.uuid,
+        subscription_id=subscription.id,
+        expires_at=expires_at,
+    )
+    db.add(license_obj)
+    await db.commit()
+    await db.refresh(license_obj)
+
     return license_obj
 
 
@@ -231,6 +530,63 @@ async def validate_license(
         webhook_url=license_obj.webhook_url,
         polygon_api_key=settings.POLYGON_API_KEY if is_valid else None,
         alphavantage_api_key=settings.ALPHAVANTAGE_API_KEY if is_valid else None
+    )
+
+
+@router.get("/api/licenses/{license_id}/atlas-validate", response_model=AtlasLicenseValidationResponse)
+async def atlas_validate_license(
+    license_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Validate a license for Atlas Trade AI.
+
+    Called by Atlas Trade AI to confirm a license is active before allowing
+    trading.  No user authentication is required — the license UUID itself
+    serves as the credential.
+
+    Returns:
+        - is_active: True only when status is "active" AND the license has not expired
+        - license_id: the license UUID
+        - license_status: raw status field (e.g. "active", "expired", "cancelled")
+        - user_uuid: UUID of the user who holds the license
+        - strategy_name: display name of the licensed strategy
+        - strategy_description: description of the strategy (may be None)
+        - backtest_results: full backtest results JSON (may be None)
+        - expires_at: UTC datetime the license expires
+    """
+    # Fetch license with related strategy in a single joined query
+    result = await db.execute(
+        select(License, Strategy)
+        .join(Strategy, License.strategy_id == Strategy.uuid)
+        .where(License.uuid == license_id)
+    )
+    row = result.one_or_none()
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="License not found"
+        )
+
+    license_obj, strategy = row
+
+    # A license is truly active only when both the status field says "active"
+    # AND the expiry date has not yet passed.
+    is_active = (
+        license_obj.status == "active"
+        and license_obj.expires_at > datetime.utcnow()
+    )
+
+    return AtlasLicenseValidationResponse(
+        is_active=is_active,
+        license_id=license_obj.uuid,
+        license_status=license_obj.status,
+        user_uuid=license_obj.user_id,
+        strategy_name=strategy.name,
+        strategy_description=strategy.description,
+        backtest_results=strategy.backtest_results,
+        expires_at=license_obj.expires_at,
     )
 
 

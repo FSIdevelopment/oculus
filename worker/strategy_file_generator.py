@@ -476,6 +476,21 @@ class TradingStrategy:
 
         return 'HOLD'
 
+    async def check_entry_conditions(
+        self,
+        symbol: str,
+        indicators: Dict[str, Any],
+        current_date=None,
+    ) -> Optional[str]:
+        """Async backtest interface — delegates to generate_signal().
+
+        The backtest runner calls this with ``await`` and expects 'BUY',
+        'SELL', or None (None is returned for 'HOLD' to match template
+        convention).
+        """
+        signal = self.generate_signal(symbol, indicators)
+        return signal if signal != 'HOLD' else None
+
     def rank_symbols(self, symbol_indicators: Dict[str, Dict[str, Any]]) -> List[Tuple[str, int]]:
         """Rank all symbols by their entry signal strength."""
         rankings = []
@@ -542,6 +557,7 @@ class Position:
     entry_date: datetime
     shares: int
     highest_price: float = 0.0
+    indicators: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.highest_price = self.entry_price
@@ -551,6 +567,7 @@ class Position:
 class Trade:
     """Completed trade record."""
     symbol: str
+    action: str          # 'LONG' for buy-then-sell positions
     entry_price: float
     exit_price: float
     entry_date: datetime
@@ -558,6 +575,8 @@ class Trade:
     shares: int
     pnl: float
     pnl_pct: float
+    duration_hours: float
+    indicators: Dict[str, Any]
     exit_reason: str
 
 
@@ -584,6 +603,7 @@ class PortfolioBacktester:
         self.positions: Dict[str, Position] = {{}}
         self.trades: List[Trade] = []
         self.equity_curve: List[float] = []
+        self.equity_dates: List[datetime] = []
         self.peak_equity = initial_capital
         self.daily_start_equity = initial_capital
         self.current_date = None
@@ -669,20 +689,26 @@ class PortfolioBacktester:
 
     def close_position(self, symbol: str, current_price: float, current_date: datetime,
                        exit_reason: str) -> Trade:
-        """Close a position and record the trade."""
+        """Close a position and record the trade with full trade metadata."""
         position = self.positions[symbol]
         pnl = (current_price - position.entry_price) * position.shares
         pnl_pct = (current_price - position.entry_price) / position.entry_price * 100
+        duration_hours = round(
+            (current_date - position.entry_date).total_seconds() / 3600, 2
+        ) if hasattr(current_date, '__sub__') else 0.0
 
         trade = Trade(
             symbol=symbol,
+            action='LONG',
             entry_price=position.entry_price,
             exit_price=current_price,
             entry_date=position.entry_date,
             exit_date=current_date,
             shares=position.shares,
-            pnl=pnl,
-            pnl_pct=pnl_pct,
+            pnl=round(pnl, 2),
+            pnl_pct=round(pnl_pct, 4),
+            duration_hours=duration_hours,
+            indicators=position.indicators,
             exit_reason=exit_reason
         )
 
@@ -693,8 +719,18 @@ class PortfolioBacktester:
         return trade
 
     def open_position(self, symbol: str, current_price: float, current_date: datetime,
-                      prices: Dict[str, float]) -> Optional[Position]:
-        """Open a new position with proper position sizing."""
+                      prices: Dict[str, float],
+                      indicators: Dict[str, Any] = None) -> Optional[Position]:
+        """Open a new position with proper position sizing.
+
+        Args:
+            symbol: Ticker symbol to buy.
+            current_price: Current market price.
+            current_date: Date of entry.
+            prices: Current prices for all symbols (used for portfolio valuation).
+            indicators: Indicator snapshot at the time of entry, stored on the
+                        position so it can be included in the closed Trade record.
+        """
         equity = self.get_equity(prices)
         max_position_value = equity * self.max_position_size
         shares = int(max_position_value / current_price)
@@ -714,7 +750,8 @@ class PortfolioBacktester:
             symbol=symbol,
             entry_price=current_price,
             entry_date=current_date,
-            shares=shares
+            shares=shares,
+            indicators=indicators or {{}}
         )
 
         self.cash -= cost
@@ -825,6 +862,7 @@ class PortfolioBacktester:
             if equity > self.peak_equity:
                 self.peak_equity = equity
             self.equity_curve.append(equity)
+            self.equity_dates.append(date)
 
             # Check existing positions for stops and exit signals
             for symbol in list(self.positions.keys()):
@@ -863,7 +901,12 @@ class PortfolioBacktester:
             for symbol in target_symbols:
                 if symbol not in self.positions and symbol in prices:
                     if len(self.positions) < self.max_positions:
-                        self.open_position(symbol, prices[symbol], date, prices)
+                        # Pass entry indicators so they are stored on the position
+                        # and later attached to the completed Trade record
+                        self.open_position(
+                            symbol, prices[symbol], date, prices,
+                            indicators=symbol_indicators.get(symbol, {{}})
+                        )
 
         # Close any remaining positions at end
         final_prices = {{}}
@@ -957,6 +1000,75 @@ class PortfolioBacktester:
 
         print(f"\\n{{'='*60}}\\n")
 
+        # --- Compute missing fields required by backtest_results.json schema ---
+
+        # Per-trade PnL in dollars (absolute $)
+        pnl_values = [t.pnl for t in self.trades]
+        avg_trade_pnl = round(float(np.mean(pnl_values)), 2) if pnl_values else 0.0
+        best_trade_pnl = round(float(max(pnl_values)), 2) if pnl_values else 0.0
+        worst_trade_pnl = round(float(min(pnl_values)), 2) if pnl_values else 0.0
+
+        # Average trade duration in hours — now read directly from Trade.duration_hours
+        avg_trade_duration_hours = (
+            round(float(np.mean([t.duration_hours for t in self.trades])), 2)
+            if self.trades else 0.0
+        )
+
+        # Serialize individual trades as list of dicts.
+        # All fields are taken directly from the Trade dataclass so no data is lost.
+        trades_list = [
+            {{
+                'symbol': t.symbol,
+                'action': t.action,
+                'entry_date': t.entry_date.isoformat() if hasattr(t.entry_date, 'isoformat') else str(t.entry_date),
+                'exit_date': t.exit_date.isoformat() if hasattr(t.exit_date, 'isoformat') else str(t.exit_date),
+                'entry_price': round(float(t.entry_price), 4),
+                'exit_price': round(float(t.exit_price), 4),
+                'quantity': t.shares,
+                'pnl': round(float(t.pnl), 2),
+                'pnl_pct': round(float(t.pnl_pct), 4),
+                'duration_hours': t.duration_hours,
+                'exit_reason': t.exit_reason,
+                'indicators': t.indicators if isinstance(t.indicators, dict) else {{}},
+            }}
+            for t in self.trades
+        ]
+
+        # Equity curve: list of {{"date": "YYYY-MM-DD", "value": float}}
+        equity_curve_list = [
+            {{'date': d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10],
+              'value': round(float(v), 2)}}
+            for d, v in zip(self.equity_dates, self.equity_curve)
+        ]
+
+        # Period returns helper
+        def _calc_period_returns(ec_list, freq, fmt):
+            """Resample equity curve to a period and return return dicts."""
+            if not ec_list:
+                return []
+            df = pd.DataFrame(ec_list)
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date').sort_index()
+            try:
+                resampled = df.resample(freq).last().dropna()
+            except Exception:
+                return []
+            resampled['return_pct'] = resampled['value'].pct_change(fill_method=None) * 100
+            result = []
+            for idx, row in resampled.iterrows():
+                ret = float(row['return_pct']) if not pd.isna(row['return_pct']) else 0.0
+                result.append({{
+                    'period': idx.strftime(fmt),
+                    'value': round(float(row['value']), 2),
+                    'return_pct': round(ret, 4),
+                }})
+            return result
+
+        daily_returns = _calc_period_returns(equity_curve_list, 'D', '%Y-%m-%d')
+        weekly_returns = _calc_period_returns(equity_curve_list, 'W', '%Y-W%V')
+        monthly_returns = _calc_period_returns(equity_curve_list, 'ME', '%Y-%m')
+        yearly_returns = _calc_period_returns(equity_curve_list, 'YE', '%Y')
+
         return {{
             'total_trades': len(self.trades),
             'win_rate': win_rate,
@@ -972,7 +1084,18 @@ class PortfolioBacktester:
             'max_potential': self.max_potential_profit,
             'buy_hold_by_symbol': self.buy_hold_returns,
             'sharpe_ratio': round((total_return / 100) / (max_dd if max_dd > 0 else 1), 2),
-            'profit_factor': round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else (float('inf') if avg_win > 0 else 0)
+            'profit_factor': round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else (float('inf') if avg_win > 0 else 0),
+            # Extended fields required by backtest_results.json schema
+            'avg_trade_pnl': avg_trade_pnl,
+            'best_trade_pnl': best_trade_pnl,
+            'worst_trade_pnl': worst_trade_pnl,
+            'avg_trade_duration_hours': avg_trade_duration_hours,
+            'trades': trades_list,
+            'equity_curve': equity_curve_list,
+            'daily_returns': daily_returns,
+            'weekly_returns': weekly_returns,
+            'monthly_returns': monthly_returns,
+            'yearly_returns': yearly_returns,
         }}
 
 

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { adminAPI } from '@/lib/api'
-import { Search, Trash2 } from 'lucide-react'
+import { Search, Trash2, KeyRound } from 'lucide-react'
+import AdminLicenseModal from './AdminLicenseModal'
 
 interface Strategy {
   uuid: string
@@ -24,6 +25,7 @@ export default function StrategyManagementTab() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [skip, setSkip] = useState(0)
   const [total, setTotal] = useState(0)
+  const [licenseStrategy, setLicenseStrategy] = useState<Strategy | null>(null)
 
   const limit = 20
 
@@ -41,7 +43,7 @@ export default function StrategyManagementTab() {
         search: search || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
       })
-      setStrategies(data.data || [])
+      setStrategies(data.items || [])
       setTotal(data.total || 0)
     } catch (err) {
       setError('Failed to load strategies')
@@ -128,6 +130,13 @@ export default function StrategyManagementTab() {
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
                         <button
+                          onClick={() => setLicenseStrategy(strategy)}
+                          className="p-2 hover:bg-primary/10 rounded text-text-secondary hover:text-primary"
+                          title="Manage Admin License"
+                        >
+                          <KeyRound size={16} />
+                        </button>
+                        <button
                           onClick={() => handleDelete(strategy.uuid)}
                           className="p-2 hover:bg-red-900/20 rounded text-text-secondary hover:text-red-400"
                           title="Delete"
@@ -165,6 +174,15 @@ export default function StrategyManagementTab() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Admin License Modal */}
+      {licenseStrategy && (
+        <AdminLicenseModal
+          strategyId={licenseStrategy.uuid}
+          strategyName={licenseStrategy.name}
+          onClose={() => setLicenseStrategy(null)}
+        />
       )}
     </div>
   )

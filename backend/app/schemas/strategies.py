@@ -36,8 +36,45 @@ class BuildResponse(BaseModel):
         from_attributes = True
 
 
+class MarketplaceListRequest(BaseModel):
+    """Schema for listing/unlisting a strategy on the marketplace."""
+    listed: bool
+    price: Optional[float] = None
+
+
 class StrategyResponse(BaseModel):
-    """Schema for strategy detail response."""
+    """Schema for strategy detail response (user-facing, excludes Docker info)."""
+    uuid: str
+    name: str
+    description: Optional[str] = None
+    status: str
+    strategy_type: Optional[str] = None
+    symbols: Optional[Union[List, dict]] = None
+    target_return: Optional[float] = None
+    backtest_results: Optional[dict] = None
+    marketplace_listed: bool = False
+    marketplace_price: Optional[float] = None
+    version: int
+    subscriber_count: int
+    rating: Optional[float] = None
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StrategyListResponse(BaseModel):
+    """Schema for paginated strategy list response."""
+    items: List[StrategyResponse]
+    total: int
+    skip: int
+    limit: int
+
+
+class StrategyInternalResponse(BaseModel):
+    """Schema for internal strategy response (includes Docker info for SignalSynk)."""
     uuid: str
     name: str
     description: Optional[str] = None
@@ -54,26 +91,6 @@ class StrategyResponse(BaseModel):
     user_id: str
     created_at: datetime
     updated_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-
-class StrategyListResponse(BaseModel):
-    """Schema for paginated strategy list response."""
-    items: List[StrategyResponse]
-    total: int
-    skip: int
-    limit: int
-
-
-class DockerInfoResponse(BaseModel):
-    """Schema for Docker pull instructions and usage guide."""
-    image_url: str
-    pull_command: str
-    run_command: str
-    environment_variables: dict
-    terms_of_use: str
 
     class Config:
         from_attributes = True

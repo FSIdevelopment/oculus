@@ -115,11 +115,6 @@ export const strategyAPI = {
     return response.data
   },
 
-  getDockerInfo: async (strategyId: string) => {
-    const response = await api.get(`/api/strategies/${strategyId}/docker`)
-    return response.data
-  },
-
   getStrategyBuilds: async (strategyId: string, skip: number = 0, limit: number = 10) => {
     const response = await api.get(`/api/strategies/${strategyId}/builds`, {
       params: { skip, limit },
@@ -131,12 +126,36 @@ export const strategyAPI = {
     const response = await api.get(`/api/builds/${buildId}/iterations`)
     return response.data
   },
+
+  retrainStrategy: async (
+    strategyId: string,
+    params: { target_return?: number; timeframe?: string; max_iterations?: number } = {}
+  ) => {
+    const response = await api.post(`/api/strategies/${strategyId}/retrain`, null, { params })
+    return response.data
+  },
+
+  getBuildBestBacktest: async (strategyId: string, buildId: string) => {
+    const response = await api.get(`/api/strategies/${strategyId}/builds/${buildId}/backtest`)
+    return response.data
+  },
+
+  getBuildConfig: async (strategyId: string, buildId: string) => {
+    const response = await api.get(`/api/strategies/${strategyId}/builds/${buildId}/config`)
+    return response.data
+  },
 }
 
 // Build API functions
 export const buildAPI = {
   listBuilds: async (skip: number = 0, limit: number = 10) => {
     const response = await api.get('/api/builds', { params: { skip, limit } })
+    return response.data
+  },
+
+  /** Fetch per-iteration token cost from the backend pricing endpoint. */
+  getBuildPricing: async (): Promise<{ tokens_per_iteration: number }> => {
+    const response = await api.get('/api/builds/pricing')
     return response.data
   },
 }
@@ -150,10 +169,36 @@ export const licenseAPI = {
     return response.data
   },
 
-  purchaseLicense: async (strategyId: string, licenseType: 'monthly' | 'annual') => {
-    const response = await api.post(`/api/strategies/${strategyId}/license`, {
+  /**
+   * Create a Stripe Checkout Session for a license and redirect the browser
+   * to the hosted checkout page. The license record is created automatically
+   * by the Stripe webhook after a successful payment.
+   */
+  createLicenseCheckout: async (strategyId: string, licenseType: 'monthly' | 'annual') => {
+    const response = await api.post(`/api/strategies/${strategyId}/license/checkout`, {
       license_type: licenseType,
       strategy_id: strategyId,
+    })
+    const { checkout_url } = response.data
+    if (checkout_url && typeof window !== 'undefined') {
+      window.location.href = checkout_url
+    }
+    return response.data
+  },
+
+  /**
+   * Fetch the calculated monthly and annual license prices for a strategy
+   * based on its backtest performance.  No authentication required.
+   */
+  getLicensePrice: async (strategyId: string): Promise<{ monthly_price: number; annual_price: number; performance_score: number }> => {
+    const response = await api.get(`/api/strategies/${strategyId}/license/price`)
+    return response.data
+  },
+
+  /** Update the webhook URL associated with an active license. */
+  updateWebhook: async (licenseId: string, webhookUrl: string) => {
+    const response = await api.put(`/api/licenses/${licenseId}/webhook`, {
+      webhook_url: webhookUrl,
     })
     return response.data
   },
@@ -161,6 +206,31 @@ export const licenseAPI = {
   renewLicense: async (licenseId: string, licenseType: 'monthly' | 'annual') => {
     const response = await api.put(`/api/licenses/${licenseId}/renew`, {
       license_type: licenseType,
+    })
+    return response.data
+  },
+
+  /**
+   * Create a Stripe SetupIntent so the frontend can collect a payment method
+   * in-app with Stripe Elements.  Returns `client_secret` and `publishable_key`.
+   */
+  createSetupIntent: async (): Promise<{ client_secret: string; publishable_key: string }> => {
+    const response = await api.post('/api/licenses/setup-intent')
+    return response.data
+  },
+
+  /**
+   * Create a Stripe Subscription + License record using a payment method that
+   * was confirmed via the SetupIntent flow.
+   */
+  subscribeWithPaymentMethod: async (
+    strategyId: string,
+    licenseType: 'monthly' | 'annual',
+    paymentMethodId: string
+  ) => {
+    const response = await api.post(`/api/strategies/${strategyId}/license/subscribe`, {
+      license_type: licenseType,
+      payment_method_id: paymentMethodId,
     })
     return response.data
   },
@@ -186,6 +256,11 @@ export const marketplaceAPI = {
 
   subscribeToStrategy: async (strategyId: string) => {
     const response = await api.post(`/api/marketplace/${strategyId}/subscribe`)
+    return response.data
+  },
+
+  updateMarketplaceListing: async (strategyId: string, listed: boolean, price?: number) => {
+    const response = await api.put(`/api/strategies/${strategyId}/marketplace`, { listed, price })
     return response.data
   },
 }
@@ -318,6 +393,35 @@ export const adminAPI = {
 
   updateLicense: async (id: string, data: any) => {
     const response = await api.put(`/api/admin/licenses/${id}`, data)
+    return response.data
+  },
+
+  /**
+   * Generate a free admin license for a strategy.
+   * Automatically revokes any previous admin license for the same strategy.
+   */
+  generateAdminLicense: async (strategyId: string) => {
+    const response = await api.post(`/api/admin/strategies/${strategyId}/license`)
+    return response.data
+  },
+
+  /**
+   * Fetch the current active admin license for a strategy.
+   * Returns null when no active admin license exists (404 → null).
+   */
+  getAdminLicense: async (strategyId: string) => {
+    try {
+      const response = await api.get(`/api/admin/strategies/${strategyId}/license`)
+      return response.data
+    } catch (err: any) {
+      if (err.response?.status === 404) return null
+      throw err
+    }
+  },
+
+  /** Revoke a license by ID (admin only). */
+  revokeAdminLicense: async (licenseId: string) => {
+    const response = await api.post(`/api/admin/licenses/${licenseId}/revoke`)
     return response.data
   },
 

@@ -97,6 +97,36 @@ services:
       - key: ADMIN_PASSWORD
         scope: RUN_TIME
         type: SECRET
+      - key: LICENSE_MONTHLY_MIN_PRICE
+        scope: RUN_TIME
+        value: 50
+      - key: LICENSE_MONTHLY_MAX_PRICE
+        scope: RUN_TIME
+        value: 1999
+      - key: LICENSE_ANNUAL_MULTIPLIER
+        scope: RUN_TIME
+        value: 10
+      - key: PERF_MIN_RETURN
+        scope: RUN_TIME
+        value: 10.0
+      - key: PERF_MAX_RETURN
+        scope: RUN_TIME
+        value: 350.0
+      - key: PERF_MIN_SHARPE
+        scope: RUN_TIME
+        value: 0.5
+      - key: PERF_MAX_SHARPE
+        scope: RUN_TIME
+        value: 5.0
+      - key: PERF_RETURN_WEIGHT
+        scope: RUN_TIME
+        value: 0.85
+      - key: PERF_SHARPE_WEIGHT
+        scope: RUN_TIME
+        value: 0.15
+      - key: PERF_CURVE_EXPONENT
+        scope: RUN_TIME
+        value: 0.9
     routes:
       - path: /api
 

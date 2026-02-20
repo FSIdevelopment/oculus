@@ -1,8 +1,12 @@
 """Docker builder service for building and pushing strategy images."""
 import asyncio
+import json
+import os
 import re
 import logging
-from typing import Optional
+import tempfile
+import uuid as _uuid_module
+from typing import Any, Dict, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -267,6 +271,130 @@ class DockerBuilder:
             build.completed_at = datetime.utcnow()
             await self.db.commit()
             return False
+
+    async def run_backtest_verification(
+        self,
+        image_tag: str,
+        strategy_id: str,
+        backtest_period: str = "1Y",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Run a full backtest inside the built container and return the results.
+
+        Executes backtest.py inside the container, copies the output JSON file
+        back to the host, and returns the parsed results for database storage.
+        The container is NOT given DATABASE_URL — builds.py persists the results
+        via SQLAlchemy after this method returns.
+
+        Args:
+            image_tag: Docker image tag to run backtest against
+            strategy_id: Strategy UUID (passed as STRATEGY_ID env var)
+            backtest_period: Historical period to backtest over (default: 1Y)
+
+        Returns:
+            Parsed backtest results dict, or None on failure
+        """
+        container_name = f"backtest-verify-{_uuid_module.uuid4().hex[:8]}"
+
+        try:
+            logger.info(
+                f"Starting backtest verification: {image_tag} (period={backtest_period})"
+            )
+
+            # Run backtest.py inside the container.
+            # DATABASE_URL is intentionally omitted so the container skips its own
+            # DB update — builds.py will persist the results via SQLAlchemy instead.
+            run_cmd = (
+                f"docker run --name {container_name} "
+                f"-e BACKTEST_MODE=true "
+                f"-e BACKTEST_PERIOD={backtest_period} "
+                f"-e STRATEGY_ID={strategy_id} "
+                f"-e ALPHAVANTAGE_API_KEY={settings.ALPHAVANTAGE_API_KEY} "
+                f"-e POLYGON_API_KEY={settings.POLYGON_API_KEY} "
+                f"-e LOG_LEVEL=INFO "
+                f"{image_tag} "
+                f"python backtest.py"
+            )
+
+            process = await asyncio.create_subprocess_shell(
+                run_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=600,  # 10-minute hard limit
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                await self._run_command(f"docker rm -f {container_name}", timeout=30)
+                logger.error("Backtest verification timed out after 10 minutes")
+                return None
+
+            stdout_str = stdout.decode("utf-8", errors="replace") if stdout else ""
+            stderr_str = stderr.decode("utf-8", errors="replace") if stderr else ""
+
+            if process.returncode != 0:
+                logger.error(
+                    f"Backtest container exited with code {process.returncode}. "
+                    f"stderr: {stderr_str[:2000]}"
+                )
+                await self._run_command(f"docker rm -f {container_name}", timeout=30)
+                return None
+
+            logger.info(
+                f"Backtest container finished. Output preview: {stdout_str[:500]}"
+            )
+
+            # Copy results file from the stopped container to a temp directory
+            results: Optional[Dict[str, Any]] = None
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                host_results_path = os.path.join(tmp_dir, "backtest_results.json")
+                cp_result = await self._run_command(
+                    f"docker cp {container_name}:/app/backtest_results.json {host_results_path}",
+                    timeout=30,
+                )
+
+                if cp_result != 0:
+                    logger.error(
+                        "docker cp failed — backtest_results.json not found in container"
+                    )
+                elif not os.path.exists(host_results_path):
+                    logger.error("backtest_results.json missing after docker cp")
+                else:
+                    with open(host_results_path, "r") as fh:
+                        results = json.load(fh)
+
+            # Always clean up the stopped container
+            await self._run_command(f"docker rm {container_name}", timeout=30)
+
+            if results is None:
+                return None
+
+            # A results dict with only an "error" key means the backtest itself failed
+            if "error" in results and not results.get("total_return_pct"):
+                logger.error(f"Backtest returned error: {results.get('error')}")
+                return None
+
+            logger.info(
+                f"Backtest verification complete — "
+                f"return={results.get('total_return_pct', 'N/A')}%, "
+                f"trades={results.get('total_trades', 'N/A')}"
+            )
+            return results
+
+        except Exception as exc:
+            logger.error(f"Backtest verification failed: {exc}", exc_info=True)
+            # Best-effort container cleanup
+            try:
+                await self._run_command(f"docker rm -f {container_name}", timeout=30)
+            except Exception:
+                pass
+            return None
 
     async def _run_command(self, cmd: str, timeout: int = 600) -> int:
         """

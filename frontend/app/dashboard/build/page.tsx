@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { buildAPI } from '@/lib/api'
-import { Zap, Clock, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Zap, Clock, CheckCircle, AlertCircle, ChevronLeft, ChevronRight, Coins } from 'lucide-react'
+import TokenTopUpModal from '@/components/TokenTopUpModal'
 
 interface BuildListItem {
   uuid: string
@@ -19,12 +20,13 @@ interface BuildListItem {
 }
 
 export default function BuildListPage() {
-  const { isAuthenticated, isLoading } = useAuth()
+  const { isAuthenticated, isLoading, user } = useAuth()
   const [builds, setBuilds] = useState<BuildListItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showTopUp, setShowTopUp] = useState(false)
 
   const pageSize = 10
 
@@ -144,6 +146,27 @@ export default function BuildListPage() {
         <p className="text-text-secondary">Track your strategy builds in real-time</p>
       </div>
 
+      {/* Token Balance CTA Banner */}
+      <div className="flex items-center justify-between bg-surface border border-border rounded-lg px-5 py-3">
+        <div className="flex items-center gap-3">
+          <Coins size={18} className="text-primary flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-text">
+              🪙 {(user?.balance ?? 0).toLocaleString()} tokens available
+            </p>
+            <p className="text-xs text-text-secondary">Tokens are consumed during each build iteration</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowTopUp(true)}
+          className="flex-shrink-0 px-4 py-1.5 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors"
+        >
+          Top Up
+        </button>
+      </div>
+
+      <TokenTopUpModal isOpen={showTopUp} onClose={() => setShowTopUp(false)} />
+
       {/* Error Message */}
       {error && (
         <div className="bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-700 rounded-lg p-4 text-red-700 dark:text-red-300">
@@ -211,11 +234,10 @@ export default function BuildListPage() {
               <button
                 onClick={() => setPage(page - 1)}
                 disabled={!canGoPrevious}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                  canGoPrevious
-                    ? 'bg-surface border border-border hover:border-primary text-text'
-                    : 'bg-surface-hover border border-border text-text-secondary cursor-not-allowed'
-                }`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${canGoPrevious
+                  ? 'bg-surface border border-border hover:border-primary text-text'
+                  : 'bg-surface-hover border border-border text-text-secondary cursor-not-allowed'
+                  }`}
               >
                 <ChevronLeft size={16} />
                 Previous
@@ -228,11 +250,10 @@ export default function BuildListPage() {
               <button
                 onClick={() => setPage(page + 1)}
                 disabled={!canGoNext}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                  canGoNext
-                    ? 'bg-surface border border-border hover:border-primary text-text'
-                    : 'bg-surface-hover border border-border text-text-secondary cursor-not-allowed'
-                }`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${canGoNext
+                  ? 'bg-surface border border-border hover:border-primary text-text'
+                  : 'bg-surface-hover border border-border text-text-secondary cursor-not-allowed'
+                  }`}
               >
                 Next
                 <ChevronRight size={16} />

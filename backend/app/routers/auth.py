@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.auth import UserRegister, UserLogin, Token, UserResponse, RefreshTokenRequest
 from app.auth.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from app.auth.dependencies import get_current_active_user
+from app.services.email_service import EmailService
 
 router = APIRouter()
 
@@ -66,7 +67,11 @@ async def register(user_data: UserRegister, db: AsyncSession = Depends(get_db)):
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
-    
+
+    # Send welcome and onboarding emails
+    EmailService.send_welcome_email(user=new_user)
+    EmailService.send_onboarding_email(user=new_user)
+
     # Create tokens
     access_token = create_access_token(data={"sub": new_user.uuid, "email": new_user.email, "role": new_user.user_role})
     refresh_token = create_refresh_token(data={"sub": new_user.uuid, "email": new_user.email, "role": new_user.user_role})

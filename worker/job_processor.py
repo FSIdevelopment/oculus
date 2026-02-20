@@ -81,14 +81,21 @@ class JobProcessor:
         Returns:
             Result dictionary with status, metrics, rules, and backtest results
         """
-        reporter = ProgressReporter(job_id, self.redis)
+        # Extract build_id first so the reporter publishes to the channel that
+        # the backend WebSocket subscribes to: oculus:training:progress:build:{uuid}
+        # (the full job_id contains an extra ":iter:{uuid}" suffix that would
+        # cause a channel mismatch and silence all progress updates in the UI).
+        build_id = job_data.get('build_id', 'unknown')
+        reporter = ProgressReporter(
+            job_id, self.redis,
+            channel_id=f"build:{build_id}",
+        )
 
         try:
             # Extract job parameters from backend format
             symbols = job_data.get('symbols', [])
             timeframe = job_data.get('timeframe', '1d')
             design = job_data.get('design', {})
-            build_id = job_data.get('build_id', 'unknown')
             user_id = job_data.get('user_id', 'unknown')
             iteration_uuid = job_data.get('iteration_uuid')  # For BuildIteration DB persistence
 
@@ -99,11 +106,50 @@ class JobProcessor:
             # Enforce minimum data periods based on timeframe
             # Daily/weekly: at least 1 year; intraday (<1d): at least 6 months
             if timeframe in ['1d', '1day', 'daily', '1w', 'weekly']:
-                years = max(years, 1.0)
+                years = max(7.0, 7.0)
             else:
                 # Intraday (1m, 5m, 15m, 30m, 1h, 4h)
                 years = max(years, 0.5)
             logger.info(f"[{job_id}] Timeframe {timeframe}: using {years} years of data")
+
+            # Compute timeframe-appropriate label configuration.
+            #
+            # Intraday timeframes MUST use smaller forward periods and lower profit
+            # thresholds.  The LLM designs in "calendar-day" terms (e.g. 5–15 days,
+            # 4–10 % profit) which work fine for daily bars but cause all training
+            # labels to collapse into a single class for hourly/sub-hourly data
+            # (e.g. NVDA gains 4 % in 5 trading days nearly every time during a
+            # bull run → all labels = 1, no negative class → training fails).
+            _is_sub_hourly = timeframe in ['1m', '5m', '15m', '30m']
+            _is_hourly = timeframe in ['1h', '2h', '4h']
+            _is_intraday = _is_sub_hourly or _is_hourly
+
+            if _is_sub_hourly:
+                # Sub-hourly: very short look-ahead, very small move thresholds
+                _default_forward_days = [1, 2, 3, 5]
+                _default_profit_thresholds = [0.3, 0.5, 0.75, 1.0, 1.5]
+            elif _is_hourly:
+                # Hourly / multi-hour: short look-ahead, small move thresholds
+                _default_forward_days = [1, 2, 3, 5, 7]
+                _default_profit_thresholds = [0.5, 1.0, 1.5, 2.0, 3.0]
+            else:
+                # Daily / weekly: honour LLM design values
+                _default_forward_days = design.get(
+                    'forward_returns_days_options', [3, 5, 7, 10, 15, 20]
+                ) if design else [3, 5, 7, 10, 15, 20]
+                _default_profit_thresholds = design.get(
+                    'profit_threshold_options', [1.5, 2.0, 3.0, 5.0]
+                ) if design else [1.5, 2.0, 3.0, 5.0]
+
+            # Assign final values; log override for intraday so it's visible in traces.
+            forward_returns_days_options = _default_forward_days
+            profit_threshold_options = _default_profit_thresholds
+            if _is_intraday:
+                logger.info(
+                    f"[{job_id}] Intraday timeframe ({timeframe}): overriding LLM label "
+                    f"config → forward_days={forward_returns_days_options}, "
+                    f"profit_thresholds={profit_threshold_options}"
+                )
 
             # Build ML config dynamically from LLM design
             # Top-level fields come directly from the design dict
@@ -111,13 +157,9 @@ class JobProcessor:
             ml_config = design.get('ml_training_config', {}) if design else {}
 
             ml_training_config = EnhancedMLConfig(
-                # Label generation — from LLM design top-level fields
-                forward_returns_days_options=design.get(
-                    'forward_returns_days_options', [3, 5, 7, 10, 15, 20]
-                ),
-                profit_threshold_options=design.get(
-                    'profit_threshold_options', [1.5, 2.0, 3.0, 5.0]
-                ),
+                # Label generation — timeframe-aware values computed above
+                forward_returns_days_options=forward_returns_days_options,
+                profit_threshold_options=profit_threshold_options,
 
                 # Hyperparameter search — top-level or fall back to old 'hp_iterations' key
                 n_iter_search=design.get(
@@ -176,7 +218,10 @@ class JobProcessor:
                 }
 
             # Step 1: Train ML models using the design-driven config
-            reporter.report_phase("training", "in_progress")
+            reporter.report_phase(
+                "training", "in_progress",
+                message="Starting model training pipeline — this will take a few minutes...",
+            )
             trainer = EnhancedMLTrainer(
                 symbols=symbols,
                 period_years=years,
@@ -184,9 +229,17 @@ class JobProcessor:
                 timeframe=timeframe,
             )
 
+            # Build a callback that pipes granular ML pipeline sub-stages back
+            # to the UI Design Thinking section via the progress reporter.
+            def _training_progress(message: str) -> None:
+                reporter.report_phase("training", "in_progress", message=message)
+
             # Skip disk writes — worker sends results via Redis, and hardcoded
             # file paths (model .pkl, strategy config .json) don't exist here.
-            training_results = await trainer.run_full_pipeline(skip_disk_writes=True)
+            training_results = await trainer.run_full_pipeline(
+                skip_disk_writes=True,
+                progress_callback=_training_progress,
+            )
             reporter.report_phase("training", "complete")
 
             # Extract model metrics
@@ -197,7 +250,10 @@ class JobProcessor:
             reporter.report_metrics(metrics)
 
             # Step 2: Extract trading rules
-            reporter.report_phase("rule_extraction", "in_progress")
+            reporter.report_phase(
+                "rule_extraction", "in_progress",
+                message="Analysing feature importance and extracting trading rules from trained models...",
+            )
 
             # Create rule extractor with training data from trainer
             rule_extractor = RuleExtractor(
@@ -222,7 +278,10 @@ class JobProcessor:
             # Wrapped in try/except — file generation failure should NOT crash the build
             strategy_files = {}
             try:
-                reporter.report_phase("file_generation", "in_progress")
+                reporter.report_phase(
+                    "file_generation", "in_progress",
+                    message="Generating strategy files from extracted rules...",
+                )
 
                 # Serialise extracted rules to a dict for the file generator
                 rules_dict = rule_extractor.to_dict(strategy_rules)
@@ -253,8 +312,8 @@ class JobProcessor:
                 reporter.report_phase("file_generation", "complete")
 
             except Exception as file_gen_err:
-                # Log the error but do NOT re-raise — the build continues
-                logger.warning(
+                # Log full traceback so the root cause is visible in worker logs.
+                logger.exception(
                     f"[{job_id}] Strategy file generation failed (non-fatal): "
                     f"{file_gen_err}"
                 )
@@ -285,7 +344,10 @@ class JobProcessor:
 
                     # Step 4: Optimize strategy parameters
                     try:
-                        reporter.report_phase("optimization", "in_progress")
+                        reporter.report_phase(
+                            "optimization", "in_progress",
+                            message="Optimizing strategy parameters (stop-loss, position sizing, entry thresholds)...",
+                        )
 
                         optimizer = StrategyOptimizer(strategy_temp_dir)
 
@@ -372,7 +434,10 @@ class JobProcessor:
 
                     # Step 5: Run backtest with real PortfolioBacktester
                     try:
-                        reporter.report_phase("backtesting", "in_progress")
+                        reporter.report_phase(
+                            "backtesting", "in_progress",
+                            message="Running backtest with optimized parameters on historical data...",
+                        )
 
                         # Clear cached modules so we import from the temp dir
                         modules_to_remove = [
@@ -421,6 +486,17 @@ class JobProcessor:
                                 "avg_loss": bt_results.get("avg_loss", 0),
                                 "buy_hold_avg": bt_results.get("buy_hold_avg", 0),
                                 "max_potential": bt_results.get("max_potential", 0),
+                                # Extended fields required by backtest_results.json schema
+                                "avg_trade_pnl": bt_results.get("avg_trade_pnl", 0.0),
+                                "best_trade_pnl": bt_results.get("best_trade_pnl", 0.0),
+                                "worst_trade_pnl": bt_results.get("worst_trade_pnl", 0.0),
+                                "avg_trade_duration_hours": bt_results.get("avg_trade_duration_hours", 0.0),
+                                "trades": bt_results.get("trades", []),
+                                "equity_curve": bt_results.get("equity_curve", []),
+                                "daily_returns": bt_results.get("daily_returns", []),
+                                "weekly_returns": bt_results.get("weekly_returns", []),
+                                "monthly_returns": bt_results.get("monthly_returns", []),
+                                "yearly_returns": bt_results.get("yearly_returns", []),
                             }
                             # Calculate capture rate
                             max_potential = bt_results.get("max_potential", 1)
@@ -625,6 +701,21 @@ class JobProcessor:
                 # Empty dict if file generation failed (non-fatal).
                 "strategy_files": strategy_files,
             }
+
+            # Diagnostic: confirm strategy_files are present in the outgoing result.
+            sf = result.get("strategy_files") or {}
+            if sf:
+                total_bytes = sum(len(v) for v in sf.values())
+                logger.info(
+                    f"[{job_id}] Returning {len(sf)} strategy files "
+                    f"({total_bytes:,} bytes total): {list(sf.keys())}"
+                )
+            else:
+                logger.warning(
+                    f"[{job_id}] strategy_files is EMPTY in result — "
+                    f"worker file generation may have failed silently. "
+                    f"Backend will fall back to LLM regeneration."
+                )
 
             logger.info(f"[{job_id}] Job complete")
             return result

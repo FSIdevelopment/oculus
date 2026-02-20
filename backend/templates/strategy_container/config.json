@@ -1,7 +1,7 @@
 {
   "strategy_name": "Template Strategy",
   "version": "1.0.0",
-  "description": "A template strategy for Signal Synk. Customize this file for your strategy.",
+  "description": "A custom trading strategy. Generated automatically — see strategy_name and indicators for details.",
   "trading": {
     "symbols": [
       "AAPL",

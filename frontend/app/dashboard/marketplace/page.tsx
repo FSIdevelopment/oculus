@@ -30,7 +30,6 @@ const STRATEGY_TYPES = [
   'Price Action',
   'RSI Overbought/Oversold',
   'Scalping',
-  'Sentiment Analysis',
   'Statistical Arbitrage',
   'Support/Resistance Breakout',
   'Swing Trading',

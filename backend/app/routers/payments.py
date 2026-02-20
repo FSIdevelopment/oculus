@@ -3,13 +3,14 @@ import stripe
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.config import settings
 from app.models.user import User
 from app.models.product import Product
 from app.models.purchase import Purchase
+from app.models.license import License
 from app.auth.dependencies import get_current_active_user
 from app.services.balance import add_tokens
 from app.schemas.payments import (
@@ -228,6 +229,49 @@ async def stripe_webhook(
             detail="Invalid signature"
         )
     
+    # Handle checkout.session.completed for license subscription purchases
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        metadata = session.get("metadata", {})
+
+        if metadata.get("event_type") == "license_purchase":
+            user_id = metadata.get("user_id")
+            strategy_id = metadata.get("strategy_id")
+            license_type = metadata.get("license_type", "monthly")
+            subscription_id = session.get("subscription")
+
+            if user_id and strategy_id:
+                # Prevent duplicate license creation for the same session
+                existing_result = await db.execute(
+                    select(License).where(License.subscription_id == session["id"])
+                )
+                if existing_result.scalar_one_or_none():
+                    return {"status": "already_processed"}
+
+                # Calculate expiration
+                if license_type == "annual":
+                    expires_at = datetime.utcnow() + timedelta(days=365)
+                else:
+                    expires_at = datetime.utcnow() + timedelta(days=30)
+
+                license_obj = License(
+                    status="active",
+                    license_type=license_type,
+                    strategy_id=strategy_id,
+                    user_id=user_id,
+                    subscription_id=session["id"],
+                    expires_at=expires_at,
+                )
+                db.add(license_obj)
+                try:
+                    await db.commit()
+                    return {"status": "license_created"}
+                except Exception as e:
+                    await db.rollback()
+                    return {"status": "error", "message": str(e)}
+
+        return {"status": "ignored"}
+
     # Handle payment.intent.succeeded event
     if event["type"] == "payment_intent.succeeded":
         payment_intent = event["data"]["object"]

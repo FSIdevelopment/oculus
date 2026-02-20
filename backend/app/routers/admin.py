@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from datetime import datetime
+from datetime import datetime, timedelta
 import secrets
 import string
 import stripe
@@ -11,13 +11,16 @@ from app.database import get_db
 from app.config import settings
 from app.models.user import User
 from app.models.strategy import Strategy
+from app.models.license import License
 from app.schemas.users import (
     UserAdminUpdate, UserDetailResponse, UserListResponse,
     UserListItem, ImpersonationTokenResponse, AdminUserCreate
 )
 from app.schemas.strategies import StrategyResponse, StrategyUpdate, StrategyListResponse
+from app.schemas.licenses import LicenseResponse
 from app.auth.dependencies import admin_required
 from app.auth.security import hash_password, create_access_token
+from app.services.email_service import EmailService
 
 router = APIRouter()
 
@@ -118,6 +121,10 @@ async def create_user(
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
+
+    # Send welcome email with credentials (admin-created users)
+    EmailService.send_welcome_email(user=new_user, password=user_data.password)
+    EmailService.send_onboarding_email(user=new_user)
 
     return new_user
 
@@ -436,4 +443,121 @@ async def delete_any_strategy(
     strategy.status = "deleted"
     strategy.updated_at = datetime.utcnow()
     await db.commit()
+
+
+# ============================================================================
+# ADMIN LICENSE ENDPOINTS
+# ============================================================================
+
+@router.post("/strategies/{strategy_id}/license", response_model=LicenseResponse, status_code=status.HTTP_201_CREATED)
+async def generate_admin_license(
+    strategy_id: str,
+    admin_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a free admin license for a strategy (no payment required).
+
+    - Revokes any existing admin licenses for this strategy first so only one
+      active admin license exists per strategy at a time.
+    - Sets license_type to "admin" and grants a 10-year validity period.
+    - The user_id is set to the requesting admin's UUID.
+    """
+    # Verify strategy exists
+    result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
+            Strategy.status != "deleted"
+        )
+    )
+    strategy = result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found"
+        )
+
+    # Revoke any existing admin licenses for this strategy
+    existing_result = await db.execute(
+        select(License).where(
+            License.strategy_id == strategy_id,
+            License.license_type == "admin",
+            License.status == "active"
+        )
+    )
+    for existing in existing_result.scalars().all():
+        existing.status = "revoked"
+
+    # Create new admin license — 10-year validity, no Stripe dependency
+    license_obj = License(
+        status="active",
+        license_type="admin",
+        strategy_id=strategy_id,
+        user_id=admin_user.uuid,
+        expires_at=datetime.utcnow() + timedelta(days=3650),
+    )
+    db.add(license_obj)
+    await db.commit()
+    await db.refresh(license_obj)
+
+    return license_obj
+
+
+@router.get("/strategies/{strategy_id}/license", response_model=LicenseResponse)
+async def get_admin_license(
+    strategy_id: str,
+    admin_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Return the current active admin license for a strategy.
+
+    Returns 404 when no active admin license exists so the frontend can
+    display the "Generate License" button.
+    """
+    result = await db.execute(
+        select(License).where(
+            License.strategy_id == strategy_id,
+            License.license_type == "admin",
+            License.status == "active"
+        )
+    )
+    license_obj = result.scalar_one_or_none()
+
+    if not license_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active admin license found for this strategy"
+        )
+
+    return license_obj
+
+
+@router.post("/licenses/{license_id}/revoke", response_model=LicenseResponse)
+async def revoke_license(
+    license_id: str,
+    admin_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Revoke a license (admin only).
+
+    Sets the license status to "revoked".  Works for any license type,
+    allowing admins to revoke both paid and admin-issued licenses.
+    """
+    result = await db.execute(select(License).where(License.uuid == license_id))
+    license_obj = result.scalar_one_or_none()
+
+    if not license_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="License not found"
+        )
+
+    license_obj.status = "revoked"
+    await db.commit()
+    await db.refresh(license_obj)
+
+    return license_obj
 

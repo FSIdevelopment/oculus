@@ -3,6 +3,7 @@ import os
 import sys
 import shutil
 from pathlib import Path
+from typing import Optional, List, Dict, Any, Set
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -32,6 +33,10 @@ from sqlalchemy import select as sa_select
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Strong references to background tasks to prevent garbage collection.
+# Tasks are added on creation and removed via a done callback when they complete.
+_background_tasks: Set[asyncio.Task] = set()
 
 
 async def _save_chat_history(
@@ -179,24 +184,85 @@ async def _build_strategy_container(
         dst = output_path / static_file
         await asyncio.to_thread(shutil.copy2, str(src), str(dst))
 
-    # Step 3: Generate custom files via LLM
-    # Generate config.json
-    await _publish_progress(build_id, {
-        "phase": "building_docker",
-        "iteration": iteration,
-        "message": "Generating strategy configuration...",
-        "tokens_consumed": build.tokens_consumed,
-        "iteration_count": build.iteration_count,
-        "max_iterations": max_iterations,
-    })
-    config_json = await orchestrator.generate_strategy_config(
-        strategy_name=strategy_name,
-        symbols=strategy_symbols,
-        design=design,
-        training_results=training_results,
-        strategy_type=strategy_type or "",
-        timeframe=timeframe,
+    # Step 3: Write worker-generated files when available, otherwise fall back to
+    # template + LLM generation.
+    worker_strategy_files = {}
+    if isinstance(training_results, dict):
+        worker_strategy_files = training_results.get("strategy_files") or {}
+    worker_strategy_files = (
+        worker_strategy_files if isinstance(worker_strategy_files, dict) else {}
     )
+
+    worker_has_bundle = all(
+        isinstance(worker_strategy_files.get(k), str) and worker_strategy_files.get(k).strip()
+        for k in ("config.json", "strategy.py", "risk_manager.py", "backtest.py")
+    )
+    allow_llm_regeneration = not worker_has_bundle
+
+    if worker_has_bundle:
+        await _publish_progress(
+            build_id,
+            {
+                "phase": "building_docker",
+                "iteration": iteration,
+                "message": "Writing worker-generated strategy files...",
+                "tokens_consumed": build.tokens_consumed,
+                "iteration_count": build.iteration_count,
+                "max_iterations": max_iterations,
+            },
+        )
+        # Write all worker-provided files into the output dir (defensive filtering to
+        # avoid path traversal).
+        for filename, content in worker_strategy_files.items():
+            if not isinstance(filename, str) or not filename.strip():
+                continue
+            if "/" in filename or "\\" in filename:
+                continue
+            if not isinstance(content, str):
+                continue
+            (output_path / filename).write_text(content)
+
+        logger.info(
+            "Wrote %d worker strategy_files (build_id=%s, iteration_id=%s)",
+            len(worker_strategy_files),
+            build_id,
+            iteration_id,
+        )
+
+    # Generate (or load) config.json
+    await _publish_progress(
+        build_id,
+        {
+            "phase": "building_docker",
+            "iteration": iteration,
+            "message": "Generating strategy configuration...",
+            "tokens_consumed": build.tokens_consumed,
+            "iteration_count": build.iteration_count,
+            "max_iterations": max_iterations,
+        },
+    )
+
+    worker_config_json = (
+        worker_strategy_files.get("config.json")
+        if isinstance(worker_strategy_files.get("config.json"), str)
+        else None
+    )
+    if worker_config_json and worker_config_json.strip():
+        config_json = worker_config_json
+        logger.info(
+            "Using worker-provided config.json (build_id=%s, iteration_id=%s)",
+            build_id,
+            iteration_id,
+        )
+    else:
+        config_json = await orchestrator.generate_strategy_config(
+            strategy_name=strategy_name,
+            symbols=strategy_symbols,
+            design=design,
+            training_results=training_results,
+            strategy_type=strategy_type or "",
+            timeframe=timeframe,
+        )
 
     # Parse config for downstream use and inject build_info metadata
     try:
@@ -204,84 +270,180 @@ async def _build_strategy_container(
     except json.JSONDecodeError:
         config = {}
 
+    # Defense-in-depth: normalize percent fields to decimal fractions (0-1)
+    # even if the LLM produced whole-percent values.
+    try:
+        config = orchestrator.normalize_config_percent_fractions(config)
+    except Exception:
+        # Never fail a build solely due to normalization.
+        pass
+
     # Inject build_info metadata (iteration_number is 1-indexed)
     config["build_info"] = {
         "build_id": build_id,
         "iteration_id": iteration_id,
         "iteration_number": iteration + 1,
+        "strategy_uuid": build.strategy_id,  # strategy UUID for full traceability
     }
-
-    # Write config with injected metadata
-    (output_path / "config.json").write_text(json.dumps(config, indent=2))
 
     # Force-override critical config fields (defense-in-depth)
     config["strategy_name"] = strategy_name
+    # Also fix the nested strategy.name — the worker uses its internal job ID here.
+    if "strategy" not in config:
+        config["strategy"] = {}
+    config["strategy"]["name"] = strategy_name
     if "trading" not in config:
         config["trading"] = {}
     config["trading"]["symbols"] = strategy_symbols
     config["trading"]["timeframe"] = timeframe
-    # Re-write with corrected values
+    # Write once with injected metadata + corrected values
     (output_path / "config.json").write_text(json.dumps(config, indent=2))
 
-    # Generate strategy.py
-    await _publish_progress(build_id, {
-        "phase": "building_docker",
-        "iteration": iteration,
-        "message": "Generating strategy code...",
-        "tokens_consumed": build.tokens_consumed,
-        "iteration_count": build.iteration_count,
-        "max_iterations": max_iterations,
-    })
-    strategy_code = await orchestrator.generate_strategy_code(
-        strategy_name=strategy_name,
-        symbols=strategy_symbols,
-        design=design,
-        training_results=training_results,
-        strategy_type=strategy_type or "",
-        config=config,
-    )
-    (output_path / "strategy.py").write_text(strategy_code)
+    # If we didn't get the full worker bundle, generate the remaining core files.
+    if not worker_has_bundle:
+        # Generate strategy.py
+        await _publish_progress(
+            build_id,
+            {
+                "phase": "building_docker",
+                "iteration": iteration,
+                "message": "Generating strategy code...",
+                "tokens_consumed": build.tokens_consumed,
+                "iteration_count": build.iteration_count,
+                "max_iterations": max_iterations,
+            },
+        )
+        strategy_code = await orchestrator.generate_strategy_code(
+            strategy_name=strategy_name,
+            symbols=strategy_symbols,
+            design=design,
+            training_results=training_results,
+            strategy_type=strategy_type or "",
+            config=config,
+        )
+        (output_path / "strategy.py").write_text(strategy_code)
 
-    # Generate risk_manager.py
-    await _publish_progress(build_id, {
-        "phase": "building_docker",
-        "iteration": iteration,
-        "message": "Generating risk manager...",
-        "tokens_consumed": build.tokens_consumed,
-        "iteration_count": build.iteration_count,
-        "max_iterations": max_iterations,
-    })
-    risk_manager_code = await orchestrator.generate_risk_manager_code(
-        strategy_name=strategy_name,
-        design=design,
-        training_results=training_results,
-        strategy_type=strategy_type or "",
-        config=config,
-    )
-    (output_path / "risk_manager.py").write_text(risk_manager_code)
+        # Generate risk_manager.py
+        await _publish_progress(
+            build_id,
+            {
+                "phase": "building_docker",
+                "iteration": iteration,
+                "message": "Generating risk manager...",
+                "tokens_consumed": build.tokens_consumed,
+                "iteration_count": build.iteration_count,
+                "max_iterations": max_iterations,
+            },
+        )
+        risk_manager_code = await orchestrator.generate_risk_manager_code(
+            strategy_name=strategy_name,
+            design=design,
+            training_results=training_results,
+            strategy_type=strategy_type or "",
+            config=config,
+        )
+        (output_path / "risk_manager.py").write_text(risk_manager_code)
 
-    # Generate backtest.py
-    await _publish_progress(build_id, {
-        "phase": "building_docker",
-        "iteration": iteration,
-        "message": "Generating backtest code...",
-        "tokens_consumed": build.tokens_consumed,
-        "iteration_count": build.iteration_count,
-        "max_iterations": max_iterations,
-    })
-    backtest_code = await orchestrator.generate_backtest_code(
-        strategy_name=strategy_name,
-        symbols=strategy_symbols,
-        design=design,
-        training_results=training_results,
-        strategy_type=strategy_type or "",
-        config=config,
-    )
-    (output_path / "backtest.py").write_text(backtest_code)
+        # Generate backtest.py
+        await _publish_progress(
+            build_id,
+            {
+                "phase": "building_docker",
+                "iteration": iteration,
+                "message": "Generating backtest code...",
+                "tokens_consumed": build.tokens_consumed,
+                "iteration_count": build.iteration_count,
+                "max_iterations": max_iterations,
+            },
+        )
+        backtest_code = await orchestrator.generate_backtest_code(
+            strategy_name=strategy_name,
+            symbols=strategy_symbols,
+            design=design,
+            training_results=training_results,
+            strategy_type=strategy_type or "",
+            config=config,
+        )
+        (output_path / "backtest.py").write_text(backtest_code)
 
-    # Step 4: Verification backtest loop (max 3 retries)
-    max_verification_retries = 3
-    verification_passed = False
+    # Pre-seed backtest_results.json from the worker's training results.
+    # The worker already ran a full backtest during training; these results are
+    # authoritative.  We normalise the worker's raw field names (total_return,
+    # win_rate, max_drawdown) to the *_pct schema expected by all downstream
+    # consumers (comparison logic, DB persistence, UI display).  The
+    # verification subprocess below may overwrite this file if it succeeds and
+    # produces better-structured output — but the pre-seed guarantees a valid
+    # file is always present even if the subprocess fails.
+    if worker_has_bundle and training_results:
+        worker_backtest = training_results.get("backtest_results")
+        if worker_backtest and isinstance(worker_backtest, dict):
+            # Map worker raw field names → _pct schema.  Fields that are
+            # already absent in the worker output get safe zero defaults so
+            # all required schema keys are always present.
+            total_trades = int(worker_backtest.get("total_trades", 0))
+            win_rate_raw = float(worker_backtest.get("win_rate", 0.0))
+            winning_trades = round(total_trades * win_rate_raw / 100) if total_trades else 0
+
+            seeded = {
+                "strategy_id": build.strategy_id,
+                "strategy_name": strategy_name,
+                # _pct schema fields
+                "total_return_pct": float(worker_backtest.get("total_return", 0.0)),
+                "max_drawdown_pct": float(worker_backtest.get("max_drawdown", 0.0)),
+                "win_rate_pct": win_rate_raw,
+                "sharpe_ratio": float(worker_backtest.get("sharpe_ratio", 0.0)),
+                "profit_factor": float(worker_backtest.get("profit_factor", 0.0)),
+                # Trade statistics
+                "total_trades": total_trades,
+                "winning_trades": winning_trades,
+                "losing_trades": total_trades - winning_trades,
+                "avg_trade_pnl": float(worker_backtest.get("avg_trade_pnl", 0.0)),
+                "best_trade_pnl": float(worker_backtest.get("best_trade_pnl", 0.0)),
+                "worst_trade_pnl": float(worker_backtest.get("worst_trade_pnl", 0.0)),
+                "avg_trade_duration_hours": float(
+                    worker_backtest.get("avg_trade_duration_hours", 0.0)
+                ),
+                # Arrays — worker may not provide these; default to empty lists
+                "trades": worker_backtest.get("trades", []),
+                "equity_curve": worker_backtest.get("equity_curve", []),
+                "daily_returns": worker_backtest.get("daily_returns", []),
+                "weekly_returns": worker_backtest.get("weekly_returns", []),
+                "monthly_returns": worker_backtest.get("monthly_returns", []),
+                "yearly_returns": worker_backtest.get("yearly_returns", []),
+            }
+
+            seed_path = output_path / "backtest_results.json"
+            seed_path.write_text(json.dumps(seeded, indent=2, default=str))
+            logger.info(
+                "Pre-seeded backtest_results.json from worker training results "
+                "(total_return_pct=%.2f, total_trades=%d, build_id=%s)",
+                seeded["total_return_pct"],
+                seeded["total_trades"],
+                build_id,
+            )
+
+    # Step 4: Verification backtest
+    # When the worker provided the full file bundle it has already validated its
+    # own generated code during training.  Skip the subprocess comparison — it
+    # only applies to LLM-generated code where we need an independent check.
+    if worker_has_bundle:
+        verification_passed = True
+        iteration_logs.append(
+            "Verification skipped — worker-provided bundle is pre-validated."
+        )
+        logger.info(
+            "Verification skipped for worker-provided bundle (build_id=%s)",
+            build_id,
+        )
+
+    # Verification backtest loop (max 3 retries) — only for LLM-generated code.
+    # worker_has_bundle builds already set verification_passed = True above.
+    if not worker_has_bundle:
+        max_verification_retries = 3
+        verification_passed = False
+    else:
+        max_verification_retries = 0  # loop body never executes
+
 
     for attempt in range(1, max_verification_retries + 1):
         await _publish_progress(build_id, {
@@ -314,7 +476,7 @@ async def _build_strategy_container(
             process.kill()
             await process.wait()
             iteration_logs.append(f"Verification backtest timed out (attempt {attempt})")
-            if attempt < max_verification_retries:
+            if attempt < max_verification_retries and allow_llm_regeneration:
                 # Regenerate strategy.py with timeout feedback
                 strategy_code = await orchestrator.generate_strategy_code(
                     strategy_name=strategy_name,
@@ -330,7 +492,7 @@ async def _build_strategy_container(
         if process.returncode != 0:
             error_output = stderr.decode() if stderr else "Unknown error"
             iteration_logs.append(f"Verification backtest failed (attempt {attempt}): {error_output[:500]}")
-            if attempt < max_verification_retries:
+            if attempt < max_verification_retries and allow_llm_regeneration:
                 strategy_code = await orchestrator.generate_strategy_code(
                     strategy_name=strategy_name,
                     symbols=strategy_symbols,
@@ -366,7 +528,7 @@ async def _build_strategy_container(
                 break
             else:
                 iteration_logs.append(f"Verification failed (attempt {attempt}): {comparison['details']}")
-                if attempt < max_verification_retries:
+                if attempt < max_verification_retries and allow_llm_regeneration:
                     # Regenerate strategy with feedback
                     strategy_code = await orchestrator.generate_strategy_code(
                         strategy_name=strategy_name,
@@ -379,7 +541,7 @@ async def _build_strategy_container(
                     (output_path / "strategy.py").write_text(strategy_code)
         else:
             iteration_logs.append(f"Verification: no backtest_results.json produced (attempt {attempt})")
-            if attempt < max_verification_retries:
+            if attempt < max_verification_retries and allow_llm_regeneration:
                 backtest_code = await orchestrator.generate_backtest_code(
                     strategy_name=strategy_name,
                     symbols=strategy_symbols,
@@ -456,6 +618,7 @@ async def _run_build_loop(
     max_iterations: int = 5,
     strategy_type: str | None = None,
     start_iteration: int = 0,
+    prior_iteration_history: list | None = None,
 ):
     """
     Background task that runs the full build iteration loop.
@@ -524,11 +687,15 @@ async def _run_build_loop(
                 if last_iteration and last_iteration.llm_design:
                     design = last_iteration.llm_design
                     logger.info(f"Resuming build {build_id} from iteration {start_iteration}, loaded previous design")
-                    # Load backtest results as training_results for continuity
+                    # Load backtest results as training_results for continuity.
+                    # IMPORTANT: include strategy_files so that on restart the build
+                    # uses the worker-generated files rather than re-generating them
+                    # via the LLM (which can corrupt percentage values, etc.).
                     if last_iteration.backtest_results:
                         training_results = {
                             "backtest_results": last_iteration.backtest_results,
                             "best_model": last_iteration.best_model.get("name") if last_iteration.best_model else "Unknown",
+                            "strategy_files": last_iteration.strategy_files or {},
                         }
 
             # Iteration loop: design → train → refine → repeat
@@ -682,6 +849,7 @@ async def _run_build_loop(
                         target_return=target_return,
                         strategy_type=strategy_type,
                         iteration=iteration,
+                        prior_iteration_history=prior_iteration_history,
                     )
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
@@ -882,6 +1050,19 @@ async def _run_build_loop(
                 try:
                     training_results = await orchestrator.listen_for_results(job_id, stop_check_callback=check_stop_signal)
                     iteration_logs.append(f"Iteration {iteration}: Training completed")
+
+                    # Diagnostic: log whether strategy_files are present in worker response
+                    sf = training_results.get("strategy_files") if isinstance(training_results, dict) else None
+                    if sf and isinstance(sf, dict):
+                        logger.info(
+                            f"Worker returned {len(sf)} strategy_files: {list(sf.keys())} "
+                            f"(build_id={build_id}, iteration={iteration})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Worker returned NO strategy_files in training_results "
+                            f"(build_id={build_id}, iteration={iteration})"
+                        )
                 except asyncio.CancelledError:
                     # Build stopped during training
                     build.status = "stopped"
@@ -908,6 +1089,10 @@ async def _run_build_loop(
                 iteration_record.model_evaluations = training_results.get("model_evaluations")
                 iteration_record.best_model = training_results.get("best_model")
                 iteration_record.backtest_results = training_results.get("backtest_results")
+
+                # Persist worker-generated strategy files (filename -> source string) for later reuse.
+                # This prevents unit drift (e.g. 0.05 -> 5.0) when rebuilding outputs from DB.
+                iteration_record.strategy_files = training_results.get("strategy_files")
 
                 # Extract rules from the result
                 extracted = training_results.get("extracted_rules", {})
@@ -1232,6 +1417,7 @@ async def _run_build_loop(
                         "features": best_iter.features or {},
                         "model_evaluations": best_iter.model_evaluations or {},
                         "model_metrics": (best_iter.best_model or {}).get("metrics", {}),
+                        "strategy_files": best_iter.strategy_files or {},
                     }
 
                     # --- NEW: Template-based strategy container build ---
@@ -1332,21 +1518,64 @@ async def _run_build_loop(
                 "timeframe": timeframe,
             })
 
+            # Update the parent strategy when the build completes successfully.
+            # Sets status to "complete" and surfaces the backtest results so the
+            # strategy tile can display annual return, max drawdown, and win rate.
+            if build.status == "complete":
+                strat_update_result = await bg_db.execute(
+                    select(Strategy).where(Strategy.uuid == strategy_id)
+                )
+                strategy_record = strat_update_result.scalar_one_or_none()
+                if strategy_record:
+                    strategy_record.status = "complete"
+                    strategy_record.backtest_results = (training_results or {}).get("backtest_results") or {}
+                    strategy_record.updated_at = datetime.utcnow()
+                    logger.info(
+                        "Strategy %s status updated to 'complete' with backtest_results (build %s)",
+                        strategy_id, build_id,
+                    )
+
             await bg_db.commit()
+
+        except asyncio.CancelledError:
+            # Task was cancelled (e.g., server shutdown) — update build status and re-raise
+            logger.info("Build %s task was cancelled", build_id)
+            try:
+                build.status = "stopped"
+                build.phase = "stopped"
+                build.completed_at = datetime.utcnow()
+                await bg_db.commit()
+            except Exception as commit_error:
+                logger.error("Failed to update build status on cancellation: %s", commit_error)
+            raise  # Re-raise so the task is properly marked as cancelled
 
         except Exception as e:
             # Mark build as failed — do NOT crash the background task
-            build.status = "failed"
-            build.completed_at = datetime.utcnow()
-            build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs, "timeframe": timeframe})
-            # Mark current iteration as failed if one was in progress
-            if 'iteration_record' in locals() and iteration_record:
-                iteration_record.status = "failed"
-                if 'iter_start_time' in locals():
-                    iteration_record.duration_seconds = time.time() - iter_start_time
-            await bg_db.commit()
+            # Log with full traceback so failures are visible in server logs
+            current_iteration = locals().get('iteration', 'unknown')
+            logger.error(
+                "Build %s failed at iteration %s with unhandled exception: %s",
+                build_id, current_iteration, e,
+                exc_info=True,
+            )
+            try:
+                build.status = "failed"
+                build.completed_at = datetime.utcnow()
+                build.logs = json.dumps({"error": str(e), "logs": orchestrator.logs, "timeframe": timeframe})
+                # Mark current iteration as failed if one was in progress
+                if 'iteration_record' in locals() and iteration_record:
+                    iteration_record.status = "failed"
+                    if 'iter_start_time' in locals():
+                        iteration_record.duration_seconds = time.time() - iter_start_time
+                await bg_db.commit()
+            except Exception as commit_error:
+                logger.error("Failed to commit error state for build %s: %s", build_id, commit_error)
         finally:
-            await orchestrator.cleanup()
+            # Always clean up the orchestrator (Redis connections, etc.)
+            try:
+                await orchestrator.cleanup()
+            except Exception as cleanup_error:
+                logger.error("Error during orchestrator cleanup for build %s: %s", build_id, cleanup_error)
 
 
 @router.post("/api/builds/trigger", response_model=BuildResponse)
@@ -1429,8 +1658,10 @@ async def trigger_build(
     strategy_description = description or strategy.description or ""
     strat_type = strategy.strategy_type  # e.g. "Momentum", "Mean Reversion", etc.
 
-    # Launch the build loop as a background task
-    asyncio.create_task(
+    # Launch the build loop as a background task.
+    # Store a strong reference in _background_tasks to prevent garbage collection.
+    # The done callback removes the reference when the task completes.
+    task = asyncio.create_task(
         _run_build_loop(
             build_id=build_id,
             strategy_id=strategy_id,
@@ -1442,8 +1673,11 @@ async def trigger_build(
             timeframe=timeframe,
             max_iterations=max_iterations,
             strategy_type=strat_type,
-        )
+        ),
+        name=f"build-{build_id}",
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     # Return immediately so the frontend can redirect to the build tracking page
     return BuildResponse(
@@ -1811,8 +2045,10 @@ async def restart_build(
     except Exception as e:
         logger.error(f"Failed to clear stop signal for build {build_id}: {e}", exc_info=True)
 
-    # Launch the build loop as a background task, resuming from last completed iteration
-    asyncio.create_task(
+    # Launch the build loop as a background task, resuming from last completed iteration.
+    # Store a strong reference in _background_tasks to prevent garbage collection.
+    # The done callback removes the reference when the task completes.
+    task = asyncio.create_task(
         _run_build_loop(
             build_id=build_id,
             strategy_id=build.strategy_id,
@@ -1825,8 +2061,11 @@ async def restart_build(
             max_iterations=build.max_iterations,
             strategy_type=strat_type,
             start_iteration=start_iteration,  # Resume from here
-        )
+        ),
+        name=f"build-{build_id}",
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return BuildResponse(
         uuid=build.uuid,
@@ -1921,8 +2160,12 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
                 except (json.JSONDecodeError, TypeError):
                     progress_data = {"raw": str(message["data"])}
 
+                # Lift the human-readable message field to the top level so the
+                # frontend's `if (newLog.message)` check picks it up and renders
+                # it in the Design Thinking section.
                 await websocket.send_json({
                     "type": "progress",
+                    "message": progress_data.get("message"),
                     "data": progress_data,
                 })
 

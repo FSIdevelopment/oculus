@@ -16,36 +16,50 @@ logger = logging.getLogger(__name__)
 class ProgressReporter:
     """Publishes training progress updates to Redis pub/sub."""
 
-    def __init__(self, job_id: str, redis_client: redis.Redis):
+    def __init__(self, job_id: str, redis_client: redis.Redis,
+                 channel_id: Optional[str] = None):
         """Initialize progress reporter.
 
         Args:
-            job_id: Unique job identifier
-            redis_client: Redis client instance
+            job_id: Unique job identifier (used in message payloads).
+            redis_client: Redis client instance.
+            channel_id: Optional channel override. When provided the reporter
+                publishes to ``{prefix}:{channel_id}`` instead of
+                ``{prefix}:{job_id}``.  Pass ``"build:{build_uuid}"`` so the
+                worker's messages land on the same channel that the backend
+                WebSocket subscribes to (the full job_id contains an extra
+                ``:iter:{uuid}`` suffix that would otherwise cause a mismatch).
         """
         self.job_id = job_id
         self.redis = redis_client
-        self.channel = f"{config.progress_channel_prefix}:{job_id}"
+        effective_id = channel_id if channel_id is not None else job_id
+        self.channel = f"{config.progress_channel_prefix}:{effective_id}"
 
     def report_phase(self, phase: str, status: str = "in_progress",
-                     details: Optional[Dict[str, Any]] = None):
+                     details: Optional[Dict[str, Any]] = None,
+                     message: Optional[str] = None):
         """Report a training phase update.
 
         Args:
             phase: Phase name (e.g., "data_fetch", "feature_engineering", "training")
             status: Phase status ("in_progress", "complete", "error")
-            details: Optional additional details
+            details: Optional additional details dict.
+            message: Optional human-readable description shown in the UI Design
+                Thinking section.  Only ``in_progress`` events typically need
+                this; ``complete`` events can omit it.
         """
-        message = {
+        payload: Dict[str, Any] = {
             "job_id": self.job_id,
             "timestamp": datetime.utcnow().isoformat(),
             "phase": phase,
             "status": status,
-            "details": details or {}
+            "details": details or {},
         }
+        if message is not None:
+            payload["message"] = message
 
         try:
-            self.redis.publish(self.channel, json.dumps(message))
+            self.redis.publish(self.channel, json.dumps(payload))
             logger.info(f"[{self.job_id}] {phase}: {status}")
         except Exception as e:
             logger.error(f"Failed to publish progress: {e}")
