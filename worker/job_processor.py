@@ -108,7 +108,7 @@ class JobProcessor:
             # Enforce minimum data periods based on timeframe
             # Daily/weekly: at least 1 year; intraday (<1d): at least 6 months
             if timeframe in ['1d', '1day', 'daily', '1w', 'weekly']:
-                years = max(7.0, 7.0)
+                years = max(years, 2.0)
             else:
                 # Intraday (1m, 5m, 15m, 30m, 1h, 4h)
                 years = max(years, 0.5)
