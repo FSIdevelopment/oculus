@@ -543,7 +543,7 @@ export default function StrategyDetailPage() {
                         { label: 'Symbols', value: Array.isArray(versionConfig.trading.symbols) ? versionConfig.trading.symbols.join(', ') : versionConfig.trading.symbols },
                         { label: 'Timeframe', value: versionConfig.trading.timeframe },
                         { label: 'Max Positions', value: versionConfig.trading.max_positions },
-                        { label: 'Position Size', value: versionConfig.trading.position_size_pct != null ? `${versionConfig.trading.position_size_pct}%` : undefined },
+                        { label: 'Position Size', value: versionConfig.trading.position_size_pct != null ? `${(versionConfig.trading.position_size_pct * 100).toFixed(2)}%` : undefined },
                       ] as { label: string; value: any }[]).filter(item => item.value != null).map(item => (
                         <div key={item.label} className="bg-background rounded-lg p-3 border border-border/50">
                           <p className="text-xs text-text-secondary mb-1">{item.label}</p>
@@ -582,13 +582,44 @@ export default function StrategyDetailPage() {
                     <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Risk Management</h3>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {([
-                        { label: 'Stop Loss', value: versionConfig.risk_management.stop_loss_pct != null ? `${versionConfig.risk_management.stop_loss_pct}%` : undefined },
-                        { label: 'Trailing Stop', value: versionConfig.risk_management.trailing_stop_pct != null ? `${versionConfig.risk_management.trailing_stop_pct}%` : undefined },
-                        { label: 'Max Position Loss', value: versionConfig.risk_management.max_position_loss_pct != null ? `${versionConfig.risk_management.max_position_loss_pct}%` : undefined },
-                        { label: 'Max Daily Loss', value: versionConfig.risk_management.max_daily_loss_pct != null ? `${versionConfig.risk_management.max_daily_loss_pct}%` : undefined },
-                      ] as { label: string; value: any }[]).filter(item => item.value != null).map(item => (
+                        {
+                          label: 'Stop Loss',
+                          value: versionConfig.risk_management.stop_loss_pct != null
+                            ? `${versionConfig.risk_management.stop_loss_pct}%`
+                            : undefined
+                        },
+                        {
+                          label: 'Trailing Stop',
+                          value: versionConfig.risk_management.trailing_stop_pct != null
+                            ? `${versionConfig.risk_management.trailing_stop_pct}%`
+                            : undefined
+                        },
+                        {
+                          label: 'Max Position Loss',
+                          value: versionConfig.risk_management.max_position_loss_pct != null
+                            ? `${versionConfig.risk_management.max_position_loss_pct}%`
+                            : undefined
+                        },
+                        {
+                          label: 'Max Daily Loss',
+                          value: versionConfig.risk_management.max_daily_loss_pct != null
+                            ? `${versionConfig.risk_management.max_daily_loss_pct}%`
+                            : (versionConfig.risk_management.max_daily_loss != null
+                              ? `${(versionConfig.risk_management.max_daily_loss * 100).toFixed(1)}%`
+                              : undefined)
+                        },
+                        {
+                          label: 'Max Drawdown',
+                          value: versionConfig.risk_management.max_drawdown_pct != null
+                            ? `${versionConfig.risk_management.max_drawdown_pct}%`
+                            : (versionConfig.risk_management.max_drawdown != null
+                              ? `${(versionConfig.risk_management.max_drawdown * 100).toFixed(1)}%`
+                              : undefined),
+                          tooltip: 'Circuit breaker - trading pauses if portfolio drawdown exceeds this limit'
+                        },
+                      ] as { label: string; value: any; tooltip?: string }[]).filter(item => item.value != null).map(item => (
                         <div key={item.label} className="bg-background rounded-lg p-3 border border-border/50">
-                          <p className="text-xs text-text-secondary mb-1">{item.label}</p>
+                          <p className="text-xs text-text-secondary mb-1" title={item.tooltip}>{item.label}</p>
                           <p className="text-sm font-semibold text-red-400">{String(item.value)}</p>
                         </div>
                       ))}

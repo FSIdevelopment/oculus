@@ -21,7 +21,7 @@ class Strategy(Base):
     
     # Strategy details
     strategy_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    symbols: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    symbols: Mapped[list | None] = mapped_column(JSON, nullable=True)
     target_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     backtest_results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Strategy config.json

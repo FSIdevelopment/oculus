@@ -1691,6 +1691,9 @@ async def trigger_build(
     raw_symbols = strategy.symbols
     if isinstance(raw_symbols, dict):
         strategy_symbols = raw_symbols.get("symbols", [])
+    elif isinstance(raw_symbols, str):
+        # Handle case where symbols might be stored as space-separated string
+        strategy_symbols = raw_symbols.split()
     elif isinstance(raw_symbols, list):
         strategy_symbols = raw_symbols
     else:
@@ -2059,6 +2062,9 @@ async def restart_build(
     raw_symbols = strategy.symbols
     if isinstance(raw_symbols, dict):
         strategy_symbols = raw_symbols.get("symbols", [])
+    elif isinstance(raw_symbols, str):
+        # Handle case where symbols might be stored as space-separated string
+        strategy_symbols = raw_symbols.split()
     elif isinstance(raw_symbols, list):
         strategy_symbols = raw_symbols
     else:

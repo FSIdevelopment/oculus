@@ -96,6 +96,14 @@ class JobProcessor:
         try:
             # Extract job parameters from backend format
             symbols = job_data.get('symbols', [])
+
+            # Ensure symbols is always a list (defensive against DB serialization issues)
+            if isinstance(symbols, str):
+                # If symbols is a space-separated string, split it
+                symbols = symbols.split()
+            elif not isinstance(symbols, list):
+                symbols = []
+
             timeframe = job_data.get('timeframe', '1d')
             design = job_data.get('design', {})
             user_id = job_data.get('user_id', 'unknown')

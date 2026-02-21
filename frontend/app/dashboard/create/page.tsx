@@ -73,9 +73,19 @@ export default function CreateStrategyPage() {
   })
 
   const handleAddSymbol = () => {
-    const symbol = symbolInput.toUpperCase().trim()
-    if (symbol && !symbols.includes(symbol)) {
-      setSymbols([...symbols, symbol])
+    const input = symbolInput.toUpperCase().trim()
+    if (!input) return
+
+    // Parse input: handle comma-separated, space-separated, or single symbols
+    // Split by comma or space, filter out empty strings, and remove duplicates
+    const newSymbols = input
+      .split(/[,\s]+/) // Split by comma or whitespace (one or more)
+      .map(s => s.trim())
+      .filter(s => s.length > 0) // Remove empty strings
+      .filter(s => !symbols.includes(s)) // Remove duplicates
+
+    if (newSymbols.length > 0) {
+      setSymbols([...symbols, ...newSymbols])
       setSymbolInput('')
     }
   }
@@ -253,8 +263,13 @@ export default function CreateStrategyPage() {
                 type="text"
                 value={symbolInput}
                 onChange={(e) => setSymbolInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSymbol())}
-                placeholder="e.g., AAPL"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    handleAddSymbol()
+                  }
+                }}
+                placeholder="e.g., AAPL or AAPL, MSFT, GOOGL or AAPL MSFT GOOGL"
                 className="flex-1 bg-background border border-border rounded px-3 py-2 text-text placeholder-text-secondary focus:outline-none focus:border-primary"
               />
               <button
@@ -265,6 +280,9 @@ export default function CreateStrategyPage() {
                 Add
               </button>
             </div>
+            <p className="text-xs text-text-secondary mb-3">
+              Enter one or more symbols separated by commas or spaces, then click Add or press Enter
+            </p>
             {symbols.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {symbols.map((sym) => (
