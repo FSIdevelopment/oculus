@@ -1,6 +1,8 @@
 """Scheduler service for cron jobs using APScheduler."""
 import logging
 import asyncio
+import os
+import multiprocessing
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -24,6 +26,9 @@ scheduler = AsyncIOScheduler()
 
 # Redis client for distributed locking and notification tracking
 redis_client = None
+
+# Track the parent process ID to determine if we're in the master process
+_parent_pid = os.getpid()
 
 
 async def get_redis_client():
@@ -417,18 +422,19 @@ async def send_license_expiry_warnings():
 
 def start_scheduler():
     """Start the APScheduler with all cron jobs."""
-    import os
+    # Only start scheduler on the parent process (not on uvicorn worker processes)
+    # When uvicorn spawns workers, they get different PIDs than the parent
+    current_pid = os.getpid()
+    current_process_name = multiprocessing.current_process().name
 
-    # Only start scheduler on the master worker process
-    # Uvicorn sets UVICORN_WORKER_ID for worker processes (not set for master)
-    worker_id = os.environ.get("UVICORN_WORKER_ID")
-
-    # Skip scheduler on worker processes (only run on master)
-    if worker_id is not None:
-        logger.info(f"Skipping scheduler on worker {worker_id} - scheduler only runs on master process")
+    # Skip scheduler on worker processes (only run on parent/master)
+    # Worker processes have names like "SpawnProcess-1", "SpawnProcess-2", etc.
+    # Master process has name "MainProcess"
+    if current_process_name != "MainProcess":
+        logger.info(f"Skipping scheduler on worker process {current_process_name} (PID: {current_pid}) - scheduler only runs on master process")
         return
 
-    logger.info("Starting scheduler on master process...")
+    logger.info(f"Starting scheduler on master process {current_process_name} (PID: {current_pid})...")
 
     # Job 1: Update stuck builds every 10 minutes (staggered: starts at :00)
     scheduler.add_job(
@@ -499,16 +505,15 @@ def start_scheduler():
 
 def stop_scheduler():
     """Stop the APScheduler."""
-    import os
+    # Only stop scheduler on the parent process
+    current_pid = os.getpid()
+    current_process_name = multiprocessing.current_process().name
 
-    # Only stop scheduler on the master worker process
-    worker_id = os.environ.get("UVICORN_WORKER_ID")
-
-    if worker_id is not None:
-        logger.info(f"Skipping scheduler shutdown on worker {worker_id}")
+    if current_process_name != "MainProcess":
+        logger.info(f"Skipping scheduler shutdown on worker process {current_process_name} (PID: {current_pid})")
         return
 
-    logger.info("Stopping scheduler on master process...")
+    logger.info(f"Stopping scheduler on master process {current_process_name} (PID: {current_pid})...")
     if scheduler.running:
         scheduler.shutdown()
         logger.info("Scheduler stopped")

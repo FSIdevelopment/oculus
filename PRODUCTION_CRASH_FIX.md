@@ -35,20 +35,27 @@ Modified `backend/app/services/scheduler.py` to only run the scheduler on the **
 ```python
 def start_scheduler():
     """Start the APScheduler with all cron jobs."""
-    import os
-    
-    # Only start scheduler on the master worker process
-    # Uvicorn sets UVICORN_WORKER_ID for worker processes (not set for master)
-    worker_id = os.environ.get("UVICORN_WORKER_ID")
-    
-    # Skip scheduler on worker processes (only run on master)
-    if worker_id is not None:
-        logger.info(f"Skipping scheduler on worker {worker_id} - scheduler only runs on master process")
+    # Only start scheduler on the parent process (not on uvicorn worker processes)
+    # When uvicorn spawns workers, they get different PIDs than the parent
+    current_pid = os.getpid()
+    current_process_name = multiprocessing.current_process().name
+
+    # Skip scheduler on worker processes (only run on parent/master)
+    # Worker processes have names like "SpawnProcess-1", "SpawnProcess-2", etc.
+    # Master process has name "MainProcess"
+    if current_process_name != "MainProcess":
+        logger.info(f"Skipping scheduler on worker process {current_process_name} (PID: {current_pid})")
         return
-    
-    logger.info("Starting scheduler on master process...")
+
+    logger.info(f"Starting scheduler on master process {current_process_name} (PID: {current_pid})...")
     # ... rest of scheduler setup
 ```
+
+**How it works:**
+- Uses `multiprocessing.current_process().name` to detect process type
+- Master process has name `"MainProcess"`
+- Worker processes have names like `"SpawnProcess-1"`, `"SpawnProcess-2"`, etc.
+- Only the master process starts the scheduler
 
 ### 2. Staggered Cron Job Execution
 
@@ -71,15 +78,14 @@ Updated `stop_scheduler()` to only shutdown on the master process:
 ```python
 def stop_scheduler():
     """Stop the APScheduler."""
-    import os
-    
-    worker_id = os.environ.get("UVICORN_WORKER_ID")
-    
-    if worker_id is not None:
-        logger.info(f"Skipping scheduler shutdown on worker {worker_id}")
+    current_pid = os.getpid()
+    current_process_name = multiprocessing.current_process().name
+
+    if current_process_name != "MainProcess":
+        logger.info(f"Skipping scheduler shutdown on worker process {current_process_name} (PID: {current_pid})")
         return
-    
-    logger.info("Stopping scheduler on master process...")
+
+    logger.info(f"Stopping scheduler on master process {current_process_name} (PID: {current_pid})...")
     if scheduler.running:
         scheduler.shutdown()
         logger.info("Scheduler stopped")
