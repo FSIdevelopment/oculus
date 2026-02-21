@@ -663,6 +663,8 @@ async def get_strategy_internal(
     # TODO: Validate API key against a secure internal API key
     # For now, this is a placeholder - you should implement proper API key validation
     from app.config import settings
+    from app.models.build_iteration import BuildIteration
+    import json
 
     # You'll need to add SIGNALSYNK_API_KEY to your config
     # if api_key != settings.SIGNALSYNK_API_KEY:
@@ -691,5 +693,69 @@ async def get_strategy_internal(
             detail="Strategy Docker image not yet built"
         )
 
-    return strategy
+    # Get the latest successful build iteration to extract config.json and full backtest results
+    config_data = None
+    full_backtest_results = None
+
+    build_result = await db.execute(
+        select(StrategyBuild)
+        .where(
+            StrategyBuild.strategy_id == strategy_id,
+            StrategyBuild.status == "complete"
+        )
+        .order_by(StrategyBuild.completed_at.desc())
+        .limit(1)
+    )
+    latest_build = build_result.scalar_one_or_none()
+
+    if latest_build:
+        # Get the latest successful iteration from this build
+        iteration_result = await db.execute(
+            select(BuildIteration)
+            .where(
+                BuildIteration.build_id == latest_build.uuid,
+                BuildIteration.status == "complete"
+            )
+            .order_by(BuildIteration.iteration_number.desc())
+            .limit(1)
+        )
+        latest_iteration = iteration_result.scalar_one_or_none()
+
+        if latest_iteration:
+            # Extract config.json from strategy_files
+            if latest_iteration.strategy_files:
+                config_json_str = latest_iteration.strategy_files.get("config.json")
+                if config_json_str:
+                    try:
+                        config_data = json.loads(config_json_str)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse config.json for strategy {strategy_id}")
+
+            # Get FULL backtest results from BuildIteration (includes trades, equity_curve, etc.)
+            if latest_iteration.backtest_results:
+                full_backtest_results = latest_iteration.backtest_results
+            else:
+                # Fallback to strategy.backtest_results if iteration doesn't have it
+                full_backtest_results = strategy.backtest_results
+
+    # Create response with config and full backtest results
+    return StrategyInternalResponse(
+        uuid=strategy.uuid,
+        name=strategy.name,
+        description=strategy.description,
+        status=strategy.status,
+        strategy_type=strategy.strategy_type,
+        symbols=strategy.symbols,
+        target_return=strategy.target_return,
+        backtest_results=full_backtest_results,  # Full backtest results from BuildIteration
+        config=config_data,
+        docker_registry=strategy.docker_registry,
+        docker_image_url=strategy.docker_image_url,
+        version=strategy.version,
+        subscriber_count=strategy.subscriber_count,
+        rating=strategy.rating,
+        user_id=strategy.user_id,
+        created_at=strategy.created_at,
+        updated_at=strategy.updated_at
+    )
 

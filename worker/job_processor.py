@@ -86,9 +86,11 @@ class JobProcessor:
         # (the full job_id contains an extra ":iter:{uuid}" suffix that would
         # cause a channel mismatch and silence all progress updates in the UI).
         build_id = job_data.get('build_id', 'unknown')
+        iteration_number = job_data.get('iteration_number')
         reporter = ProgressReporter(
             job_id, self.redis,
             channel_id=f"build:{build_id}",
+            iteration=iteration_number,
         )
 
         try:

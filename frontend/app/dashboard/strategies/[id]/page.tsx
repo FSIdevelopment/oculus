@@ -189,6 +189,10 @@ export default function StrategyDetailPage() {
   // Trade table sort state
   const [tradeSort, setTradeSort] = useState<{ col: keyof Trade; asc: boolean }>({ col: 'entry_date', asc: false })
 
+  // Trade pagination state
+  const [tradePage, setTradePage] = useState(0)
+  const tradesPerPage = 20
+
   const loadStrategy = useCallback(async () => {
     try {
       const data = await strategyAPI.getStrategy(strategyId)
@@ -238,6 +242,7 @@ export default function StrategyDetailPage() {
   useEffect(() => {
     if (!selectedBuildId) return
     setVersionLoading(true)
+    setTradePage(0) // Reset trade pagination when version changes
     Promise.all([
       strategyAPI.getBuildBestBacktest(strategyId, selectedBuildId).catch(() => null),
       strategyAPI.getBuildConfig(strategyId, selectedBuildId).catch(() => null),
@@ -517,6 +522,85 @@ export default function StrategyDetailPage() {
             </div>
           </div>
 
+          {/* Strategy Configuration (config.json) */}
+          <div className="bg-surface border border-border rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-text mb-4">Strategy Configuration</h2>
+            {versionLoading ? (
+              <p className="text-text-secondary animate-pulse text-sm">Loading config…</p>
+            ) : versionConfig ? (
+              <div className="space-y-6">
+                {/* Description */}
+                {versionConfig.description && (
+                  <p className="text-sm text-text-secondary leading-relaxed">{versionConfig.description}</p>
+                )}
+
+                {/* Trading Parameters */}
+                {versionConfig.trading && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Trading Parameters</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {([
+                        { label: 'Symbols', value: Array.isArray(versionConfig.trading.symbols) ? versionConfig.trading.symbols.join(', ') : versionConfig.trading.symbols },
+                        { label: 'Timeframe', value: versionConfig.trading.timeframe },
+                        { label: 'Max Positions', value: versionConfig.trading.max_positions },
+                        { label: 'Position Size', value: versionConfig.trading.position_size_pct != null ? `${versionConfig.trading.position_size_pct}%` : undefined },
+                      ] as { label: string; value: any }[]).filter(item => item.value != null).map(item => (
+                        <div key={item.label} className="bg-background rounded-lg p-3 border border-border/50">
+                          <p className="text-xs text-text-secondary mb-1">{item.label}</p>
+                          <p className="text-sm font-semibold text-text">{String(item.value)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Indicators */}
+                {versionConfig.indicators && Object.keys(versionConfig.indicators).length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Indicators</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {Object.entries(versionConfig.indicators as Record<string, Record<string, any>>).map(([name, params]) => (
+                        <div key={name} className="bg-background rounded-lg p-3 border border-border/50">
+                          <p className="text-xs font-semibold text-text mb-2 uppercase tracking-wide">{name}</p>
+                          <div className="space-y-1">
+                            {Object.entries(params).map(([k, v]) => (
+                              <div key={k} className="flex justify-between text-xs">
+                                <span className="text-text-secondary">{k.replace(/_/g, ' ')}</span>
+                                <span className="text-text font-medium">{String(v)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Risk Management */}
+                {versionConfig.risk_management && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Risk Management</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {([
+                        { label: 'Stop Loss', value: versionConfig.risk_management.stop_loss_pct != null ? `${versionConfig.risk_management.stop_loss_pct}%` : undefined },
+                        { label: 'Trailing Stop', value: versionConfig.risk_management.trailing_stop_pct != null ? `${versionConfig.risk_management.trailing_stop_pct}%` : undefined },
+                        { label: 'Max Position Loss', value: versionConfig.risk_management.max_position_loss_pct != null ? `${versionConfig.risk_management.max_position_loss_pct}%` : undefined },
+                        { label: 'Max Daily Loss', value: versionConfig.risk_management.max_daily_loss_pct != null ? `${versionConfig.risk_management.max_daily_loss_pct}%` : undefined },
+                      ] as { label: string; value: any }[]).filter(item => item.value != null).map(item => (
+                        <div key={item.label} className="bg-background rounded-lg p-3 border border-border/50">
+                          <p className="text-xs text-text-secondary mb-1">{item.label}</p>
+                          <p className="text-sm font-semibold text-red-400">{String(item.value)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-text-secondary text-sm">No configuration file found for this build.</p>
+            )}
+          </div>
+
           {/* Equity Curve */}
           {displayBacktest.equity_curve && displayBacktest.equity_curve.length > 1 && (
             <div className="bg-surface border border-border rounded-lg p-6">
@@ -533,51 +617,97 @@ export default function StrategyDetailPage() {
           )}
 
           {/* Trade Log */}
-          {displayBacktest.trades && displayBacktest.trades.length > 0 && (
-            <div className="bg-surface border border-border rounded-lg p-6">
-              <h2 className="text-lg font-semibold text-text mb-4">Trade Log ({displayBacktest.trades.length} trades)</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      {(['entry_date', 'exit_date', 'symbol', 'action', 'entry_price', 'exit_price', 'pnl', 'pnl_pct', 'duration_hours', 'exit_reason'] as (keyof Trade)[]).map(col => (
-                        <th
-                          key={col}
-                          className="text-left py-2 px-3 text-text-secondary font-medium cursor-pointer select-none hover:text-text transition-colors whitespace-nowrap"
-                          onClick={() => setTradeSort(s => s.col === col ? { col, asc: !s.asc } : { col, asc: true })}
-                        >
-                          {col.replace(/_/g, ' ')}{tradeSort.col === col ? (tradeSort.asc ? ' ↑' : ' ↓') : ''}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...displayBacktest.trades].sort((a, b) => {
-                      const va = a[tradeSort.col], vb = b[tradeSort.col]
-                      if (va == null && vb == null) return 0
-                      if (va == null) return 1
-                      if (vb == null) return -1
-                      if (typeof va === 'number' && typeof vb === 'number') return tradeSort.asc ? va - vb : vb - va
-                      return tradeSort.asc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
-                    }).map((trade, idx) => (
-                      <tr key={idx} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
-                        <td className="py-2 px-3 text-text-secondary whitespace-nowrap">{trade.entry_date?.slice(0, 10) ?? '—'}</td>
-                        <td className="py-2 px-3 text-text-secondary whitespace-nowrap">{trade.exit_date?.slice(0, 10) ?? '—'}</td>
-                        <td className="py-2 px-3 text-text font-medium">{trade.symbol}</td>
-                        <td className={`py-2 px-3 font-medium ${trade.action === 'buy' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
-                        <td className="py-2 px-3 text-text">${trade.entry_price?.toFixed(2) ?? '—'}</td>
-                        <td className="py-2 px-3 text-text">{trade.exit_price != null ? `$${trade.exit_price.toFixed(2)}` : '—'}</td>
-                        <td className={`py-2 px-3 font-medium ${(trade.pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>${trade.pnl?.toFixed(2) ?? '—'}</td>
-                        <td className={`py-2 px-3 ${(trade.pnl_pct ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{trade.pnl_pct?.toFixed(2) ?? '—'}%</td>
-                        <td className="py-2 px-3 text-text-secondary">{trade.duration_hours?.toFixed(1) ?? '—'}h</td>
-                        <td className="py-2 px-3 text-text-secondary">{trade.exit_reason ?? '—'}</td>
+          {displayBacktest.trades && displayBacktest.trades.length > 0 && (() => {
+            // Sort trades
+            const sortedTrades = [...displayBacktest.trades].sort((a, b) => {
+              const va = a[tradeSort.col], vb = b[tradeSort.col]
+              if (va == null && vb == null) return 0
+              if (va == null) return 1
+              if (vb == null) return -1
+              if (typeof va === 'number' && typeof vb === 'number') return tradeSort.asc ? va - vb : vb - va
+              return tradeSort.asc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va))
+            })
+
+            // Paginate trades
+            const totalTrades = sortedTrades.length
+            const totalPages = Math.ceil(totalTrades / tradesPerPage)
+            const startIdx = tradePage * tradesPerPage
+            const endIdx = Math.min(startIdx + tradesPerPage, totalTrades)
+            const paginatedTrades = sortedTrades.slice(startIdx, endIdx)
+
+            return (
+              <div className="bg-surface border border-border rounded-lg p-6">
+                <h2 className="text-lg font-semibold text-text mb-4">Trade Log ({totalTrades} trades)</h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border">
+                        {(['entry_date', 'exit_date', 'symbol', 'action', 'entry_price', 'exit_price', 'pnl', 'pnl_pct', 'duration_hours', 'exit_reason'] as (keyof Trade)[]).map(col => (
+                          <th
+                            key={col}
+                            className="text-left py-2 px-3 text-text-secondary font-medium cursor-pointer select-none hover:text-text transition-colors whitespace-nowrap"
+                            onClick={() => {
+                              setTradeSort(s => s.col === col ? { col, asc: !s.asc } : { col, asc: true })
+                              setTradePage(0) // Reset to first page when sorting changes
+                            }}
+                          >
+                            {col.replace(/_/g, ' ')}{tradeSort.col === col ? (tradeSort.asc ? ' ↑' : ' ↓') : ''}
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {paginatedTrades.map((trade, idx) => (
+                        <tr key={idx} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                          <td className="py-2 px-3 text-text-secondary whitespace-nowrap">{trade.entry_date?.slice(0, 10) ?? '—'}</td>
+                          <td className="py-2 px-3 text-text-secondary whitespace-nowrap">{trade.exit_date?.slice(0, 10) ?? '—'}</td>
+                          <td className="py-2 px-3 text-text font-medium">{trade.symbol}</td>
+                          <td className={`py-2 px-3 font-medium ${trade.action === 'buy' ? 'text-green-400' : 'text-red-400'}`}>{trade.action}</td>
+                          <td className="py-2 px-3 text-text">${trade.entry_price?.toFixed(2) ?? '—'}</td>
+                          <td className="py-2 px-3 text-text">{trade.exit_price != null ? `$${trade.exit_price.toFixed(2)}` : '—'}</td>
+                          <td className={`py-2 px-3 font-medium ${(trade.pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>${trade.pnl?.toFixed(2) ?? '—'}</td>
+                          <td className={`py-2 px-3 ${(trade.pnl_pct ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{trade.pnl_pct?.toFixed(2) ?? '—'}%</td>
+                          <td className="py-2 px-3 text-text-secondary">{trade.duration_hours?.toFixed(1) ?? '—'}h</td>
+                          <td className="py-2 px-3 text-text-secondary">{trade.exit_reason ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination Controls */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                    <button
+                      onClick={() => setTradePage(Math.max(0, tradePage - 1))}
+                      disabled={tradePage === 0}
+                      className={`px-4 py-2 rounded-lg font-medium transition-colors ${tradePage === 0
+                        ? 'bg-surface-hover text-text-secondary cursor-not-allowed'
+                        : 'bg-surface border border-border hover:border-primary text-text'
+                        }`}
+                    >
+                      Previous
+                    </button>
+
+                    <span className="text-text-secondary text-sm">
+                      Showing {startIdx + 1}-{endIdx} of {totalTrades} trades (Page {tradePage + 1} of {totalPages})
+                    </span>
+
+                    <button
+                      onClick={() => setTradePage(Math.min(totalPages - 1, tradePage + 1))}
+                      disabled={tradePage >= totalPages - 1}
+                      className={`px-4 py-2 rounded-lg font-medium transition-colors ${tradePage >= totalPages - 1
+                        ? 'bg-surface-hover text-text-secondary cursor-not-allowed'
+                        : 'bg-surface border border-border hover:border-primary text-text'
+                        }`}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            )
+          })()}
         </>
       ) : (
         !versionLoading && (
@@ -586,85 +716,6 @@ export default function StrategyDetailPage() {
           </div>
         )
       )}
-
-      {/* Strategy Configuration (config.json) */}
-      <div className="bg-surface border border-border rounded-lg p-6">
-        <h2 className="text-lg font-semibold text-text mb-4">Strategy Configuration</h2>
-        {versionLoading ? (
-          <p className="text-text-secondary animate-pulse text-sm">Loading config…</p>
-        ) : versionConfig ? (
-          <div className="space-y-6">
-            {/* Description */}
-            {versionConfig.description && (
-              <p className="text-sm text-text-secondary leading-relaxed">{versionConfig.description}</p>
-            )}
-
-            {/* Trading Parameters */}
-            {versionConfig.trading && (
-              <div>
-                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Trading Parameters</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {([
-                    { label: 'Symbols', value: Array.isArray(versionConfig.trading.symbols) ? versionConfig.trading.symbols.join(', ') : versionConfig.trading.symbols },
-                    { label: 'Timeframe', value: versionConfig.trading.timeframe },
-                    { label: 'Max Positions', value: versionConfig.trading.max_positions },
-                    { label: 'Position Size', value: versionConfig.trading.position_size_pct != null ? `${versionConfig.trading.position_size_pct}%` : undefined },
-                  ] as { label: string; value: any }[]).filter(item => item.value != null).map(item => (
-                    <div key={item.label} className="bg-background rounded-lg p-3 border border-border/50">
-                      <p className="text-xs text-text-secondary mb-1">{item.label}</p>
-                      <p className="text-sm font-semibold text-text">{String(item.value)}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Indicators */}
-            {versionConfig.indicators && Object.keys(versionConfig.indicators).length > 0 && (
-              <div>
-                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Indicators</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {Object.entries(versionConfig.indicators as Record<string, Record<string, any>>).map(([name, params]) => (
-                    <div key={name} className="bg-background rounded-lg p-3 border border-border/50">
-                      <p className="text-xs font-semibold text-text mb-2 uppercase tracking-wide">{name}</p>
-                      <div className="space-y-1">
-                        {Object.entries(params).map(([k, v]) => (
-                          <div key={k} className="flex justify-between text-xs">
-                            <span className="text-text-secondary">{k.replace(/_/g, ' ')}</span>
-                            <span className="text-text font-medium">{String(v)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Risk Management */}
-            {versionConfig.risk_management && (
-              <div>
-                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Risk Management</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {([
-                    { label: 'Stop Loss', value: versionConfig.risk_management.stop_loss_pct != null ? `${versionConfig.risk_management.stop_loss_pct}%` : undefined },
-                    { label: 'Trailing Stop', value: versionConfig.risk_management.trailing_stop_pct != null ? `${versionConfig.risk_management.trailing_stop_pct}%` : undefined },
-                    { label: 'Max Position Loss', value: versionConfig.risk_management.max_position_loss_pct != null ? `${versionConfig.risk_management.max_position_loss_pct}%` : undefined },
-                    { label: 'Max Daily Loss', value: versionConfig.risk_management.max_daily_loss_pct != null ? `${versionConfig.risk_management.max_daily_loss_pct}%` : undefined },
-                  ] as { label: string; value: any }[]).filter(item => item.value != null).map(item => (
-                    <div key={item.label} className="bg-background rounded-lg p-3 border border-border/50">
-                      <p className="text-xs text-text-secondary mb-1">{item.label}</p>
-                      <p className="text-sm font-semibold text-red-400">{String(item.value)}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-text-secondary text-sm">No configuration file found for this build.</p>
-        )}
-      </div>
 
       {/* Build History */}
       <div className="bg-surface border border-border rounded-lg p-6">

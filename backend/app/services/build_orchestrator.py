@@ -153,6 +153,7 @@ class BuildOrchestrator:
         symbols: List[str],
         timeframe: str,
         iteration_uuid: str = None,
+        iteration_number: int = None,
     ) -> str:
         """Dispatch training job to Redis via REDIS_URL."""
         self._log("Dispatching training job to Redis")
@@ -165,6 +166,7 @@ class BuildOrchestrator:
             "timeframe": timeframe,
             "timestamp": datetime.utcnow().isoformat(),
             "iteration_uuid": iteration_uuid,
+            "iteration_number": iteration_number,
             "source": "oculus",
         }
 
@@ -806,6 +808,14 @@ The JSON must follow this exact schema:
                             f"Exit: {t.get('exit_reason', '?')}\n"
                         )
 
+        # Create a filtered version of backtest_results that excludes large arrays
+        # Keep: metrics, period returns (daily/weekly/monthly/yearly)
+        # Remove: trades, equity_curve, ohlc_data (these can be hundreds of thousands of tokens)
+        filtered_results = {
+            k: v for k, v in backtest_results.items()
+            if k not in ['trades', 'equity_curve', 'ohlc_data']
+        }
+
         return f"""You are an expert quantitative trading strategy designer refining a strategy based on backtest results.
 
 ## Previous Design (Iteration {iteration})
@@ -821,8 +831,8 @@ The JSON must follow this exact schema:
 - Sharpe Ratio: {sharpe_ratio}
 - Total Trades: {num_trades}
 
-Full results:
-{json.dumps(backtest_results, indent=2)}
+Full results (excluding large arrays):
+{json.dumps(filtered_results, indent=2)}
 {ml_rules_section}
 {feature_importance_section}
 {history_section}

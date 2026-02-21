@@ -1043,7 +1043,9 @@ async def _run_build_loop(
                 )
 
                 job_id = await orchestrator.dispatch_training_job(
-                    design, strategy_symbols, timeframe, iteration_uuid=iteration_uuid
+                    design, strategy_symbols, timeframe,
+                    iteration_uuid=iteration_uuid,
+                    iteration_number=iteration
                 )
 
                 # Listen for training results (with stop signal checking every 5s)

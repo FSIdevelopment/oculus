@@ -1694,6 +1694,28 @@ export default function BuildDetailPage() {
                 </p>
               </div>
             )}
+
+            {/* Worker Progress Messages */}
+            {progressMessages.length > 0 && (
+              <div className="mt-6 pt-6 border-t border-border">
+                <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-3">Activity</h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {progressMessages.slice(-10).reverse().map((pm, idx) => (
+                    <div key={`progress-${idx}-${pm.timestamp}`} className="flex items-start gap-2 text-xs">
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500/20 text-blue-600 dark:text-blue-400 mt-0.5">
+                        ⚙️
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-text-secondary break-words">{pm.message}</p>
+                        <p className="text-text-secondary/60 text-[10px] mt-0.5">
+                          {new Date(pm.timestamp).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Rich Iteration Cards - Best and Current Only */}
@@ -1774,19 +1796,9 @@ export default function BuildDetailPage() {
                   <p className="text-text-secondary text-sm">Loading chat history...</p>
                 </div>
               ) : (() => {
-                // Combine all messages: chat history + progress messages
-                type CombinedMessage = ChatMessage | { role: 'progress', message: string, iteration?: number, timestamp: string, uuid: string }
-
-                const allMessages: CombinedMessage[] = [
-                  ...chatHistory,
-                  ...progressMessages.map((pm, idx) => ({
-                    role: 'progress' as const,
-                    message: pm.message,
-                    iteration: pm.iteration,
-                    timestamp: pm.timestamp,
-                    uuid: `progress-${idx}-${pm.timestamp}`
-                  }))
-                ]
+                // Only show chat history messages (thinking, user, assistant)
+                // Progress messages are now shown in the Build Status card
+                const allMessages: ChatMessage[] = chatHistory
 
                 // Sort all messages chronologically by timestamp
                 allMessages.sort((a, b) => {
@@ -1809,11 +1821,7 @@ export default function BuildDetailPage() {
                 return (
                   <div className="space-y-4">
                     {allMessages.map((msg) => {
-                      const isProgress = msg.role === 'progress'
-                      const isChatMessage = 'content' in msg
-                      const currentIteration = isProgress
-                        ? (msg as { role: 'progress', message: string, iteration?: number, timestamp: string, uuid: string }).iteration
-                        : (isChatMessage ? (msg as ChatMessage).metadata?.iteration : undefined)
+                      const currentIteration = msg.metadata?.iteration
 
                       // Show iteration divider when iteration changes
                       const showDivider = currentIteration !== undefined && currentIteration !== lastIteration
@@ -1821,7 +1829,7 @@ export default function BuildDetailPage() {
                         lastIteration = currentIteration
                       }
 
-                      const designOutput = isChatMessage && msg.role === 'assistant' ? parseDesignOutput((msg as ChatMessage).content) : null
+                      const designOutput = msg.role === 'assistant' ? parseDesignOutput(msg.content) : null
 
                       return (
                         <div key={msg.uuid}>
@@ -1836,50 +1844,29 @@ export default function BuildDetailPage() {
                             </div>
                           )}
 
-                          {/* Progress messages */}
-                          {isProgress && (() => {
-                            const messageText = isChatMessage
-                              ? (msg as any).content
-                              : (msg as any).message
-                            return (
-                              <div className="flex gap-3">
-                                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-500/20 text-blue-600 dark:text-blue-400">
-                                  ⚙️
-                                </div>
-                                <div className="flex-1 bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
-                                  <p className="text-xs text-blue-600 dark:text-blue-400">{messageText}</p>
-                                </div>
-                              </div>
-                            )
-                          })()}
-
                           {/* Thinking messages from chat history (role: "thinking") */}
-                          {isChatMessage && msg.role === 'thinking' && (() => {
-                            const chatMsg = msg as ChatMessage
-                            return (
-                              <div className="flex gap-3">
-                                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400">
-                                  <Brain size={16} />
-                                </div>
-                                <div className="flex-1 bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
-                                  <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide mb-1">Thinking</p>
-                                  <p className="text-sm text-text break-words whitespace-pre-wrap">{chatMsg.content}</p>
-                                  <p className="text-xs text-text-secondary mt-2">
-                                    {new Date(chatMsg.created_at).toLocaleTimeString()}
-                                  </p>
-                                </div>
+                          {msg.role === 'thinking' && (
+                            <div className="flex gap-3">
+                              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                                <Brain size={16} />
                               </div>
-                            )
-                          })()}
+                              <div className="flex-1 bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                                <p className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wide mb-1">Thinking</p>
+                                <p className="text-sm text-text break-words whitespace-pre-wrap">{msg.content}</p>
+                                <p className="text-xs text-text-secondary mt-2">
+                                  {new Date(msg.created_at).toLocaleTimeString()}
+                                </p>
+                              </div>
+                            </div>
+                          )}
 
                           {/* User prompt - parsed into conversational bubbles */}
-                          {isChatMessage && msg.role === 'user' && (
-                            <DesignPromptBubbles msg={msg as ChatMessage} />
+                          {msg.role === 'user' && (
+                            <DesignPromptBubbles msg={msg} />
                           )}
 
                           {/* Design output - HERO content */}
-                          {isChatMessage && msg.role === 'assistant' && (() => {
-                            const chatMsg = msg as ChatMessage
+                          {msg.role === 'assistant' && (() => {
                             return (
                               <div className="flex gap-3">
                                 <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 bg-surface-hover text-text-secondary">
@@ -1891,17 +1878,17 @@ export default function BuildDetailPage() {
                                     <div className="space-y-2">
                                       {renderDesignCard(designOutput)}
                                       <p className="text-xs text-text-secondary">
-                                        {new Date(chatMsg.created_at).toLocaleTimeString()}
+                                        {new Date(msg.created_at).toLocaleTimeString()}
                                       </p>
                                     </div>
                                   ) : (
                                     // Fallback: render as text if not JSON
                                     <div className="space-y-2">
                                       <div className="bg-surface-hover border border-border rounded-lg p-4">
-                                        <p className="text-sm text-text break-words whitespace-pre-wrap">{chatMsg.content}</p>
+                                        <p className="text-sm text-text break-words whitespace-pre-wrap">{msg.content}</p>
                                       </div>
                                       <p className="text-xs text-text-secondary">
-                                        {new Date(chatMsg.created_at).toLocaleTimeString()}
+                                        {new Date(msg.created_at).toLocaleTimeString()}
                                       </p>
                                     </div>
                                   )}

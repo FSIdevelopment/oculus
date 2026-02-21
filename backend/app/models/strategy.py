@@ -24,6 +24,7 @@ class Strategy(Base):
     symbols: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     target_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     backtest_results: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Strategy config.json
     
     # Docker info
     docker_registry: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -17,7 +17,8 @@ class ProgressReporter:
     """Publishes training progress updates to Redis pub/sub."""
 
     def __init__(self, job_id: str, redis_client: redis.Redis,
-                 channel_id: Optional[str] = None):
+                 channel_id: Optional[str] = None,
+                 iteration: Optional[int] = None):
         """Initialize progress reporter.
 
         Args:
@@ -29,9 +30,13 @@ class ProgressReporter:
                 worker's messages land on the same channel that the backend
                 WebSocket subscribes to (the full job_id contains an extra
                 ``:iter:{uuid}`` suffix that would otherwise cause a mismatch).
+            iteration: Optional iteration number (0-based). When provided, all
+                progress messages include this iteration number so the frontend
+                can group them under the correct iteration divider.
         """
         self.job_id = job_id
         self.redis = redis_client
+        self.iteration = iteration
         effective_id = channel_id if channel_id is not None else job_id
         self.channel = f"{config.progress_channel_prefix}:{effective_id}"
 
@@ -57,6 +62,8 @@ class ProgressReporter:
         }
         if message is not None:
             payload["message"] = message
+        if self.iteration is not None:
+            payload["iteration"] = self.iteration
 
         try:
             self.redis.publish(self.channel, json.dumps(payload))
