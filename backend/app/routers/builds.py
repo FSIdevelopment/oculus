@@ -71,7 +71,10 @@ async def _save_chat_history(
 
 
 async def _publish_progress(build_id: str, data: dict, max_retries: int = 3) -> None:
-    """Publish a progress update to the Redis channel for a build with retry logic."""
+    """Publish a progress update to the Redis channel for a build with retry logic.
+
+    Note: Uses a timeout to avoid blocking if Redis is busy with long-running training jobs.
+    """
     for attempt in range(max_retries):
         redis_client = None
         try:
@@ -82,12 +85,22 @@ async def _publish_progress(build_id: str, data: dict, max_retries: int = 3) -> 
                 socket_timeout=10,
                 retry_on_timeout=True,
             )
-            await redis_client.publish(
-                f"oculus:training:progress:build:{build_id}",
-                json.dumps(data),
+            # Use timeout to avoid blocking if Redis is busy with training
+            await asyncio.wait_for(
+                redis_client.publish(
+                    f"oculus:training:progress:build:{build_id}",
+                    json.dumps(data),
+                ),
+                timeout=3.0  # 3 second timeout for publish
             )
             await redis_client.close()
             return  # Success
+        except asyncio.TimeoutError:
+            # Redis is busy (likely processing training), log but don't retry aggressively
+            logger.debug(
+                f"Redis publish timed out for build {build_id} (likely busy with training), skipping this update"
+            )
+            return  # Skip this update rather than retrying
         except (RedisConnectionError, redis_async.TimeoutError, OSError) as e:
             if attempt < max_retries - 1:
                 logger.warning(
@@ -2110,7 +2123,7 @@ async def restart_build(
     )
 
 
-@router.websocket("/ws/builds/{build_id}/logs")
+@router.websocket("/api/ws/builds/{build_id}/logs")
 async def websocket_build_logs(websocket: WebSocket, build_id: str):
     """
     WebSocket endpoint for streaming build logs and progress.

@@ -905,7 +905,7 @@ export default function BuildDetailPage() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
         wsBase = `${protocol}//${window.location.host}`
       }
-      const wsEndpoint = `${wsBase}/ws/builds/${buildUuid}/logs`
+      const wsEndpoint = `${wsBase}/api/ws/builds/${buildUuid}/logs`
 
       const ws = new WebSocket(wsEndpoint)
 
