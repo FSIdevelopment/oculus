@@ -68,7 +68,7 @@ async def save_chat_message(
 async def get_chat_history(
     strategy_id: str,
     page: int = 1,
-    page_size: int = 50,
+    page_size: int = 500,  # Increased from 50 to 500 to support builds with many iterations
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):

@@ -609,7 +609,8 @@ async def get_build_config(
     """
     Return the config.json generated for a specific build.
 
-    The file lives at backend/strategy_outputs/{build_id}/config.json.
+    Reads from the database (BuildIteration.strategy_files) instead of the filesystem
+    to support production environments where files don't persist.
     """
     # Verify strategy ownership
     strat_result = await db.execute(
@@ -629,25 +630,63 @@ async def get_build_config(
             StrategyBuild.strategy_id == strategy_id,
         )
     )
-    if not build_result.scalar_one_or_none():
+    build = build_result.scalar_one_or_none()
+    if not build:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build not found")
 
-    # Construct path: backend/strategy_outputs/{build_id}/config.json
-    config_path = Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id / "config.json"
+    # Get the best iteration for this build (or latest completed iteration)
+    # Priority: 1) iteration with best backtest results, 2) latest completed iteration
+    iteration_result = await db.execute(
+        select(BuildIteration)
+        .where(
+            BuildIteration.build_id == build_id,
+            BuildIteration.status == "complete",
+        )
+        .order_by(BuildIteration.iteration_number.desc())
+        .limit(1)
+    )
+    iteration = iteration_result.scalar_one_or_none()
 
-    if not config_path.exists():
+    if not iteration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No completed iterations found for this build",
+        )
+
+    # Extract config.json from strategy_files
+    if not iteration.strategy_files or "config.json" not in iteration.strategy_files:
+        # Fallback to filesystem for local development
+        config_path = Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id / "config.json"
+        if config_path.exists():
+            try:
+                with open(config_path) as f:
+                    config_data = json.load(f)
+                return {"config": config_data}
+            except Exception as exc:
+                logger.error("Failed to read config from filesystem for build %s: %s", build_id, exc)
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Config file not found for this build",
         )
 
     try:
-        with open(config_path) as f:
-            config_data = json.load(f)
+        # Parse config.json from database
+        config_json_str = iteration.strategy_files["config.json"]
+        config_data = json.loads(config_json_str)
         return {"config": config_data}
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse config JSON for build %s: %s", build_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Invalid config JSON in database"
+        )
     except Exception as exc:
         logger.error("Failed to read config for build %s: %s", build_id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to read config file")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to read config file"
+        )
 
 
 @router.get("/{strategy_id}/internal", response_model=StrategyInternalResponse)

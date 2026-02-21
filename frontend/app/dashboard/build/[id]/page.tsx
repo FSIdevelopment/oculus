@@ -811,7 +811,14 @@ export default function BuildDetailPage() {
     }
 
     try {
-      const response = await api.get(`/api/strategies/${build.strategy_id}/chat`)
+      // Fetch with a large page size to get all messages for builds with many iterations
+      // Default backend page_size is now 500, which should handle most builds
+      const response = await api.get(`/api/strategies/${build.strategy_id}/chat`, {
+        params: {
+          page: 1,
+          page_size: 500
+        }
+      })
       const allMessages = response.data.items || response.data || []
 
       // Deduplicate by UUID: only keep first occurrence of each UUID
