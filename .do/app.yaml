@@ -13,9 +13,9 @@ services:
     instance_count: 1
     health_check:
       http_path: /health
-      initial_delay_seconds: 10
+      initial_delay_seconds: 30
       period_seconds: 10
-      timeout_seconds: 1
+      timeout_seconds: 3
       success_threshold: 1
       failure_threshold: 3
     envs:
