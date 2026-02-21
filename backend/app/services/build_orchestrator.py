@@ -190,7 +190,11 @@ class BuildOrchestrator:
         return job_id
 
     async def _ensure_redis_connection(self):
-        """Ensure Redis connection is healthy, reconnect if needed."""
+        """Ensure Redis connection is healthy, reconnect if needed.
+
+        Note: This uses a timeout on ping to avoid blocking during long-running
+        training jobs where Redis may be busy.
+        """
         try:
             if self.redis_client is None:
                 logger.warning("Redis client is None, reconnecting...")
@@ -206,8 +210,12 @@ class BuildOrchestrator:
                 )
                 return
 
-            # Test connection with ping
-            await self.redis_client.ping()
+            # Test connection with ping (with timeout to avoid blocking)
+            await asyncio.wait_for(self.redis_client.ping(), timeout=2.0)
+        except asyncio.TimeoutError:
+            # Redis is busy (likely processing training), connection is probably fine
+            logger.debug("Redis ping timed out (likely busy), assuming connection is OK")
+            return
         except (redis.ConnectionError, redis.TimeoutError, OSError) as e:
             logger.warning(f"Redis connection lost, reconnecting: {e}")
             try:
@@ -225,7 +233,11 @@ class BuildOrchestrator:
                 retry_on_timeout=True,
                 health_check_interval=30,
             )
-            await self.redis_client.ping()  # Verify new connection works
+            # Verify new connection works (with timeout)
+            try:
+                await asyncio.wait_for(self.redis_client.ping(), timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.debug("Redis ping timed out after reconnect (likely busy), continuing anyway")
 
     async def listen_for_results(self, job_id: str, timeout: int = 3600, stop_check_callback=None) -> Dict[str, Any]:
         """Listen for training results from Redis with automatic reconnection.
@@ -241,11 +253,28 @@ class BuildOrchestrator:
         start_time = datetime.utcnow()
         consecutive_errors = 0
         max_consecutive_errors = 10
+        last_health_check = datetime.utcnow()
+        health_check_interval = 300  # Only check health every 5 minutes to avoid blocking during training
 
         while True:
             try:
-                # Ensure Redis connection is healthy before each poll
-                await self._ensure_redis_connection()
+                # Only check Redis health periodically (not on every poll) to avoid blocking
+                # during long-running training jobs where Redis may be busy
+                elapsed_since_health_check = (datetime.utcnow() - last_health_check).total_seconds()
+                if elapsed_since_health_check > health_check_interval:
+                    try:
+                        # Use a short timeout for health check to avoid blocking
+                        await asyncio.wait_for(self.redis_client.ping(), timeout=2.0)
+                        last_health_check = datetime.utcnow()
+                        logger.debug(f"Redis health check passed for job {job_id}")
+                    except asyncio.TimeoutError:
+                        # Redis is busy (likely processing training), skip health check
+                        logger.debug(f"Redis health check timed out (likely busy with training), continuing to poll")
+                        last_health_check = datetime.utcnow()  # Reset timer to avoid repeated timeouts
+                    except Exception as e:
+                        logger.warning(f"Redis health check failed: {e}, will attempt reconnection")
+                        await self._ensure_redis_connection()
+                        last_health_check = datetime.utcnow()
 
                 result_data = await self.redis_client.get(result_key)
                 if result_data:
@@ -274,6 +303,13 @@ class BuildOrchestrator:
                 backoff_delay = min(2 ** consecutive_errors, 30)  # Cap at 30 seconds
                 logger.info(f"Waiting {backoff_delay}s before retry...")
                 await asyncio.sleep(backoff_delay)
+
+                # Try to reconnect after error
+                try:
+                    await self._ensure_redis_connection()
+                except Exception as reconnect_error:
+                    logger.error(f"Failed to reconnect to Redis: {reconnect_error}")
+
                 continue
 
             except json.JSONDecodeError as e:

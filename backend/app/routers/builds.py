@@ -2171,8 +2171,13 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
             # Periodic Redis health check and reconnection
             if current_time - last_redis_health_check >= redis_health_check_interval:
                 try:
-                    await redis_client.ping()
+                    # Use timeout to avoid blocking during long-running training jobs
+                    await asyncio.wait_for(redis_client.ping(), timeout=2.0)
                     last_redis_health_check = current_time
+                except asyncio.TimeoutError:
+                    # Redis is busy (likely processing training), skip health check
+                    logger.debug(f"Redis health check timed out for build {build_id} (likely busy with training)")
+                    last_redis_health_check = current_time  # Reset timer to avoid repeated timeouts
                 except (RedisConnectionError, redis.TimeoutError, OSError) as e:
                     logger.warning(f"Redis health check failed for build {build_id}, reconnecting: {e}")
                     try:
