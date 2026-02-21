@@ -417,9 +417,20 @@ async def send_license_expiry_warnings():
 
 def start_scheduler():
     """Start the APScheduler with all cron jobs."""
-    logger.info("Starting scheduler...")
+    import os
 
-    # Job 1: Update stuck builds every 10 minutes
+    # Only start scheduler on the master worker process
+    # Uvicorn sets UVICORN_WORKER_ID for worker processes (not set for master)
+    worker_id = os.environ.get("UVICORN_WORKER_ID")
+
+    # Skip scheduler on worker processes (only run on master)
+    if worker_id is not None:
+        logger.info(f"Skipping scheduler on worker {worker_id} - scheduler only runs on master process")
+        return
+
+    logger.info("Starting scheduler on master process...")
+
+    # Job 1: Update stuck builds every 10 minutes (staggered: starts at :00)
     scheduler.add_job(
         update_stuck_builds,
         trigger=IntervalTrigger(minutes=10),
@@ -428,46 +439,46 @@ def start_scheduler():
         replace_existing=True
     )
 
-    # Job 2: Reconnect workers every 8 minutes
+    # Job 2: Reconnect workers every 8 minutes (staggered: starts at :02)
     scheduler.add_job(
         reconnect_workers,
-        trigger=IntervalTrigger(minutes=8),
+        trigger=IntervalTrigger(minutes=8, start_date=datetime.utcnow() + timedelta(minutes=2)),
         id="reconnect_workers",
         name="Reconnect workers",
         replace_existing=True
     )
 
-    # Job 3: Reconnect websockets every 5 minutes
+    # Job 3: Reconnect websockets every 5 minutes (staggered: starts at :01)
     scheduler.add_job(
         reconnect_websockets,
-        trigger=IntervalTrigger(minutes=5),
+        trigger=IntervalTrigger(minutes=5, start_date=datetime.utcnow() + timedelta(minutes=1)),
         id="reconnect_websockets",
         name="Reconnect websockets",
         replace_existing=True
     )
 
-    # Job 4: Update expired licenses every 1 hour
+    # Job 4: Update expired licenses every 1 hour (staggered: starts at :05)
     scheduler.add_job(
         update_expired_licenses,
-        trigger=IntervalTrigger(hours=1),
+        trigger=IntervalTrigger(hours=1, start_date=datetime.utcnow() + timedelta(minutes=5)),
         id="update_expired_licenses",
         name="Update expired licenses",
         replace_existing=True
     )
 
-    # Job 5: Send build complete emails every 10 minutes
+    # Job 5: Send build complete emails every 10 minutes (staggered: starts at :03)
     scheduler.add_job(
         send_build_complete_emails,
-        trigger=IntervalTrigger(minutes=10),
+        trigger=IntervalTrigger(minutes=10, start_date=datetime.utcnow() + timedelta(minutes=3)),
         id="send_build_complete_emails",
         name="Send build complete emails",
         replace_existing=True
     )
 
-    # Job 6: Send build failed emails every 10 minutes
+    # Job 6: Send build failed emails every 10 minutes (staggered: starts at :06)
     scheduler.add_job(
         send_build_failed_emails,
-        trigger=IntervalTrigger(minutes=10),
+        trigger=IntervalTrigger(minutes=10, start_date=datetime.utcnow() + timedelta(minutes=6)),
         id="send_build_failed_emails",
         name="Send build failed emails",
         replace_existing=True
@@ -483,12 +494,24 @@ def start_scheduler():
     )
 
     scheduler.start()
-    logger.info("Scheduler started with 7 cron jobs")
+    logger.info("Scheduler started with 7 staggered cron jobs on master process")
 
 
 def stop_scheduler():
     """Stop the APScheduler."""
-    logger.info("Stopping scheduler...")
-    scheduler.shutdown()
-    logger.info("Scheduler stopped")
+    import os
+
+    # Only stop scheduler on the master worker process
+    worker_id = os.environ.get("UVICORN_WORKER_ID")
+
+    if worker_id is not None:
+        logger.info(f"Skipping scheduler shutdown on worker {worker_id}")
+        return
+
+    logger.info("Stopping scheduler on master process...")
+    if scheduler.running:
+        scheduler.shutdown()
+        logger.info("Scheduler stopped")
+    else:
+        logger.info("Scheduler was not running")
 
