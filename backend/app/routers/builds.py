@@ -70,17 +70,43 @@ async def _save_chat_history(
     await db.flush()
 
 
-async def _publish_progress(build_id: str, data: dict) -> None:
-    """Publish a progress update to the Redis channel for a build (best-effort)."""
-    try:
-        redis_client = await redis_async.from_url(settings.REDIS_URL)
-        await redis_client.publish(
-            f"oculus:training:progress:build:{build_id}",
-            json.dumps(data),
-        )
-        await redis_client.close()
-    except Exception:
-        pass  # Redis notification is best-effort
+async def _publish_progress(build_id: str, data: dict, max_retries: int = 3) -> None:
+    """Publish a progress update to the Redis channel for a build with retry logic."""
+    for attempt in range(max_retries):
+        redis_client = None
+        try:
+            redis_client = await redis_async.from_url(
+                settings.REDIS_URL,
+                socket_keepalive=True,
+                socket_connect_timeout=5,
+                socket_timeout=10,
+                retry_on_timeout=True,
+            )
+            await redis_client.publish(
+                f"oculus:training:progress:build:{build_id}",
+                json.dumps(data),
+            )
+            await redis_client.close()
+            return  # Success
+        except (RedisConnectionError, redis_async.TimeoutError, OSError) as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"Failed to publish progress for build {build_id} (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                await asyncio.sleep(0.5 * (2 ** attempt))  # Exponential backoff
+            else:
+                logger.error(
+                    f"Failed to publish progress for build {build_id} after {max_retries} attempts: {e}"
+                )
+        except Exception as e:
+            logger.error(f"Unexpected error publishing progress for build {build_id}: {e}")
+            break
+        finally:
+            if redis_client:
+                try:
+                    await redis_client.close()
+                except Exception:
+                    pass
 
 
 async def _save_thinking_history(
@@ -2125,7 +2151,53 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
         })
 
         # Listen for messages from Redis and relay to client
+        last_ping_time = asyncio.get_event_loop().time()
+        ping_interval = 30  # Send ping every 30 seconds to keep connection alive
+        redis_health_check_interval = 60  # Check Redis health every 60 seconds
+        last_redis_health_check = asyncio.get_event_loop().time()
+
         while True:
+            current_time = asyncio.get_event_loop().time()
+
+            # Send periodic ping to keep WebSocket alive
+            if current_time - last_ping_time >= ping_interval:
+                try:
+                    await websocket.send_json({"type": "ping"})
+                    last_ping_time = current_time
+                except Exception as e:
+                    logger.warning(f"Failed to send WebSocket ping for build {build_id}: {e}")
+                    break
+
+            # Periodic Redis health check and reconnection
+            if current_time - last_redis_health_check >= redis_health_check_interval:
+                try:
+                    await redis_client.ping()
+                    last_redis_health_check = current_time
+                except (RedisConnectionError, redis.TimeoutError, OSError) as e:
+                    logger.warning(f"Redis health check failed for build {build_id}, reconnecting: {e}")
+                    try:
+                        # Close old connections
+                        if pubsub:
+                            await pubsub.unsubscribe()
+                            await pubsub.close()
+                        if redis_client:
+                            await redis_client.close()
+
+                        # Reconnect
+                        redis_client = await redis.from_url(settings.REDIS_URL)
+                        pubsub = redis_client.pubsub()
+                        await pubsub.subscribe(progress_channel)
+                        last_redis_health_check = current_time
+
+                        logger.info(f"Successfully reconnected Redis for build {build_id}")
+                    except Exception as reconnect_error:
+                        logger.error(f"Failed to reconnect Redis for build {build_id}: {reconnect_error}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Lost connection to build log stream. Please refresh the page.",
+                        })
+                        break
+
             # Check for incoming WebSocket messages (ping/pong)
             try:
                 data = await asyncio.wait_for(
@@ -2135,6 +2207,9 @@ async def websocket_build_logs(websocket: WebSocket, build_id: str):
                     await websocket.send_text("pong")
             except asyncio.TimeoutError:
                 pass
+            except Exception as e:
+                logger.warning(f"WebSocket receive error for build {build_id}: {e}")
+                break
 
             # Check for Redis messages; catch mid-stream Redis disconnects
             try:

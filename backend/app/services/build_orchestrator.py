@@ -36,8 +36,17 @@ class BuildOrchestrator:
         logger.info(f"BuildOrchestrator initialized with user: {self.user.uuid}")
 
     async def initialize(self):
-        """Initialize Redis connection via Ngrok tunnel."""
-        self.redis_client = await redis.from_url(settings.REDIS_URL)
+        """Initialize Redis connection via Ngrok tunnel with connection pooling."""
+        self.redis_client = await redis.from_url(
+            settings.REDIS_URL,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_keepalive=True,
+            socket_connect_timeout=10,
+            socket_timeout=30,
+            retry_on_timeout=True,
+            health_check_interval=30,
+        )
 
     async def cleanup(self):
         """Clean up resources."""
@@ -180,8 +189,46 @@ class BuildOrchestrator:
         self._log(f"Job dispatched with ID: {job_id}")
         return job_id
 
+    async def _ensure_redis_connection(self):
+        """Ensure Redis connection is healthy, reconnect if needed."""
+        try:
+            if self.redis_client is None:
+                logger.warning("Redis client is None, reconnecting...")
+                self.redis_client = await redis.from_url(
+                    settings.REDIS_URL,
+                    encoding="utf-8",
+                    decode_responses=True,
+                    socket_keepalive=True,
+                    socket_connect_timeout=10,
+                    socket_timeout=30,
+                    retry_on_timeout=True,
+                    health_check_interval=30,
+                )
+                return
+
+            # Test connection with ping
+            await self.redis_client.ping()
+        except (redis.ConnectionError, redis.TimeoutError, OSError) as e:
+            logger.warning(f"Redis connection lost, reconnecting: {e}")
+            try:
+                if self.redis_client:
+                    await self.redis_client.close()
+            except Exception:
+                pass
+            self.redis_client = await redis.from_url(
+                settings.REDIS_URL,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_keepalive=True,
+                socket_connect_timeout=10,
+                socket_timeout=30,
+                retry_on_timeout=True,
+                health_check_interval=30,
+            )
+            await self.redis_client.ping()  # Verify new connection works
+
     async def listen_for_results(self, job_id: str, timeout: int = 3600, stop_check_callback=None) -> Dict[str, Any]:
-        """Listen for training results from Redis.
+        """Listen for training results from Redis with automatic reconnection.
 
         Args:
             job_id: Training job identifier
@@ -192,15 +239,48 @@ class BuildOrchestrator:
 
         result_key = f"result:{job_id}"
         start_time = datetime.utcnow()
+        consecutive_errors = 0
+        max_consecutive_errors = 10
 
         while True:
-            result_data = await self.redis_client.get(result_key)
-            if result_data:
-                result = json.loads(result_data)
-                self._log(f"Results received: {result.get('status', 'unknown')}")
-                # Clean up result key to prevent stale data in future re-runs
+            try:
+                # Ensure Redis connection is healthy before each poll
+                await self._ensure_redis_connection()
+
+                result_data = await self.redis_client.get(result_key)
+                if result_data:
+                    result = json.loads(result_data)
+                    self._log(f"Results received: {result.get('status', 'unknown')}")
+                    # Clean up result key to prevent stale data in future re-runs
+                    await self.redis_client.delete(result_key)
+                    return result
+
+                # Reset error counter on successful poll
+                consecutive_errors = 0
+
+            except (redis.ConnectionError, redis.TimeoutError, OSError) as e:
+                consecutive_errors += 1
+                logger.warning(
+                    f"Redis error while polling for results (attempt {consecutive_errors}/{max_consecutive_errors}): {e}"
+                )
+
+                if consecutive_errors >= max_consecutive_errors:
+                    raise RuntimeError(
+                        f"Failed to poll Redis after {max_consecutive_errors} consecutive errors. "
+                        f"Last error: {e}"
+                    )
+
+                # Exponential backoff: wait longer after each failure
+                backoff_delay = min(2 ** consecutive_errors, 30)  # Cap at 30 seconds
+                logger.info(f"Waiting {backoff_delay}s before retry...")
+                await asyncio.sleep(backoff_delay)
+                continue
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to decode result JSON for {job_id}: {e}")
+                # Clean up corrupted result and raise error
                 await self.redis_client.delete(result_key)
-                return result
+                raise RuntimeError(f"Corrupted result data in Redis for job {job_id}")
 
             # Check for stop signal
             if stop_check_callback and await stop_check_callback():
