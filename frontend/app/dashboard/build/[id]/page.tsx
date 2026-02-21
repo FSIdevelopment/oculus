@@ -1802,8 +1802,8 @@ export default function BuildDetailPage() {
 
                 // Sort all messages chronologically by timestamp
                 allMessages.sort((a, b) => {
-                  const timeA = 'created_at' in a ? new Date(a.created_at).getTime() : new Date(a.timestamp).getTime()
-                  const timeB = 'created_at' in b ? new Date(b.created_at).getTime() : new Date(b.timestamp).getTime()
+                  const timeA = new Date(a.created_at).getTime()
+                  const timeB = new Date(b.created_at).getTime()
                   return timeA - timeB
                 })
 
