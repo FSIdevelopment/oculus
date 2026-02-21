@@ -52,10 +52,11 @@ class LicenseResponse(BaseModel):
     license_type: str
     strategy_id: str
     user_id: str
+    strategy_version: Optional[int] = None
     webhook_url: Optional[str] = None
     created_at: datetime
     expires_at: datetime
-    
+
     class Config:
         from_attributes = True
 

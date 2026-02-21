@@ -10,8 +10,15 @@ interface License {
   license_type: string
   strategy_id: string
   user_id: string
+  strategy_version?: number
   created_at: string
   expires_at: string
+}
+
+interface VersionsData {
+  versions: number[]
+  current_version: number
+  total_builds: number
 }
 
 interface AdminLicenseModalProps {
@@ -27,9 +34,12 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
   const [error, setError] = useState<string | null>(null)
   const [keyVisible, setKeyVisible] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [versions, setVersions] = useState<VersionsData | null>(null)
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(null)
 
   useEffect(() => {
     fetchLicense()
+    fetchVersions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strategyId])
 
@@ -47,13 +57,30 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
     }
   }
 
+  const fetchVersions = async () => {
+    try {
+      const data = await adminAPI.getStrategyVersions(strategyId)
+      setVersions(data)
+      // Set default selected version to current version
+      if (data.versions.length > 0) {
+        setSelectedVersion(data.current_version)
+      }
+    } catch (err) {
+      console.error('Failed to load versions:', err)
+    }
+  }
+
   const handleGenerate = async () => {
+    if (!selectedVersion) {
+      setError('Please select a version')
+      return
+    }
     if (license && !confirm('This will revoke the current license and generate a new one. Continue?')) return
     try {
       setActionLoading(true)
       setError(null)
       setKeyVisible(false)
-      const data = await adminAPI.generateAdminLicense(strategyId)
+      const data = await adminAPI.generateAdminLicense(strategyId, selectedVersion)
       setLicense(data)
     } catch (err) {
       setError('Failed to generate license')
@@ -114,7 +141,7 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
             <div className="text-text-secondary text-sm">Loading...</div>
           ) : license ? (
             <div className="space-y-4">
-              {/* Status + expiry */}
+              {/* Status + expiry + version */}
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-text-secondary">Status:</span>
@@ -125,6 +152,11 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
                 <div className="text-sm text-text-secondary">
                   Expires: <span className="text-text">{new Date(license.expires_at).toLocaleDateString()}</span>
                 </div>
+                {license.strategy_version && (
+                  <div className="text-sm text-text-secondary">
+                    Version: <span className="text-text font-semibold">v{license.strategy_version}</span>
+                  </div>
+                )}
               </div>
 
               {/* License key row */}
@@ -153,6 +185,28 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
                 </div>
               </div>
 
+              {/* Version Selection */}
+              <div className="space-y-2 pt-2">
+                <label className="block text-sm font-medium text-text">Strategy Version</label>
+                <select
+                  value={selectedVersion || ''}
+                  onChange={(e) => setSelectedVersion(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  disabled={!versions || versions.versions.length === 0}
+                >
+                  {versions?.versions.map((version) => (
+                    <option key={version} value={version}>
+                      Version {version} {version === versions.current_version ? '(Latest)' : ''}
+                    </option>
+                  ))}
+                </select>
+                {versions && (
+                  <p className="text-xs text-text-secondary">
+                    {versions.total_builds} completed build{versions.total_builds !== 1 ? 's' : ''} available
+                  </p>
+                )}
+              </div>
+
               {/* Action buttons */}
               <div className="flex gap-2 pt-2">
                 <button
@@ -165,7 +219,7 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
                 </button>
                 <button
                   onClick={handleGenerate}
-                  disabled={actionLoading}
+                  disabled={actionLoading || !selectedVersion}
                   className="flex items-center gap-1.5 px-4 py-2 bg-surface border border-border text-text rounded-lg hover:bg-surface-hover disabled:opacity-50 text-sm transition-colors ml-auto"
                 >
                   <RefreshCw size={15} />
@@ -176,9 +230,32 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
           ) : (
             <div className="space-y-4">
               <p className="text-text-secondary text-sm">No active admin license exists for this strategy.</p>
+
+              {/* Version Selection */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-text">Strategy Version</label>
+                <select
+                  value={selectedVersion || ''}
+                  onChange={(e) => setSelectedVersion(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  disabled={!versions || versions.versions.length === 0}
+                >
+                  {versions?.versions.map((version) => (
+                    <option key={version} value={version}>
+                      Version {version} {version === versions.current_version ? '(Latest)' : ''}
+                    </option>
+                  ))}
+                </select>
+                {versions && (
+                  <p className="text-xs text-text-secondary">
+                    {versions.total_builds} completed build{versions.total_builds !== 1 ? 's' : ''} available
+                  </p>
+                )}
+              </div>
+
               <button
                 onClick={handleGenerate}
-                disabled={actionLoading}
+                disabled={actionLoading || !selectedVersion}
                 className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50 text-sm transition-colors"
               >
                 <Key size={15} />

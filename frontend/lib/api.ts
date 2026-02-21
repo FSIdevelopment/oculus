@@ -397,11 +397,22 @@ export const adminAPI = {
   },
 
   /**
+   * Get available versions for a strategy.
+   * Returns a list of version numbers that have been successfully built.
+   */
+  getStrategyVersions: async (strategyId: string) => {
+    const response = await api.get(`/api/admin/strategies/${strategyId}/versions`)
+    return response.data
+  },
+
+  /**
    * Generate a free admin license for a strategy.
    * Automatically revokes any previous admin license for the same strategy.
    */
-  generateAdminLicense: async (strategyId: string) => {
-    const response = await api.post(`/api/admin/strategies/${strategyId}/license`)
+  generateAdminLicense: async (strategyId: string, strategyVersion: number) => {
+    const response = await api.post(`/api/admin/strategies/${strategyId}/license`, null, {
+      params: { strategy_version: strategyVersion }
+    })
     return response.data
   },
 

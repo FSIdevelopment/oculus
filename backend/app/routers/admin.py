@@ -1,7 +1,7 @@
 """Admin endpoints for user management and support."""
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, distinct
 from datetime import datetime, timedelta
 import secrets
 import string
@@ -11,6 +11,7 @@ from app.database import get_db
 from app.config import settings
 from app.models.user import User
 from app.models.strategy import Strategy
+from app.models.strategy_build import StrategyBuild
 from app.models.license import License
 from app.schemas.users import (
     UserAdminUpdate, UserDetailResponse, UserListResponse,
@@ -449,9 +450,75 @@ async def delete_any_strategy(
 # ADMIN LICENSE ENDPOINTS
 # ============================================================================
 
+@router.get("/strategies/{strategy_id}/versions")
+async def get_strategy_versions(
+    strategy_id: str,
+    admin_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all available versions for a strategy based on completed builds.
+
+    Returns a list of version numbers that have been successfully built and pushed
+    to the docker registry. These versions can be used when creating licenses.
+    """
+    # Verify strategy exists
+    result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
+            Strategy.status != "deleted"
+        )
+    )
+    strategy = result.scalar_one_or_none()
+
+    if not strategy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Strategy not found"
+        )
+
+    # Get the current version from the strategy (latest)
+    current_version = strategy.version or 1
+
+    # Get all completed builds to determine which versions were successfully built
+    # Each completed build represents a version that was pushed to the registry
+    builds_result = await db.execute(
+        select(StrategyBuild)
+        .where(
+            StrategyBuild.strategy_id == strategy_id,
+            StrategyBuild.status == "complete"
+        )
+        .order_by(StrategyBuild.started_at.desc())
+    )
+    completed_builds = builds_result.scalars().all()
+
+    # Build a list of available versions
+    # Each completed build incremented the version, so we can reconstruct the version history
+    versions = []
+    if completed_builds:
+        # The current version is the latest
+        # Work backwards from current version based on number of completed builds
+        num_builds = len(completed_builds)
+        for i in range(num_builds):
+            version = current_version - i
+            if version > 0:
+                versions.append(version)
+
+    # If no builds but strategy has a version, include it
+    if not versions and current_version > 0:
+        versions.append(current_version)
+
+    return {
+        "versions": sorted(versions, reverse=True),  # Latest first
+        "current_version": current_version,
+        "total_builds": len(completed_builds)
+    }
+
+
 @router.post("/strategies/{strategy_id}/license", response_model=LicenseResponse, status_code=status.HTTP_201_CREATED)
 async def generate_admin_license(
     strategy_id: str,
+    strategy_version: int = Query(..., description="Strategy version number to license"),
     admin_user: User = Depends(admin_required),
     db: AsyncSession = Depends(get_db)
 ):
@@ -462,6 +529,7 @@ async def generate_admin_license(
       active admin license exists per strategy at a time.
     - Sets license_type to "admin" and grants a 10-year validity period.
     - The user_id is set to the requesting admin's UUID.
+    - Requires a strategy_version to specify which build to pull from docker registry.
     """
     # Verify strategy exists
     result = await db.execute(
@@ -495,6 +563,7 @@ async def generate_admin_license(
         license_type="admin",
         strategy_id=strategy_id,
         user_id=admin_user.uuid,
+        strategy_version=strategy_version,
         expires_at=datetime.utcnow() + timedelta(days=3650),
     )
     db.add(license_obj)
