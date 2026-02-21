@@ -2045,6 +2045,7 @@ async def restart_build(
     build.status = "queued"
     build.phase = "resuming"
     build.completed_at = None
+    build.started_at = datetime.utcnow()  # Reset started_at to prevent timeout checks from failing
     # Keep max_iterations from the original build, or update if provided
     if max_iterations != build.max_iterations:
         build.max_iterations = max_iterations

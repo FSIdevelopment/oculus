@@ -83,16 +83,20 @@ async def update_stuck_builds():
             now = datetime.utcnow()
             
             # Find builds stuck in "queued" for > 30 minutes
+            # Exclude builds that are actively processing (completed_at is None and phase is not "resuming")
+            # Also exclude builds that were just restarted (phase = "resuming")
             queued_threshold = now - timedelta(minutes=30)
             queued_query = select(StrategyBuild).where(
                 and_(
                     StrategyBuild.status == "queued",
-                    StrategyBuild.started_at < queued_threshold
+                    StrategyBuild.started_at < queued_threshold,
+                    StrategyBuild.completed_at.is_(None),  # Only check builds that haven't completed
+                    StrategyBuild.phase != "resuming"  # Exclude restarted builds
                 )
             )
             queued_result = await session.execute(queued_query)
             queued_builds = queued_result.scalars().all()
-            
+
             for build in queued_builds:
                 build.status = "failed"
                 build.phase = "Timeout - stuck in queue"
