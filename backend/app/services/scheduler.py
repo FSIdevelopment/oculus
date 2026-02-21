@@ -422,19 +422,19 @@ async def send_license_expiry_warnings():
 
 def start_scheduler():
     """Start the APScheduler with all cron jobs."""
-    # Only start scheduler on the parent process (not on uvicorn worker processes)
-    # When uvicorn spawns workers, they get different PIDs than the parent
+    # Only start scheduler on the FIRST worker process
+    # When uvicorn runs with --workers, the parent process doesn't run the app
+    # Worker processes have names like "SpawnProcess-1", "SpawnProcess-2", etc.
+    # We run the scheduler ONLY on SpawnProcess-1 to avoid duplication
     current_pid = os.getpid()
     current_process_name = multiprocessing.current_process().name
 
-    # Skip scheduler on worker processes (only run on parent/master)
-    # Worker processes have names like "SpawnProcess-1", "SpawnProcess-2", etc.
-    # Master process has name "MainProcess"
-    if current_process_name != "MainProcess":
-        logger.info(f"Skipping scheduler on worker process {current_process_name} (PID: {current_pid}) - scheduler only runs on master process")
+    # Skip scheduler on all workers except SpawnProcess-1
+    if current_process_name != "SpawnProcess-1":
+        logger.info(f"Skipping scheduler on {current_process_name} (PID: {current_pid}) - scheduler only runs on SpawnProcess-1")
         return
 
-    logger.info(f"Starting scheduler on master process {current_process_name} (PID: {current_pid})...")
+    logger.info(f"Starting scheduler on {current_process_name} (PID: {current_pid})...")
 
     # Job 1: Update stuck builds every 10 minutes (staggered: starts at :00)
     scheduler.add_job(
@@ -505,15 +505,15 @@ def start_scheduler():
 
 def stop_scheduler():
     """Stop the APScheduler."""
-    # Only stop scheduler on the parent process
+    # Only stop scheduler on SpawnProcess-1 (where it's running)
     current_pid = os.getpid()
     current_process_name = multiprocessing.current_process().name
 
-    if current_process_name != "MainProcess":
-        logger.info(f"Skipping scheduler shutdown on worker process {current_process_name} (PID: {current_pid})")
+    if current_process_name != "SpawnProcess-1":
+        logger.info(f"Skipping scheduler shutdown on {current_process_name} (PID: {current_pid})")
         return
 
-    logger.info(f"Stopping scheduler on master process {current_process_name} (PID: {current_pid})...")
+    logger.info(f"Stopping scheduler on {current_process_name} (PID: {current_pid})...")
     if scheduler.running:
         scheduler.shutdown()
         logger.info("Scheduler stopped")
