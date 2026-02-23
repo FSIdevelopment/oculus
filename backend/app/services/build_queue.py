@@ -220,7 +220,7 @@ class BuildQueueManager:
 
             return {
                 "queue_length": len(queued_builds),
-                "active_builds": len(active_builds),
+                "active_builds_count": len(active_builds),
                 "total_workers": len(workers),
                 "active_workers": len([w for w in workers if w.status == "active"]),
                 "total_capacity": total_capacity,

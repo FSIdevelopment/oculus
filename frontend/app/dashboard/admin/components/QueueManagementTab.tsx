@@ -36,7 +36,7 @@ interface Worker {
 
 interface QueueStatus {
   queue_length: number
-  active_builds: number
+  active_builds_count: number
   total_workers: number
   active_workers: number
   total_capacity: number
@@ -132,7 +132,7 @@ export default function QueueManagementTab() {
             <Activity className="text-green-400" size={24} />
             <h3 className="text-lg font-semibold text-text">Active</h3>
           </div>
-          <p className="text-3xl font-bold text-text">{queueStatus.active_builds}</p>
+          <p className="text-3xl font-bold text-text">{queueStatus.active_builds_count}</p>
           <p className="text-text-secondary text-sm mt-1">Builds processing</p>
         </div>
 
@@ -218,7 +218,7 @@ export default function QueueManagementTab() {
         <div className="px-6 py-4 border-b border-border">
           <h3 className="text-lg font-semibold text-text flex items-center gap-2">
             <Activity size={20} className="text-green-400" />
-            Active Builds ({queueStatus.active_builds})
+            Active Builds ({queueStatus.active_builds_count})
           </h3>
         </div>
         {queueStatus.active_builds.length === 0 ? (
@@ -315,8 +315,8 @@ export default function QueueManagementTab() {
                     <td className="px-6 py-4">
                       <span
                         className={`px-2 py-1 rounded-full text-xs font-medium ${worker.status === 'active'
-                            ? 'bg-green-900/20 text-green-400'
-                            : 'bg-red-900/20 text-red-400'
+                          ? 'bg-green-900/20 text-green-400'
+                          : 'bg-red-900/20 text-red-400'
                           }`}
                       >
                         {worker.status}

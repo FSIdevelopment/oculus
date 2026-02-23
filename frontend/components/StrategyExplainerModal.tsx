@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { X, FileText, Loader2 } from 'lucide-react'
 import { strategyAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
@@ -25,13 +25,7 @@ export default function StrategyExplainerModal({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (isOpen && strategyId && buildId) {
-      loadReadme()
-    }
-  }, [isOpen, strategyId, buildId])
-
-  const loadReadme = async () => {
+  const loadReadme = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -43,14 +37,20 @@ export default function StrategyExplainerModal({
     } finally {
       setLoading(false)
     }
-  }
+  }, [strategyId, buildId])
+
+  useEffect(() => {
+    if (isOpen && strategyId && buildId) {
+      loadReadme()
+    }
+  }, [isOpen, strategyId, buildId, loadReadme])
 
   if (!isOpen) return null
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-surface border border-border rounded-xl max-w-5xl w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between px-8 py-6 border-b border-border bg-surface">
           <div className="flex items-center gap-3">
