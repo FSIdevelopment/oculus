@@ -18,6 +18,7 @@ from app.models.license import License
 from app.models.user import User
 from app.models.strategy import Strategy
 from app.services.email_service import EmailService
+from app.services.build_recovery import BuildRecoveryService
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,39 @@ async def reconnect_websockets():
 
     except Exception as e:
         logger.error(f"Error in reconnect_websockets: {e}")
+    finally:
+        await release_lock(lock_name)
+
+
+async def recover_stuck_builds():
+    """Recover stuck builds and reassign from dead workers."""
+    lock_name = "recover_stuck_builds"
+
+    if not await acquire_lock(lock_name):
+        logger.info(f"Skipping {lock_name} - another instance is running")
+        return
+
+    try:
+        logger.info("Running recover_stuck_builds job")
+
+        # Get Redis client
+        client = await get_redis_client()
+
+        # Create recovery service
+        recovery_service = BuildRecoveryService(client)
+
+        # Run recovery
+        async with AsyncSessionLocal() as session:
+            stats = await recovery_service.recover_stuck_builds(session)
+
+            logger.info(
+                f"Build recovery complete: {stats['recovered']} recovered, "
+                f"{stats['failed']} failed, {stats['requeued']} requeued, "
+                f"{stats['dead_workers']} dead workers"
+            )
+
+    except Exception as e:
+        logger.error(f"Error in recover_stuck_builds: {e}")
     finally:
         await release_lock(lock_name)
 
@@ -464,6 +498,15 @@ def start_scheduler():
         trigger=IntervalTrigger(minutes=5, start_date=datetime.utcnow() + timedelta(minutes=1)),
         id="reconnect_websockets",
         name="Reconnect websockets",
+        replace_existing=True
+    )
+
+    # Job 3.5: Recover stuck builds every 2 minutes (staggered: starts at :00:30)
+    scheduler.add_job(
+        recover_stuck_builds,
+        trigger=IntervalTrigger(minutes=2, start_date=datetime.utcnow() + timedelta(seconds=30)),
+        id="recover_stuck_builds",
+        name="Recover stuck builds",
         replace_existing=True
     )
 

@@ -1,7 +1,7 @@
 """StrategyBuild model for Oculus platform."""
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import String, Integer, Float, DateTime, Text, ForeignKey, Index
+from sqlalchemy import String, Integer, Float, DateTime, Text, ForeignKey, Index, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -23,7 +23,15 @@ class StrategyBuild(Base):
     tokens_consumed: Mapped[float] = mapped_column(Float, default=0.0)
     iteration_count: Mapped[int] = mapped_column(Integer, default=0)
     max_iterations: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    
+
+    # Build queue and recovery fields
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_checkpoint: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {phase, iteration, step}
+    assigned_worker_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    queue_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # Exponential backoff timestamp
+
     # Foreign keys
     strategy_id: Mapped[str] = mapped_column(String(36), ForeignKey("strategies.uuid"), nullable=False)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.uuid"), nullable=False)
@@ -45,6 +53,8 @@ class StrategyBuild(Base):
         Index("idx_build_strategy_id", "strategy_id"),
         Index("idx_build_user_id", "user_id"),
         Index("idx_build_status", "status"),
+        Index("idx_build_assigned_worker", "assigned_worker_id"),
+        Index("idx_build_queue_position", "queue_position"),
     )
     
     def __repr__(self) -> str:

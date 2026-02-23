@@ -338,6 +338,7 @@ class BuildOrchestrator:
         strategy_type: Optional[str] = None,
         training_results: Optional[Dict[str, Any]] = None,
         iteration_history: Optional[List[Dict[str, Any]]] = None,
+        description: str = "",
     ) -> Dict[str, Any]:
         """Refine strategy based on backtest results.
 
@@ -353,6 +354,7 @@ class BuildOrchestrator:
         prompt = self._build_refinement_prompt(
             previous_design, backtest_results, iteration, creation_guide, strategy_type or "",
             training_results=training_results, iteration_history=iteration_history,
+            description=description,
         )
 
         try:
@@ -669,9 +671,18 @@ Design a trading strategy with these specifications:
 - Name: {strategy_name}
 - Strategy Type: {strategy_type}
 - Symbols: {', '.join(symbols)}
-- Description: {description}
 - Timeframe: {timeframe}
 - Target Return: {target_return}%
+
+## ⚠️ CRITICAL: User Customization Requirements ⚠️
+User Description/Comments: {description}
+
+**MANDATORY INSTRUCTION**: The user's description/comments above are CRITICAL REQUIREMENTS that you MUST follow.
+These are NOT suggestions - they are explicit constraints and customizations that define what the user wants.
+You MUST incorporate every aspect of the user's description into your strategy design to the best of your ability.
+If the user specifies particular indicators, entry/exit conditions, risk parameters, or any other requirements,
+you MUST include them EXACTLY as requested. Ignoring or modifying user requirements is UNACCEPTABLE.
+Treat the user's description with the HIGHEST priority - even higher than general best practices.
 
 ## Previous Builds Context
 {context}
@@ -741,6 +752,7 @@ The JSON must follow this exact schema:
         strategy_type: str = "",
         training_results: Optional[Dict[str, Any]] = None,
         iteration_history: Optional[List[Dict[str, Any]]] = None,
+        description: str = "",
     ) -> str:
         """Build strategy refinement prompt with full schema and analysis guidance.
 
@@ -932,6 +944,21 @@ The JSON must follow this exact schema:
             if k not in ['trades', 'equity_curve', 'ohlc_data']
         }
 
+        # Build user description section if provided
+        user_description_section = ""
+        if description:
+            user_description_section = f"""
+## ⚠️ CRITICAL: User Customization Requirements ⚠️
+User Description/Comments: {description}
+
+**MANDATORY INSTRUCTION**: The user's description/comments above are CRITICAL REQUIREMENTS that you MUST follow.
+These are NOT suggestions - they are explicit constraints and customizations that define what the user wants.
+You MUST incorporate every aspect of the user's description into your strategy refinements to the best of your ability.
+If the user specifies particular indicators, entry/exit conditions, risk parameters, or any other requirements,
+you MUST include them EXACTLY as requested. Ignoring or modifying user requirements is UNACCEPTABLE.
+Treat the user's description with the HIGHEST priority - even higher than general best practices.
+"""
+
         return f"""You are an expert quantitative trading strategy designer refining a strategy based on backtest results.
 
 ## Previous Design (Iteration {iteration})
@@ -939,7 +966,7 @@ The JSON must follow this exact schema:
 
 ## Strategy Type
 - Strategy Type: {strategy_type}
-
+{user_description_section}
 ## Backtest Results (Iteration {iteration})
 - Total Return: {total_return}%
 - Win Rate: {win_rate}%

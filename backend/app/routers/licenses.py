@@ -63,12 +63,13 @@ async def purchase_license(
         expires_at = datetime.utcnow() + timedelta(days=30)
     else:  # annual
         expires_at = datetime.utcnow() + timedelta(days=365)
-    
-    # Create license record
+
+    # Create license record with current strategy version
     license_obj = License(
         status="active",
         license_type=license_data.license_type,
         strategy_id=strategy_id,
+        strategy_version=strategy.version,  # Store the current strategy version
         user_id=current_user.uuid,
         expires_at=expires_at
     )
@@ -364,6 +365,7 @@ async def create_license_subscription(
         status="active",
         license_type=subscribe_data.license_type,
         strategy_id=strategy_id,
+        strategy_version=strategy.version,  # Store the current strategy version
         user_id=current_user.uuid,
         subscription_id=subscription.id,
         expires_at=expires_at,
@@ -585,6 +587,7 @@ async def atlas_validate_license(
         user_uuid=license_obj.user_id,
         strategy_name=strategy.name,
         strategy_description=strategy.description,
+        strategy_version=license_obj.strategy_version or strategy.version,  # Use license version or fall back to current strategy version
         backtest_results=strategy.backtest_results,
         expires_at=license_obj.expires_at,
     )

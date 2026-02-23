@@ -23,6 +23,7 @@ import redis
 
 from worker.config import config
 from worker.job_processor import JobProcessor
+from worker.health_client import WorkerHealthClient
 
 # Force-configure logging (overrides any pre-existing handlers from library imports)
 root_logger = logging.getLogger()
@@ -40,24 +41,48 @@ logger = logging.getLogger(__name__)
 class TrainingWorker:
     """Redis-based training worker for ML jobs."""
 
-    def __init__(self, redis_client: redis.Redis, concurrency: int = 2):
+    def __init__(self, redis_client: redis.Redis, concurrency: int = 2,
+                 health_client: Optional[WorkerHealthClient] = None):
         """Initialize worker.
 
         Args:
             redis_client: Redis client instance
             concurrency: Number of concurrent jobs
+            health_client: Optional health client for backend communication
         """
         self.redis = redis_client
         self.concurrency = concurrency
         self.processor = JobProcessor(redis_client)
         self.executor = ThreadPoolExecutor(max_workers=concurrency)
         self.running = False
+        self.health_client = health_client
+        self.heartbeat_task: Optional[asyncio.Task] = None
+
+    async def _heartbeat_loop(self):
+        """Send periodic heartbeats to backend."""
+        while self.running:
+            try:
+                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
+                if self.health_client:
+                    await self.health_client.send_heartbeat()
+            except Exception as e:
+                logger.warning(f"Heartbeat error: {e}")
 
     async def start(self):
         """Start the worker and listen for jobs."""
         self.running = True
         logger.info(f"Starting training worker (concurrency={self.concurrency})")
         logger.info(f"Listening on queue: {config.job_queue}")
+
+        # Register with backend if health client is available
+        if self.health_client:
+            registered = await self.health_client.register()
+            if registered:
+                logger.info("Worker registered with backend")
+                # Start heartbeat loop
+                self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            else:
+                logger.warning("Failed to register with backend - continuing without health tracking")
 
         try:
             while self.running:
@@ -111,6 +136,13 @@ class TrainingWorker:
             job: Job configuration dictionary
             job_id: Job ID from Redis queue
         """
+        # Extract build_id for health tracking
+        build_id = job.get('build_id', 'unknown')
+
+        # Add job to active jobs list
+        if self.health_client and build_id != 'unknown':
+            self.health_client.add_job(build_id)
+
         try:
             # Process job
             result = await self.processor.process_job(job, job_id)
@@ -123,17 +155,28 @@ class TrainingWorker:
         except Exception as e:
             logger.exception(f"[{job_id}] Failed to process job: {e}")
             error_result = {
-                "build_id": job.get('build_id', 'unknown'),
+                "build_id": build_id,
                 "status": "error",
                 "error": str(e)
             }
             result_key = f"{config.result_key_prefix}:{job_id}"
             self.redis.set(result_key, json.dumps(error_result), ex=86400)
 
+        finally:
+            # Remove job from active jobs list
+            if self.health_client and build_id != 'unknown':
+                self.health_client.remove_job(build_id)
+
     def stop(self):
         """Stop the worker gracefully."""
         logger.info("Stopping worker...")
         self.running = False
+
+        # Cancel heartbeat task if running
+        if self.heartbeat_task and not self.heartbeat_task.done():
+            self.heartbeat_task.cancel()
+            logger.info("Heartbeat task cancelled")
+
         self.executor.shutdown(wait=True)
         logger.info("Worker stopped")
 
@@ -171,9 +214,20 @@ async def main():
         logger.error(f"Failed to connect to Redis: {e}")
         sys.exit(1)
 
+    # Create health client for backend communication
+    health_client = None
+    try:
+        health_client = WorkerHealthClient(
+            backend_url=config.backend_url,
+            capacity=args.concurrency or config.worker_concurrency
+        )
+        logger.info(f"Health client created for backend: {config.backend_url}")
+    except Exception as e:
+        logger.warning(f"Failed to create health client: {e} - continuing without health tracking")
+
     # Create and start worker
     concurrency = args.concurrency or config.worker_concurrency
-    worker = TrainingWorker(redis_client, concurrency=concurrency)
+    worker = TrainingWorker(redis_client, concurrency=concurrency, health_client=health_client)
 
     # Handle shutdown signals
     def signal_handler(sig, frame):

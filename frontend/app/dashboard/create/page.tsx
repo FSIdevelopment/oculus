@@ -354,20 +354,6 @@ export default function CreateStrategyPage() {
               className="w-full bg-background border border-border rounded px-3 py-2 text-text placeholder-text-secondary focus:outline-none focus:border-primary resize-none"
             />
           </div>
-
-          {/* LLM Enabled */}
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="llm_enabled"
-              checked={formData.llm_enabled}
-              onChange={(e) => setFormData({ ...formData, llm_enabled: e.target.checked })}
-              className="w-4 h-4 rounded border-border bg-background cursor-pointer"
-            />
-            <label htmlFor="llm_enabled" className="text-sm font-medium text-text cursor-pointer">
-              Enable LLM-assisted design
-            </label>
-          </div>
         </div>
 
         {/* Token Cost */}

@@ -101,6 +101,11 @@ class WorkerConfig:
         """Job timeout in seconds."""
         return int(os.getenv('JOB_TIMEOUT_SECONDS', '3600'))
 
+    @property
+    def backend_url(self) -> str:
+        """Backend API URL for health tracking."""
+        return os.getenv('BACKEND_URL', 'http://localhost:8000')
+
 
 # Global config instance
 config = WorkerConfig()

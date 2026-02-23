@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import secrets
 import string
 import stripe
+import redis.asyncio as redis
 
 from app.database import get_db
 from app.config import settings
@@ -22,6 +23,8 @@ from app.schemas.licenses import LicenseResponse
 from app.auth.dependencies import admin_required
 from app.auth.security import hash_password, create_access_token
 from app.services.email_service import EmailService
+from app.services.build_queue import BuildQueueManager
+from app.services.monitoring import MonitoringService
 
 router = APIRouter()
 
@@ -39,30 +42,30 @@ async def list_users(
 ):
     """
     List all users with pagination and search.
-    
+
     - Paginated with skip/limit
     - Search by name or email (case-insensitive)
     """
     query = select(User)
-    
+
     # Apply search filter
     if search:
         query = query.where(
-            (User.name.ilike(f"%{search}%")) | 
+            (User.name.ilike(f"%{search}%")) |
             (User.email.ilike(f"%{search}%"))
         )
-    
+
     # Get total count
     count_result = await db.execute(select(func.count(User.uuid)).select_from(User))
     total = count_result.scalar()
-    
+
     # Apply pagination
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
-    
+
     items = [UserListItem.model_validate(u) for u in users]
-    
+
     return {
         "items": items,
         "total": total,
@@ -139,13 +142,13 @@ async def get_user_detail(
     """Get detailed information about a specific user."""
     result = await db.execute(select(User).where(User.uuid == user_id))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     return user
 
 
@@ -158,18 +161,18 @@ async def update_user(
 ):
     """
     Update user information (admin only).
-    
+
     - Can update all fields including role and status
     """
     result = await db.execute(select(User).where(User.uuid == user_id))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Check email uniqueness
     if user_update.email and user_update.email != user.email:
         result = await db.execute(select(User).where(User.email == user_update.email))
@@ -178,7 +181,7 @@ async def update_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already in use"
             )
-    
+
     # Update fields
     if user_update.name:
         user.name = user_update.name
@@ -192,11 +195,11 @@ async def update_user(
         user.status = user_update.status
     if user_update.balance is not None:
         user.balance = user_update.balance
-    
+
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    
+
     return user
 
 
@@ -208,18 +211,18 @@ async def soft_delete_user(
 ):
     """
     Soft-delete a user (set is_active=False).
-    
+
     - User data is preserved but account is deactivated
     """
     result = await db.execute(select(User).where(User.uuid == user_id))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     user.status = "inactive"
     db.add(user)
     await db.commit()
@@ -629,4 +632,117 @@ async def revoke_license(
     await db.refresh(license_obj)
 
     return license_obj
+
+
+@router.get("/queue/status")
+async def get_queue_status(
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get comprehensive build queue status for admin dashboard.
+
+    Returns:
+    - Queue length and active builds count
+    - Worker statistics (total, active, capacity)
+    - List of queued builds with details
+    - List of active builds with progress
+    - Worker health information
+    """
+    try:
+        # Create Redis client
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+        # Create queue manager
+        queue_manager = BuildQueueManager(redis_client)
+
+        # Get comprehensive queue status
+        status_data = await queue_manager.get_queue_status(db)
+
+        # Close Redis connection
+        await redis_client.close()
+
+        return status_data
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get queue status: {str(e)}"
+        )
+
+
+
+@router.get("/health")
+async def get_system_health(
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get comprehensive system health metrics for monitoring.
+
+    Returns:
+    - Overall health score (0-100)
+    - System status (healthy/degraded/warning/critical)
+    - Queue metrics (length, active builds, avg wait time)
+    - Worker metrics (total, active, dead, utilization)
+    - Build metrics (success rate, avg duration, counts by status)
+    - Recovery metrics (retries, failures)
+    """
+    try:
+        # Create Redis client
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+        # Create monitoring service
+        monitoring = MonitoringService(redis_client)
+
+        # Get system health
+        health = await monitoring.get_system_health(db)
+
+        # Close Redis connection
+        await redis_client.close()
+
+        return health
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get system health: {str(e)}"
+        )
+
+
+
+@router.get("/scaling/recommendations")
+async def get_scaling_recommendations(
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get worker auto-scaling recommendations.
+
+    Returns:
+    - Scaling recommendation (scale_up/scale_down/maintain)
+    - Reason for recommendation
+    - Current and suggested worker count
+    - Key metrics used for decision
+    """
+    try:
+        # Create Redis client
+        redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+        # Create monitoring service
+        monitoring = MonitoringService(redis_client)
+
+        # Get scaling recommendations
+        recommendations = await monitoring.get_scaling_recommendations(db)
+
+        # Close Redis connection
+        await redis_client.close()
+
+        return recommendations
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get scaling recommendations: {str(e)}"
+        )
 

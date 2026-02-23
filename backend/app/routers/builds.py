@@ -29,6 +29,9 @@ from app.services.docker_builder import DockerBuilder
 from app.services.balance import deduct_tokens, check_balance
 from app.config import settings
 from sqlalchemy import select as sa_select
+from app.services.build_queue import BuildQueueManager
+from app.services.checkpoint_manager import CheckpointManager
+from app.services.priority_manager import PriorityManager
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +73,36 @@ async def _save_chat_history(
     await db.flush()
 
 
+async def _get_queue_position(build_id: str) -> int | None:
+    """Get the current queue position for a build.
+
+    Args:
+        build_id: Build ID
+
+    Returns:
+        Queue position (1-based) or None if not in queue
+    """
+    try:
+        redis_client = await redis_async.from_url(settings.REDIS_URL, decode_responses=True)
+        queue_manager = BuildQueueManager(redis_client)
+        position = await queue_manager.get_queue_position(build_id)
+        await redis_client.close()
+        return position
+    except Exception as e:
+        logger.warning(f"Failed to get queue position for build {build_id}: {e}")
+        return None
+
+
 async def _publish_progress(build_id: str, data: dict, max_retries: int = 3) -> None:
     """Publish a progress update to the Redis channel for a build with retry logic.
 
     Note: Uses a timeout to avoid blocking if Redis is busy with long-running training jobs.
     """
+    # Add queue position to progress data if build is queued
+    if data.get("phase") in ["initializing", "queued"] or data.get("status") == "queued":
+        queue_position = await _get_queue_position(build_id)
+        if queue_position is not None:
+            data["queue_position"] = queue_position
     for attempt in range(max_retries):
         redis_client = None
         try:
@@ -736,6 +764,13 @@ async def _run_build_loop(
                             "best_model": last_iteration.best_model.get("name") if last_iteration.best_model else "Unknown",
                             "strategy_files": last_iteration.strategy_files or {},
                         }
+                    else:
+                        # Initialize empty training_results if no backtest results available
+                        training_results = {
+                            "backtest_results": {},
+                            "best_model": "Unknown",
+                            "strategy_files": {},
+                        }
 
             # Iteration loop: design → train → refine → repeat
             # Starts from start_iteration to support resuming stopped/failed builds
@@ -855,6 +890,12 @@ async def _run_build_loop(
                         build.status = "building"
                     iteration_record.status = "designing"
                     await bg_db.commit()
+
+                    # Save checkpoint before designing
+                    await CheckpointManager.save_checkpoint(
+                        bg_db, build_id, "designing", iteration=iteration
+                    )
+
                     await _publish_progress(build_id, {
                         "phase": "designing",
                         "iteration": iteration,
@@ -1007,6 +1048,7 @@ async def _run_build_loop(
                         strategy_type=strategy_type,
                         training_results=training_results,
                         iteration_history=iteration_history if iteration_history else None,
+                        description=description,
                     )
                     guide_task = _guide_update_safe()
                     results = await asyncio.gather(refine_task, guide_task)
@@ -1066,6 +1108,12 @@ async def _run_build_loop(
                 build.phase = "training"
                 iteration_record.status = "training"
                 await bg_db.commit()
+
+                # Save checkpoint before training
+                await CheckpointManager.save_checkpoint(
+                    bg_db, build_id, "training", iteration=iteration
+                )
+
                 await _publish_progress(build_id, {
                     "phase": "training",
                     "iteration": iteration,
@@ -1168,6 +1216,12 @@ async def _run_build_loop(
                     else:
                         raise  # Re-raise non-402 errors
 
+                # Save checkpoint after iteration completes
+                await CheckpointManager.save_checkpoint(
+                    bg_db, build_id, "iteration_complete", iteration=iteration,
+                    data={"total_return": (training_results.get("backtest_results") or {}).get("total_return")}
+                )
+
                 # Publish per-iteration training results via Redis
                 await _publish_progress(build_id, {
                     "phase": "training_complete",
@@ -1200,6 +1254,12 @@ async def _run_build_loop(
                     # --- NEW: Template-based strategy container build ---
                     build.phase = "building_docker"
                     await bg_db.commit()
+
+                    # Save checkpoint before building Docker
+                    await CheckpointManager.save_checkpoint(
+                        bg_db, build_id, "building_docker", iteration=iteration
+                    )
+
                     await _publish_progress(build_id, {
                         "phase": "building_docker",
                         "iteration": iteration,
@@ -1701,6 +1761,22 @@ async def trigger_build(
 
     strategy_description = description or strategy.description or ""
     strat_type = strategy.strategy_type  # e.g. "Momentum", "Mean Reversion", etc.
+
+    # Add build to queue for tracking and recovery
+    try:
+        # Get user priority
+        user_priority = await PriorityManager.get_user_priority(db, current_user.uuid)
+        priority_desc = PriorityManager.get_priority_description(user_priority)
+        logger.info(f"Build {build_id} priority: {user_priority} ({priority_desc})")
+
+        redis_client = await redis_async.from_url(settings.REDIS_URL, decode_responses=True)
+        queue_manager = BuildQueueManager(redis_client)
+        queue_position = await queue_manager.enqueue_build(db, build_id, priority=user_priority)
+        logger.info(f"Build {build_id} added to queue at position {queue_position}")
+        await redis_client.close()
+    except Exception as e:
+        logger.error(f"Failed to enqueue build {build_id}: {e}", exc_info=True)
+        # Continue anyway - build will still run, just won't be tracked in queue
 
     # Launch the build loop as a background task.
     # Store a strong reference in _background_tasks to prevent garbage collection.

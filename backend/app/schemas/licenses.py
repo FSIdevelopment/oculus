@@ -97,6 +97,7 @@ class AtlasLicenseValidationResponse(BaseModel):
     user_uuid: str
     strategy_name: str
     strategy_description: Optional[str] = None
+    strategy_version: Optional[int] = None
     backtest_results: Optional[dict] = None
     expires_at: datetime
 
