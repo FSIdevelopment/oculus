@@ -78,7 +78,10 @@ class WorkerHealthManager:
         active_job_ids: List[str]
     ):
         """Update worker heartbeat and active jobs.
-        
+
+        Also updates last_heartbeat for all active builds to prevent them from
+        being marked as stuck while they're still being processed.
+
         Args:
             db: Database session
             worker_id: Worker identifier
@@ -89,20 +92,37 @@ class WorkerHealthManager:
                 select(WorkerHealth).where(WorkerHealth.worker_id == worker_id)
             )
             worker = result.scalar_one_or_none()
-            
+
             if not worker:
                 logger.warning(f"Worker {worker_id} not found for heartbeat update")
                 return
-            
-            worker.last_heartbeat = datetime.utcnow()
+
+            now = datetime.utcnow()
+            worker.last_heartbeat = now
             worker.active_jobs = len(active_job_ids)
             worker.status = "active"
-            worker.updated_at = datetime.utcnow()
-            
+            worker.updated_at = now
+
+            # Update last_heartbeat for all active builds to prevent them from being
+            # marked as stuck by the recovery service while they're still processing
+            if active_job_ids:
+                result = await db.execute(
+                    select(StrategyBuild).where(StrategyBuild.uuid.in_(active_job_ids))
+                )
+                active_builds = result.scalars().all()
+
+                for build in active_builds:
+                    build.last_heartbeat = now
+
+                logger.debug(
+                    f"Worker {worker_id} heartbeat updated: {len(active_job_ids)} active jobs, "
+                    f"updated {len(active_builds)} build heartbeats"
+                )
+            else:
+                logger.debug(f"Worker {worker_id} heartbeat updated: no active jobs")
+
             await db.commit()
-            
-            logger.debug(f"Worker {worker_id} heartbeat updated: {len(active_job_ids)} active jobs")
-            
+
         except Exception as e:
             logger.error(f"Failed to update heartbeat for worker {worker_id}: {e}")
             await db.rollback()

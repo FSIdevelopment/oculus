@@ -2254,13 +2254,19 @@ async def restart_build(
 
     Reuses the same build record and continues from the last completed iteration.
     Only builds with status 'failed' or 'stopped' can be restarted.
+    Admins can restart any build; regular users can only restart their own.
     """
-    # Fetch original build and validate ownership
-    result = await db.execute(
-        select(StrategyBuild).where(
-            (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
+    # Fetch original build (admins can restart any build)
+    if current_user.user_role == "admin":
+        result = await db.execute(
+            select(StrategyBuild).where(StrategyBuild.uuid == build_id)
         )
-    )
+    else:
+        result = await db.execute(
+            select(StrategyBuild).where(
+                (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
+            )
+        )
     build = result.scalar_one_or_none()
 
     if not build:
@@ -2275,18 +2281,9 @@ async def restart_build(
             detail=f"Cannot restart build with status '{build.status}'. Only 'failed' or 'stopped' builds can be restarted."
         )
 
-    # Validate user has enough tokens for at least one iteration
-    if current_user.balance < settings.TOKENS_PER_ITERATION:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"Insufficient token balance. You need at least {settings.TOKENS_PER_ITERATION} tokens per iteration. Current balance: {current_user.balance}"
-        )
-
     # Fetch the strategy for the build
     strat_result = await db.execute(
-        select(Strategy).where(
-            (Strategy.uuid == build.strategy_id) & (Strategy.user_id == current_user.uuid)
-        )
+        select(Strategy).where(Strategy.uuid == build.strategy_id)
     )
     strategy = strat_result.scalar_one_or_none()
 
@@ -2294,6 +2291,31 @@ async def restart_build(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Strategy not found"
+        )
+
+    # Determine which user's tokens to use
+    # For admin restarts, use the strategy owner's tokens
+    # For regular users, use their own tokens
+    if current_user.user_role == "admin":
+        # Fetch the strategy owner for token validation
+        owner_result = await db.execute(
+            select(User).where(User.uuid == strategy.user_id)
+        )
+        strategy_owner = owner_result.scalar_one_or_none()
+        if not strategy_owner:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy owner not found"
+            )
+        token_user = strategy_owner
+    else:
+        token_user = current_user
+
+    # Validate token balance
+    if token_user.balance < settings.TOKENS_PER_ITERATION:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"Insufficient token balance. You need at least {settings.TOKENS_PER_ITERATION} tokens per iteration. Current balance: {token_user.balance}"
         )
 
     # Reuse the same build record - reset status and clear completed_at
@@ -2308,7 +2330,8 @@ async def restart_build(
     await db.commit()
 
     # Capture values for background task
-    user_id = current_user.uuid
+    # Use the build's owner (strategy owner) for the background task, not the admin
+    user_id = build.user_id
     strategy_name = strategy.name
     start_iteration = build.iteration_count  # Resume from where we left off
 

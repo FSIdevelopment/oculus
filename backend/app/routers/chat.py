@@ -74,26 +74,27 @@ async def get_chat_history(
 ):
     """
     Get chat history for a strategy (paginated, chronological order).
-    Only the strategy owner can access their chat history.
+    Strategy owner or admin can access chat history.
     """
-    # Verify strategy exists and user owns it
+    # Verify strategy exists
     result = await db.execute(
         select(Strategy).where(Strategy.uuid == strategy_id)
     )
     strategy = result.scalar_one_or_none()
-    
+
     if not strategy:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Strategy not found"
         )
-    
-    if strategy.user_id != current_user.uuid:
+
+    # Check if user owns the strategy or is an admin
+    if strategy.user_id != current_user.uuid and current_user.user_role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only strategy owner can access chat history"
+            detail="Only strategy owner or admin can access chat history"
         )
-    
+
     # Get chat history
     offset = (page - 1) * page_size
     result = await db.execute(
@@ -104,7 +105,7 @@ async def get_chat_history(
         .limit(page_size)
     )
     messages = result.scalars().all()
-    
+
     return [
         ChatMessageResponse(
             uuid=msg.uuid,

@@ -445,27 +445,54 @@ async def retrain_strategy(
 
     Increments the strategy version and launches a new build loop in the background.
     Returns BuildResponse immediately with status='queued'.
+    Admins can retrain any strategy; regular users can only retrain their own.
     """
     import redis.asyncio as redis_async
     from app.routers.builds import _run_build_loop
 
-    # Fetch and validate strategy ownership
-    result = await db.execute(
-        select(Strategy).where(
-            Strategy.uuid == strategy_id,
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted",
+    # Fetch and validate strategy (admins can retrain any strategy)
+    if current_user.user_role == "admin":
+        result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.status != "deleted",
+            )
         )
-    )
+    else:
+        result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.user_id == current_user.uuid,
+                Strategy.status != "deleted",
+            )
+        )
     strategy = result.scalar_one_or_none()
     if not strategy:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
 
+    # Determine which user's tokens to use
+    # For admin retrains, use the strategy owner's tokens
+    # For regular users, use their own tokens
+    if current_user.user_role == "admin":
+        # Fetch the strategy owner for token validation
+        owner_result = await db.execute(
+            select(User).where(User.uuid == strategy.user_id)
+        )
+        strategy_owner = owner_result.scalar_one_or_none()
+        if not strategy_owner:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Strategy owner not found"
+            )
+        token_user = strategy_owner
+    else:
+        token_user = current_user
+
     # Validate token balance
-    if current_user.balance < settings.TOKENS_PER_ITERATION:
+    if token_user.balance < settings.TOKENS_PER_ITERATION:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"Insufficient tokens. Need at least {settings.TOKENS_PER_ITERATION}. Balance: {current_user.balance}",
+            detail=f"Insufficient tokens. Need at least {settings.TOKENS_PER_ITERATION}. Balance: {token_user.balance}",
         )
 
     # Increment strategy version to signal a new build is starting
@@ -473,9 +500,10 @@ async def retrain_strategy(
     strategy.updated_at = datetime.utcnow()
 
     # Create a new build record
+    # Use the strategy owner's user_id for the build, not the admin's
     build = StrategyBuild(
         strategy_id=strategy_id,
-        user_id=current_user.uuid,
+        user_id=strategy.user_id,
         status="queued",
         phase="initializing",
         started_at=datetime.utcnow(),
@@ -486,7 +514,7 @@ async def retrain_strategy(
     await db.refresh(build)
 
     build_id = build.uuid
-    user_id = current_user.uuid
+    user_id = strategy.user_id  # Use strategy owner's ID for the build
     strategy_name = strategy.name
 
     # Clear any stale stop signal from previous builds
@@ -774,15 +802,24 @@ async def get_build_readme(
     Return the README.md generated for a specific build.
 
     The README is stored in the database for production compatibility.
+    Admins can view any strategy's README; regular users can only view their own.
     """
-    # Verify strategy ownership
-    strat_result = await db.execute(
-        select(Strategy).where(
-            Strategy.uuid == strategy_id,
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted",
+    # Verify strategy ownership (admins can view any strategy)
+    if current_user.user_role == "admin":
+        strat_result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.status != "deleted",
+            )
         )
-    )
+    else:
+        strat_result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.user_id == current_user.uuid,
+                Strategy.status != "deleted",
+            )
+        )
     if not strat_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
 

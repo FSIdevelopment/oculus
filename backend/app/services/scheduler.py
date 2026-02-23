@@ -145,26 +145,33 @@ async def reconnect_workers():
         await client.ping()
         logger.info("Redis connection healthy")
         
-        # Check for builds stuck in "training" for > 60 minutes
+        # Check for builds stuck in "training" for > 60 minutes WITHOUT heartbeat
+        # This catches builds that are truly stuck, not just long-running
         async with AsyncSessionLocal() as session:
             now = datetime.utcnow()
             training_threshold = now - timedelta(minutes=60)
-            
+            heartbeat_threshold = now - timedelta(minutes=10)  # No heartbeat for 10 minutes
+
             query = select(StrategyBuild).where(
                 and_(
                     StrategyBuild.status == "training",
-                    StrategyBuild.started_at < training_threshold
+                    StrategyBuild.started_at < training_threshold,
+                    # Only fail if no recent heartbeat (worker is actually dead/stuck)
+                    or_(
+                        StrategyBuild.last_heartbeat < heartbeat_threshold,
+                        StrategyBuild.last_heartbeat.is_(None)
+                    )
                 )
             )
             result = await session.execute(query)
             stuck_builds = result.scalars().all()
-            
+
             for build in stuck_builds:
                 build.status = "failed"
                 build.phase = "Timeout - training took too long"
                 build.completed_at = now
                 logger.warning(f"Failed stuck training build {build.uuid}")
-            
+
             await session.commit()
             logger.info(f"Checked worker connectivity, failed {len(stuck_builds)} stuck training builds")
             
