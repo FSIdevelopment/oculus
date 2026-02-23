@@ -15,7 +15,7 @@ class StrategyBuild(Base):
     uuid: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     
     # Build info
-    status: Mapped[str] = mapped_column(String(50), nullable=False)  # "queued", "building", "designing", "training", "extracting_rules", "optimizing", "building_docker", "complete", "failed"
+    status: Mapped[str] = mapped_column(String(50), nullable=False)  # "queued", "building", "designing", "waiting_for_worker", "training", "extracting_rules", "optimizing", "building_docker", "complete", "failed", "stopped"
     phase: Mapped[str | None] = mapped_column(String(100), nullable=True)
     logs: Mapped[str | None] = mapped_column(Text, nullable=True)
     

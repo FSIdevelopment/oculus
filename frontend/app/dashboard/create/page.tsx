@@ -68,7 +68,8 @@ export default function CreateStrategyPage() {
     timeframe: '1d',
     target_return: 15,
     max_iterations: 5,
-    comments: '',
+    customizations: '',
+    thoughts: '',
     llm_enabled: true,
   })
 
@@ -127,7 +128,7 @@ export default function CreateStrategyPage() {
       // Step 1: Create strategy
       const strategyRes = await api.post('/api/strategies', {
         name: formData.name,
-        description: formData.comments,
+        description: formData.customizations || formData.thoughts || '',
         config: {
           strategy_type: formData.strategy_type,
           timeframe: formData.timeframe,
@@ -143,7 +144,8 @@ export default function CreateStrategyPage() {
       const buildRes = await api.post('/api/builds/trigger', null, {
         params: {
           strategy_id: strategyId,
-          description: formData.comments,
+          customizations: formData.customizations,
+          thoughts: formData.thoughts,
           target_return: formData.target_return,
           timeframe: formData.timeframe,
           max_iterations: formData.max_iterations,
@@ -341,15 +343,35 @@ export default function CreateStrategyPage() {
             </p>
           </div>
 
-          {/* Comments */}
+          {/* Customizations */}
           <div>
             <label className="block text-sm font-medium text-text mb-2">
-              Comments / Customizations
+              Customizations
             </label>
+            <p className="text-xs text-text-secondary mb-2">
+              Any REQUIRED additional instructions for the AI. The AI will absolutely follow these instructions.
+            </p>
             <textarea
-              value={formData.comments}
-              onChange={(e) => setFormData({ ...formData, comments: e.target.value })}
-              placeholder="Any additional instructions for the AI..."
+              value={formData.customizations}
+              onChange={(e) => setFormData({ ...formData, customizations: e.target.value })}
+              placeholder="e.g., max daily drawdown of 5%"
+              rows={4}
+              className="w-full bg-background border border-border rounded px-3 py-2 text-text placeholder-text-secondary focus:outline-none focus:border-primary resize-none"
+            />
+          </div>
+
+          {/* Thoughts */}
+          <div>
+            <label className="block text-sm font-medium text-text mb-2">
+              Thoughts
+            </label>
+            <p className="text-xs text-text-secondary mb-2">
+              Things you want the AI to consider when building your strategy. Not required by the AI to design and build your strategy.
+            </p>
+            <textarea
+              value={formData.thoughts}
+              onChange={(e) => setFormData({ ...formData, thoughts: e.target.value })}
+              placeholder="e.g., Consider the volatility of micro cap and small cap stocks and their liquidity."
               rows={4}
               className="w-full bg-background border border-border rounded px-3 py-2 text-text placeholder-text-secondary focus:outline-none focus:border-primary resize-none"
             />

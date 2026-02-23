@@ -34,15 +34,27 @@ interface Worker {
   last_heartbeat: string | null
 }
 
+interface TrainingQueueBuild {
+  uuid: string
+  strategy_id: string
+  status: string
+  phase: string | null
+  iteration_count: number
+  max_iterations: number
+  started_at: string | null
+}
+
 interface QueueStatus {
   queue_length: number
   active_builds_count: number
+  training_queue_length: number
   total_workers: number
   active_workers: number
   total_capacity: number
   available_capacity: number
   queued_builds: QueuedBuild[]
   active_builds: ActiveBuild[]
+  training_queue_builds: TrainingQueueBuild[]
   workers: Worker[]
 }
 
@@ -117,23 +129,32 @@ export default function QueueManagementTab() {
       </div>
 
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-surface border border-border rounded-lg p-6">
           <div className="flex items-center gap-3 mb-2">
             <Clock className="text-yellow-400" size={24} />
-            <h3 className="text-lg font-semibold text-text">Queue</h3>
+            <h3 className="text-lg font-semibold text-text">Build Queue</h3>
           </div>
           <p className="text-3xl font-bold text-text">{queueStatus.queue_length}</p>
-          <p className="text-text-secondary text-sm mt-1">Builds waiting</p>
+          <p className="text-text-secondary text-sm mt-1">Waiting to start</p>
         </div>
 
         <div className="bg-surface border border-border rounded-lg p-6">
           <div className="flex items-center gap-3 mb-2">
             <Activity className="text-green-400" size={24} />
-            <h3 className="text-lg font-semibold text-text">Active</h3>
+            <h3 className="text-lg font-semibold text-text">Active Builds</h3>
           </div>
           <p className="text-3xl font-bold text-text">{queueStatus.active_builds_count}</p>
-          <p className="text-text-secondary text-sm mt-1">Builds processing</p>
+          <p className="text-text-secondary text-sm mt-1">Currently running</p>
+        </div>
+
+        <div className="bg-surface border border-border rounded-lg p-6">
+          <div className="flex items-center gap-3 mb-2">
+            <Clock className="text-orange-400" size={24} />
+            <h3 className="text-lg font-semibold text-text">Training Queue</h3>
+          </div>
+          <p className="text-3xl font-bold text-text">{queueStatus.training_queue_length}</p>
+          <p className="text-text-secondary text-sm mt-1">Waiting for worker</p>
         </div>
 
         <div className="bg-surface border border-border rounded-lg p-6">
@@ -194,6 +215,68 @@ export default function QueueManagementTab() {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-text">{build.retry_count}</td>
+                    <td className="px-6 py-4 text-text-secondary text-sm">
+                      {build.started_at ? new Date(build.started_at).toLocaleString() : 'N/A'}
+                    </td>
+                    <td className="px-6 py-4">
+                      <Link
+                        href={`/dashboard/build/${build.uuid}`}
+                        className="text-primary hover:text-primary-hover text-sm font-medium"
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Training Queue (Waiting for Worker) */}
+      <div className="bg-surface border border-border rounded-lg overflow-hidden">
+        <div className="px-6 py-4 border-b border-border">
+          <h3 className="text-lg font-semibold text-text flex items-center gap-2">
+            <Clock size={20} className="text-orange-400" />
+            Training Queue ({queueStatus.training_queue_length})
+          </h3>
+          <p className="text-text-secondary text-sm mt-1">Builds waiting for worker availability</p>
+        </div>
+        {queueStatus.training_queue_builds.length === 0 ? (
+          <div className="p-8 text-center text-text-secondary">
+            <CheckCircle className="mx-auto mb-2 text-green-400" size={32} />
+            <p>No builds waiting for workers</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-surface-hover">
+                <tr>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Build ID</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Status</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Phase</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Progress</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Waiting Since</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queueStatus.training_queue_builds.map((build, idx) => (
+                  <tr
+                    key={build.uuid}
+                    className={`border-b border-border ${idx % 2 === 0 ? 'bg-surface' : 'bg-surface-hover'}`}
+                  >
+                    <td className="px-6 py-4 font-mono text-sm text-text">{build.uuid.slice(0, 8)}...</td>
+                    <td className="px-6 py-4">
+                      <span className="px-2 py-1 rounded-full bg-orange-900/20 text-orange-400 text-xs font-medium">
+                        {build.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-text capitalize">{build.phase || 'N/A'}</td>
+                    <td className="px-6 py-4 text-text">
+                      {build.iteration_count}/{build.max_iterations}
+                    </td>
                     <td className="px-6 py-4 text-text-secondary text-sm">
                       {build.started_at ? new Date(build.started_at).toLocaleString() : 'N/A'}
                     </td>

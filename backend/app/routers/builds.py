@@ -686,12 +686,16 @@ async def _run_build_loop(
     strategy_type: str | None = None,
     start_iteration: int = 0,
     prior_iteration_history: list | None = None,
+    customizations: str = "",
+    thoughts: str = "",
 ):
     """
     Background task that runs the full build iteration loop.
 
     Args:
         start_iteration: Iteration number to start from (default 0). Used for resuming builds.
+        customizations: Required instructions that the AI must follow.
+        thoughts: Optional considerations for the AI to think about.
 
     Uses its own DB session since the request-scoped session will be closed
     by the time this coroutine executes.
@@ -933,6 +937,8 @@ async def _run_build_loop(
                         strategy_type=strategy_type,
                         iteration=iteration,
                         prior_iteration_history=prior_iteration_history,
+                        customizations=customizations,
+                        thoughts=thoughts,
                     )
                     design = llm_result["design"]
                     thinking_text = llm_result.get("thinking", "")
@@ -947,7 +953,8 @@ async def _run_build_loop(
                         bg_db, user_id, strategy_id,
                         orchestrator._build_design_prompt(
                             strategy_name, strategy_type, strategy_symbols,
-                            description, timeframe, target_return, "", ""
+                            description, timeframe, target_return, "", "",
+                            customizations=customizations, thoughts=thoughts
                         ),
                         json.dumps(design)
                     )
@@ -1720,7 +1727,9 @@ async def _run_build_loop(
 @router.post("/api/builds/trigger", response_model=BuildResponse)
 async def trigger_build(
     strategy_id: str,
-    description: str = "",
+    customizations: str = "",
+    thoughts: str = "",
+    description: str = "",  # Deprecated, kept for backward compatibility
     target_return: float = 10.0,
     timeframe: str = "1d",
     max_iterations: int = 5,
@@ -1831,6 +1840,8 @@ async def trigger_build(
             timeframe=timeframe,
             max_iterations=max_iterations,
             strategy_type=strat_type,
+            customizations=customizations,
+            thoughts=thoughts,
         ),
         name=f"build-{build_id}",
     )
@@ -1953,7 +1964,7 @@ async def get_build_iterations(
         )
 
     # Check ownership (admins can view any build)
-    if not current_user.is_admin:
+    if current_user.user_role != "admin":
         # Fetch strategy to verify ownership for non-admin users
         strat_result = await db.execute(
             select(Strategy).where(Strategy.uuid == build.strategy_id)
@@ -2021,7 +2032,7 @@ async def get_build_status(
         )
 
     # Check ownership (admins can view any build)
-    if not current_user.is_admin and build.user_id != current_user.uuid:
+    if current_user.user_role != "admin" and build.user_id != current_user.uuid:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Build not found"
@@ -2061,16 +2072,22 @@ async def stop_build(
 
     Sets a Redis stop key that the build loop checks at each iteration.
     Only builds with status 'building' or 'queued' can be stopped.
+    Admins can stop any build; regular users can only stop their own builds.
     """
-    # Fetch build and validate ownership
+    # Fetch build
     result = await db.execute(
-        select(StrategyBuild).where(
-            (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
-        )
+        select(StrategyBuild).where(StrategyBuild.uuid == build_id)
     )
     build = result.scalar_one_or_none()
 
     if not build:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Build not found"
+        )
+
+    # Check ownership (admins can stop any build)
+    if current_user.user_role != "admin" and build.user_id != current_user.uuid:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Build not found"
@@ -2233,6 +2250,8 @@ async def restart_build(
             max_iterations=build.max_iterations,
             strategy_type=strat_type,
             start_iteration=start_iteration,  # Resume from here
+            customizations="",  # Not available for resumed builds
+            thoughts="",  # Not available for resumed builds
         ),
         name=f"build-{build_id}",
     )

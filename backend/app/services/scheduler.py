@@ -391,6 +391,200 @@ async def send_build_failed_emails():
         await release_lock(lock_name)
 
 
+async def assign_waiting_builds_to_workers():
+    """Assign builds waiting for workers to available workers.
+
+    This job runs every 15 seconds to check for builds in 'waiting_for_worker' status
+    and dispatches them to the training queue when worker capacity becomes available.
+    """
+    lock_name = "assign_waiting_builds"
+
+    if not await acquire_lock(lock_name):
+        logger.debug(f"Skipping {lock_name} - another instance is running")
+        return
+
+    try:
+        logger.debug("Running assign_waiting_builds_to_workers job")
+        client = await get_redis_client()
+
+        async with AsyncSessionLocal() as session:
+            from app.services.worker_health import WorkerHealthManager
+
+            worker_manager = WorkerHealthManager()
+
+            # Get available worker capacity
+            workers = await worker_manager.get_active_workers(session)
+            total_capacity = sum(w.capacity for w in workers)
+            active_jobs = sum(w.active_jobs for w in workers)
+            available_capacity = total_capacity - active_jobs
+
+            if available_capacity <= 0:
+                logger.debug("No available worker capacity for waiting builds")
+                return
+
+            # Get builds waiting for workers (ordered by created_at)
+            result = await session.execute(
+                select(StrategyBuild)
+                .where(StrategyBuild.status == "waiting_for_worker")
+                .order_by(StrategyBuild.created_at)
+                .limit(available_capacity)
+            )
+            waiting_builds = result.scalars().all()
+
+            if not waiting_builds:
+                logger.debug("No builds waiting for workers")
+                return
+
+            logger.info(f"Available capacity: {available_capacity}, Waiting builds: {len(waiting_builds)}")
+
+            # Dispatch waiting builds to training queue
+            builds_dispatched = 0
+            for build in waiting_builds:
+                try:
+                    # Get pending job payload from Redis
+                    job_id = f"build:{build.uuid}:iter:*"  # Pattern match
+                    pending_keys = await client.keys(f"pending:{job_id}")
+
+                    if not pending_keys:
+                        logger.warning(f"No pending job found for build {build.uuid}, skipping")
+                        # Reset status so it can be retried
+                        build.status = "building"
+                        build.phase = "Retrying training dispatch"
+                        await session.commit()
+                        continue
+
+                    # Get the job payload
+                    job_payload_str = await client.get(pending_keys[0])
+                    if not job_payload_str:
+                        logger.warning(f"Pending job payload empty for build {build.uuid}")
+                        continue
+
+                    job_payload = json.loads(job_payload_str)
+                    actual_job_id = pending_keys[0].replace("pending:", "")
+
+                    # Dispatch to training queue
+                    await client.delete(f"result:{actual_job_id}")  # Clean up stale results
+                    await client.set(actual_job_id, json.dumps(job_payload), ex=86400)
+                    await client.lpush(settings.TRAINING_QUEUE, actual_job_id)
+
+                    # Remove pending job
+                    await client.delete(pending_keys[0])
+
+                    # Update build status to training
+                    build.status = "training"
+                    build.phase = "Training ML model"
+                    await session.commit()
+
+                    builds_dispatched += 1
+                    logger.info(f"Dispatched waiting build {build.uuid} to training queue")
+
+                except Exception as e:
+                    logger.error(f"Failed to dispatch waiting build {build.uuid}: {e}", exc_info=True)
+                    await session.rollback()
+                    continue
+
+            logger.info(f"Dispatched {builds_dispatched} waiting builds to training queue")
+
+    except Exception as e:
+        logger.error(f"Error in assign_waiting_builds_to_workers: {e}", exc_info=True)
+    finally:
+        await release_lock(lock_name)
+
+
+async def process_build_queue():
+    """Process queued builds and start them when workers have capacity."""
+    lock_name = "process_build_queue"
+
+    if not await acquire_lock(lock_name):
+        logger.debug(f"Skipping {lock_name} - another instance is running")
+        return
+
+    try:
+        logger.debug("Running process_build_queue job")
+        client = await get_redis_client()
+
+        async with AsyncSessionLocal() as session:
+            # Import here to avoid circular dependency
+            from app.services.build_queue import BuildQueueManager
+            from app.services.worker_health import WorkerHealthManager
+
+            queue_manager = BuildQueueManager(client)
+            worker_manager = WorkerHealthManager()
+
+            # Get available worker capacity
+            workers = await worker_manager.get_active_workers(session)
+            total_capacity = sum(w.capacity for w in workers)
+            active_jobs = sum(w.active_jobs for w in workers)
+            available_capacity = total_capacity - active_jobs
+
+            if available_capacity <= 0:
+                logger.debug("No available worker capacity")
+                return
+
+            # Get queued builds from Redis
+            queue_items = await client.zrange(queue_manager.QUEUE_KEY, 0, -1)
+            if not queue_items:
+                logger.debug("No builds in queue")
+                return
+
+            logger.info(f"Available capacity: {available_capacity}, Queued builds: {len(queue_items)}")
+
+            # Process builds up to available capacity
+            builds_started = 0
+            for build_id in queue_items[:available_capacity]:
+                try:
+                    # Get build from database
+                    result = await session.execute(
+                        select(StrategyBuild).where(StrategyBuild.uuid == build_id)
+                    )
+                    build = result.scalar_one_or_none()
+
+                    if not build:
+                        logger.warning(f"Build {build_id} not found in database, removing from queue")
+                        await client.zrem(queue_manager.QUEUE_KEY, build_id)
+                        continue
+
+                    # Only process builds that are still queued
+                    if build.status != "queued":
+                        logger.info(f"Build {build_id} status is {build.status}, removing from queue")
+                        await client.zrem(queue_manager.QUEUE_KEY, build_id)
+                        continue
+
+                    # Start the build by triggering the background task
+                    # Import the start_build_background function
+                    from app.routers.builds import start_build_background
+                    import asyncio
+
+                    # Remove from queue first
+                    await client.zrem(queue_manager.QUEUE_KEY, build_id)
+                    build.queue_position = None
+                    build.status = "building"
+                    await session.commit()
+
+                    # Start build in background
+                    asyncio.create_task(start_build_background(
+                        build_id=build.uuid,
+                        user_id=build.user_id,
+                        strategy_id=build.strategy_id,
+                        max_iterations=build.max_iterations or 5
+                    ))
+
+                    builds_started += 1
+                    logger.info(f"Started build {build_id} from queue")
+
+                except Exception as e:
+                    logger.error(f"Failed to start build {build_id}: {e}", exc_info=True)
+                    continue
+
+            if builds_started > 0:
+                logger.info(f"Started {builds_started} builds from queue")
+
+    except Exception as e:
+        logger.error(f"Error in process_build_queue: {e}", exc_info=True)
+    finally:
+        await release_lock(lock_name)
+
+
 async def send_license_expiry_warnings():
     """Send emails for expiring licenses at 15, 5, 3, and 1 day marks."""
     lock_name = "send_license_expiry_warnings"
@@ -474,6 +668,24 @@ def start_scheduler():
 
     logger.info(f"Starting scheduler on {current_process_name} (PID: {current_pid})...")
 
+    # Job 0: Process build queue every 30 seconds
+    scheduler.add_job(
+        process_build_queue,
+        trigger=IntervalTrigger(seconds=30),
+        id="process_build_queue",
+        name="Process build queue",
+        replace_existing=True
+    )
+
+    # Job 0.5: Assign waiting builds to workers every 15 seconds
+    scheduler.add_job(
+        assign_waiting_builds_to_workers,
+        trigger=IntervalTrigger(seconds=15),
+        id="assign_waiting_builds",
+        name="Assign waiting builds to workers",
+        replace_existing=True
+    )
+
     # Job 1: Update stuck builds every 10 minutes (staggered: starts at :00)
     scheduler.add_job(
         update_stuck_builds,
@@ -547,7 +759,7 @@ def start_scheduler():
     )
 
     scheduler.start()
-    logger.info("Scheduler started with 7 staggered cron jobs on master process")
+    logger.info("Scheduler started with 9 staggered cron jobs on master process")
 
 
 def stop_scheduler():

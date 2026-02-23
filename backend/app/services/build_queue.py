@@ -181,6 +181,11 @@ class BuildQueueManager:
     async def get_queue_status(self, db: AsyncSession) -> Dict[str, Any]:
         """Get comprehensive queue status for admin dashboard.
 
+        UI Structure:
+        - Build Queue: Builds waiting to start (status = 'queued')
+        - Active Builds: ALL running builds (building, designing, waiting_for_worker, training, extracting_rules, optimizing, building_docker)
+        - Training Queue: Subset of Active - waiting for worker (status = 'waiting_for_worker')
+
         Args:
             db: Database session
 
@@ -188,26 +193,35 @@ class BuildQueueManager:
             Dictionary with queue statistics and build details
         """
         try:
-            # Get all builds in queue from Redis
+            # Get all builds in queue from Redis (waiting to start)
             queue_items = await self.redis.zrange(self.QUEUE_KEY, 0, -1, withscores=True)
             build_ids = [item[0] for item in queue_items]
 
-            # Get build details from database
+            # Get build details from database for queued builds (only status = 'queued')
             queued_builds = []
             if build_ids:
                 result = await db.execute(
-                    select(StrategyBuild).where(StrategyBuild.uuid.in_(build_ids))
+                    select(StrategyBuild).where(
+                        StrategyBuild.uuid.in_(build_ids),
+                        StrategyBuild.status == "queued"
+                    )
                 )
                 queued_builds = result.scalars().all()
 
-            # Get active builds (currently being processed)
-            # Note: We don't require assigned_worker_id because builds can run directly without going through the queue
+            # Get ALL active builds (any running status)
             active_result = await db.execute(
                 select(StrategyBuild).where(
-                    StrategyBuild.status.in_(["building", "designing", "training", "extracting_rules", "optimizing", "building_docker"])
+                    StrategyBuild.status.in_([
+                        "building", "designing", "building_docker",
+                        "waiting_for_worker",
+                        "training", "extracting_rules", "optimizing"
+                    ])
                 )
             )
             active_builds = active_result.scalars().all()
+
+            # Training queue: subset of active builds waiting for worker
+            training_queue_builds = [b for b in active_builds if b.status == "waiting_for_worker"]
 
             # Get worker health
             worker_result = await db.execute(select(WorkerHealth))
@@ -219,12 +233,8 @@ class BuildQueueManager:
             available_capacity = total_capacity - active_jobs
 
             return {
+                # Build queue (waiting to start - status = 'queued')
                 "queue_length": len(queued_builds),
-                "active_builds_count": len(active_builds),
-                "total_workers": len(workers),
-                "active_workers": len([w for w in workers if w.status == "active"]),
-                "total_capacity": total_capacity,
-                "available_capacity": max(0, available_capacity),
                 "queued_builds": [
                     {
                         "uuid": b.uuid,
@@ -236,19 +246,40 @@ class BuildQueueManager:
                     }
                     for b in queued_builds
                 ],
+
+                # Active builds (ALL running builds)
+                "active_builds_count": len(active_builds),
                 "active_builds": [
                     {
                         "uuid": b.uuid,
                         "strategy_id": b.strategy_id,
                         "status": b.status,
                         "phase": b.phase,
-                        "assigned_worker_id": b.assigned_worker_id,
+                        "assigned_worker_id": getattr(b, 'assigned_worker_id', None),
                         "last_heartbeat": b.last_heartbeat.isoformat() if b.last_heartbeat else None,
                         "iteration_count": b.iteration_count,
                         "max_iterations": b.max_iterations,
+                        "started_at": b.started_at.isoformat() if b.started_at else None,
                     }
                     for b in active_builds
                 ],
+
+                # Training queue (subset of active - waiting for worker)
+                "training_queue_length": len(training_queue_builds),
+                "training_queue_builds": [
+                    {
+                        "uuid": b.uuid,
+                        "strategy_id": b.strategy_id,
+                        "status": b.status,
+                        "phase": b.phase,
+                        "iteration_count": b.iteration_count,
+                        "max_iterations": b.max_iterations,
+                        "started_at": b.started_at.isoformat() if b.started_at else None,
+                    }
+                    for b in training_queue_builds
+                ],
+
+                # Worker capacity
                 "workers": [
                     {
                         "worker_id": w.worker_id,
@@ -259,7 +290,11 @@ class BuildQueueManager:
                         "last_heartbeat": w.last_heartbeat.isoformat() if w.last_heartbeat else None,
                     }
                     for w in workers
-                ]
+                ],
+                "total_workers": len(workers),
+                "active_workers": len([w for w in workers if w.status == "active"]),
+                "total_capacity": total_capacity,
+                "available_capacity": max(0, available_capacity),
             }
 
         except Exception as e:

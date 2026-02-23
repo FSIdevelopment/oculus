@@ -14,6 +14,7 @@ import json
 import logging
 import signal
 import sys
+import threading
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -56,17 +57,32 @@ class TrainingWorker:
         self.executor = ThreadPoolExecutor(max_workers=concurrency)
         self.running = False
         self.health_client = health_client
-        self.heartbeat_task: Optional[asyncio.Task] = None
+        self.heartbeat_thread: Optional[threading.Thread] = None
+        self.heartbeat_stop_event = threading.Event()
 
-    async def _heartbeat_loop(self):
-        """Send periodic heartbeats to backend."""
-        while self.running:
+    def _heartbeat_thread_loop(self):
+        """Send periodic heartbeats to backend in a separate thread.
+
+        This runs in a dedicated thread so it's not blocked by CPU-intensive training.
+        """
+        while not self.heartbeat_stop_event.is_set():
             try:
-                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
                 if self.health_client:
-                    await self.health_client.send_heartbeat()
+                    # Run the async heartbeat in a new event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self.health_client.send_heartbeat())
+                    finally:
+                        loop.close()
             except Exception as e:
                 logger.warning(f"Heartbeat error: {e}")
+
+            # Sleep for 30 seconds, but check stop event every second for quick shutdown
+            for _ in range(30):
+                if self.heartbeat_stop_event.is_set():
+                    break
+                self.heartbeat_stop_event.wait(1)
 
     async def start(self):
         """Start the worker and listen for jobs."""
@@ -79,8 +95,14 @@ class TrainingWorker:
             registered = await self.health_client.register()
             if registered:
                 logger.info("Worker registered with backend")
-                # Start heartbeat loop
-                self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                # Start heartbeat in a separate thread so it's not blocked by training
+                self.heartbeat_thread = threading.Thread(
+                    target=self._heartbeat_thread_loop,
+                    daemon=True,
+                    name="HeartbeatThread"
+                )
+                self.heartbeat_thread.start()
+                logger.info("Heartbeat thread started")
             else:
                 logger.warning("Failed to register with backend - continuing without health tracking")
 
@@ -172,10 +194,15 @@ class TrainingWorker:
         logger.info("Stopping worker...")
         self.running = False
 
-        # Cancel heartbeat task if running
-        if self.heartbeat_task and not self.heartbeat_task.done():
-            self.heartbeat_task.cancel()
-            logger.info("Heartbeat task cancelled")
+        # Stop heartbeat thread if running
+        if self.heartbeat_thread and self.heartbeat_thread.is_alive():
+            logger.info("Stopping heartbeat thread...")
+            self.heartbeat_stop_event.set()
+            self.heartbeat_thread.join(timeout=5)
+            if self.heartbeat_thread.is_alive():
+                logger.warning("Heartbeat thread did not stop gracefully")
+            else:
+                logger.info("Heartbeat thread stopped")
 
         self.executor.shutdown(wait=True)
         logger.info("Worker stopped")

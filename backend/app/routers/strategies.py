@@ -246,22 +246,31 @@ async def get_strategy(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get strategy detail."""
-    result = await db.execute(
-        select(Strategy).where(
-            Strategy.uuid == strategy_id,
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted"
+    """Get strategy detail. Admins can view any strategy; regular users can only view their own."""
+    # Admins can view any strategy
+    if current_user.user_role == "admin":
+        result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.status != "deleted"
+            )
         )
-    )
+    else:
+        result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.user_id == current_user.uuid,
+                Strategy.status != "deleted"
+            )
+        )
     strategy = result.scalar_one_or_none()
-    
+
     if not strategy:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Strategy not found"
         )
-    
+
     return strategy
 
 
@@ -338,17 +347,25 @@ async def get_strategy_builds(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get build history for a strategy (paginated)."""
-    # Verify strategy ownership
-    result = await db.execute(
-        select(Strategy).where(
-            Strategy.uuid == strategy_id,
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted"
+    """Get build history for a strategy (paginated). Admins can view any strategy's builds; regular users can only view their own."""
+    # Verify strategy ownership (admins can view any strategy)
+    if current_user.user_role == "admin":
+        result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.status != "deleted"
+            )
         )
-    )
+    else:
+        result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.user_id == current_user.uuid,
+                Strategy.status != "deleted"
+            )
+        )
     strategy = result.scalar_one_or_none()
-    
+
     if not strategy:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -529,6 +546,8 @@ async def retrain_strategy(
             max_iterations=max_iterations,
             strategy_type=strategy.strategy_type,
             prior_iteration_history=prior_iteration_history if prior_iteration_history else None,
+            customizations="",  # Not available for retrain
+            thoughts="",  # Not available for retrain
         )
     )
 
@@ -558,15 +577,24 @@ async def get_build_best_backtest(
     Return the best iteration's backtest results for a specific completed build.
 
     'Best' is the completed iteration with the highest total_return_pct.
+    Admins can view any strategy's backtest; regular users can only view their own.
     """
-    # Verify strategy ownership
-    strat_result = await db.execute(
-        select(Strategy).where(
-            Strategy.uuid == strategy_id,
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted",
+    # Verify strategy ownership (admins can view any strategy)
+    if current_user.user_role == "admin":
+        strat_result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.status != "deleted",
+            )
         )
-    )
+    else:
+        strat_result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.user_id == current_user.uuid,
+                Strategy.status != "deleted",
+            )
+        )
     if not strat_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
 
@@ -614,15 +642,24 @@ async def get_build_config(
 
     Reads from the database (BuildIteration.strategy_files) instead of the filesystem
     to support production environments where files don't persist.
+    Admins can view any strategy's config; regular users can only view their own.
     """
-    # Verify strategy ownership
-    strat_result = await db.execute(
-        select(Strategy).where(
-            Strategy.uuid == strategy_id,
-            Strategy.user_id == current_user.uuid,
-            Strategy.status != "deleted",
+    # Verify strategy ownership (admins can view any strategy)
+    if current_user.user_role == "admin":
+        strat_result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.status != "deleted",
+            )
         )
-    )
+    else:
+        strat_result = await db.execute(
+            select(Strategy).where(
+                Strategy.uuid == strategy_id,
+                Strategy.user_id == current_user.uuid,
+                Strategy.status != "deleted",
+            )
+        )
     if not strat_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
 

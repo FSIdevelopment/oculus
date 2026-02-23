@@ -104,12 +104,18 @@ class BuildOrchestrator:
         strategy_type: Optional[str] = None,
         iteration: int = 0,
         prior_iteration_history: Optional[List[Dict[str, Any]]] = None,
+        customizations: str = "",
+        thoughts: str = "",
     ) -> Dict[str, Any]:
         """Call Claude API to design strategy.
 
         Returns a dict with keys:
         - "design": the parsed strategy design JSON
         - "thinking": concatenated thinking block text
+
+        Args:
+            customizations: Required instructions that the AI must follow.
+            thoughts: Optional considerations for the AI to think about.
         """
         self._log(f"Starting LLM strategy design for {strategy_name}")
 
@@ -128,7 +134,8 @@ class BuildOrchestrator:
         # Create prompt
         prompt = self._build_design_prompt(
             strategy_name, strategy_type, symbols, description, timeframe, target_return, context,
-            creation_guide, prior_iteration_history=prior_iteration_history
+            creation_guide, prior_iteration_history=prior_iteration_history,
+            customizations=customizations, thoughts=thoughts
         )
 
         try:
@@ -164,8 +171,48 @@ class BuildOrchestrator:
         iteration_uuid: str = None,
         iteration_number: int = None,
     ) -> str:
-        """Dispatch training job to Redis via REDIS_URL."""
-        self._log("Dispatching training job to Redis")
+        """Dispatch training job to Redis queue if workers are available.
+
+        If no workers are available, the build status will be set to 'waiting_for_worker'
+        and a separate scheduler job will dispatch it when capacity becomes available.
+
+        Returns:
+            job_id: The job identifier
+        """
+        from app.services.worker_health import WorkerHealthManager
+
+        # Check worker availability
+        worker_manager = WorkerHealthManager()
+        workers = await worker_manager.get_active_workers(self.db)
+        total_capacity = sum(w.capacity for w in workers)
+        active_jobs = sum(w.active_jobs for w in workers)
+        available_capacity = total_capacity - active_jobs
+
+        if available_capacity <= 0:
+            # No workers available - set status to waiting_for_worker
+            self._log("No workers available - entering training queue (waiting_for_worker)")
+            self.build.status = "waiting_for_worker"
+            self.build.phase = "Waiting for worker availability"
+            await self.db.commit()
+
+            # Store job payload in Redis for later dispatch
+            job_id = f"build:{self.build.uuid}:iter:{iteration_uuid or 'default'}"
+            job_payload = {
+                "build_id": self.build.uuid,
+                "user_id": self.user.uuid,
+                "design": design,
+                "symbols": symbols,
+                "timeframe": timeframe,
+                "timestamp": datetime.utcnow().isoformat(),
+                "iteration_uuid": iteration_uuid,
+                "iteration_number": iteration_number,
+                "source": "oculus",
+            }
+            await self.redis_client.set(f"pending:{job_id}", json.dumps(job_payload), ex=86400)
+            return job_id
+
+        # Workers available - dispatch immediately
+        self._log(f"Dispatching training job to Redis (available capacity: {available_capacity})")
 
         job_payload = {
             "build_id": self.build.uuid,
@@ -609,6 +656,8 @@ class BuildOrchestrator:
         context: str,
         creation_guide: str = "",
         prior_iteration_history: Optional[List[Dict[str, Any]]] = None,
+        customizations: str = "",
+        thoughts: str = "",
     ) -> str:
         """Build initial strategy design prompt with full features list, JSON schema, and rules."""
         features_list = "\n".join(f"  - {f}" for f in self.AVAILABLE_FEATURES)
@@ -663,6 +712,33 @@ class BuildOrchestrator:
                     prior_history_section += f"  Exit Features Used: {', '.join(iter_exit[:5])}\n"
                 prior_history_section += "\n"
 
+        # Build user instructions section
+        user_instructions_section = ""
+        if customizations or thoughts:
+            user_instructions_section = "\n## ⚠️ User Instructions ⚠️\n"
+
+            if customizations:
+                user_instructions_section += f"""
+### REQUIRED Customizations (MUST FOLLOW):
+{customizations}
+
+**CRITICAL**: These customizations are MANDATORY REQUIREMENTS that you MUST follow EXACTLY.
+These are NOT suggestions - they are explicit constraints that define what the user wants.
+You MUST incorporate every aspect of these customizations into your strategy design.
+If the user specifies particular indicators, entry/exit conditions, risk parameters, or any other requirements,
+you MUST include them EXACTLY as requested. Ignoring or modifying these requirements is UNACCEPTABLE.
+Treat these customizations with the HIGHEST priority - even higher than general best practices.
+"""
+
+            if thoughts:
+                user_instructions_section += f"""
+### Thoughts to Consider (Optional Guidance):
+{thoughts}
+
+These are things the user wants you to consider when building the strategy.
+While not strictly required, you should take these thoughts into account and let them inform your design decisions.
+"""
+
         return f"""You are an expert quantitative trading strategy designer. Your role is to design
 highly profitable algorithmic trading strategies using technical indicators and ML-optimized parameters.
 
@@ -673,16 +749,7 @@ Design a trading strategy with these specifications:
 - Symbols: {', '.join(symbols)}
 - Timeframe: {timeframe}
 - Target Return: {target_return}%
-
-## ⚠️ CRITICAL: User Customization Requirements ⚠️
-User Description/Comments: {description}
-
-**MANDATORY INSTRUCTION**: The user's description/comments above are CRITICAL REQUIREMENTS that you MUST follow.
-These are NOT suggestions - they are explicit constraints and customizations that define what the user wants.
-You MUST incorporate every aspect of the user's description into your strategy design to the best of your ability.
-If the user specifies particular indicators, entry/exit conditions, risk parameters, or any other requirements,
-you MUST include them EXACTLY as requested. Ignoring or modifying user requirements is UNACCEPTABLE.
-Treat the user's description with the HIGHEST priority - even higher than general best practices.
+{user_instructions_section}
 
 ## Previous Builds Context
 {context}
