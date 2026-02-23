@@ -61,6 +61,10 @@ class StrategyResponse(BaseModel):
     user_id: str
     created_at: datetime
     updated_at: datetime
+    # Admin-specific fields (populated only in admin endpoints)
+    owner_name: Optional[str] = None
+    build_count: Optional[int] = None
+    annual_return: Optional[float] = None
 
     class Config:
         from_attributes = True

@@ -359,27 +359,74 @@ async def list_all_strategies(
     admin_user: User = Depends(admin_required),
     db: AsyncSession = Depends(get_db)
 ):
-    """List ALL strategies (admin only, searchable)."""
-    # Build query
-    query = select(Strategy).where(Strategy.status != "deleted")
+    """List ALL strategies (admin only, searchable) with owner name, build count, and annual return."""
+    # Build base query with join to User table
+    from sqlalchemy.orm import selectinload
+
+    query = (
+        select(
+            Strategy,
+            User.name.label("owner_name"),
+            func.count(distinct(StrategyBuild.uuid)).label("build_count")
+        )
+        .join(User, Strategy.user_id == User.uuid)
+        .outerjoin(StrategyBuild, Strategy.uuid == StrategyBuild.strategy_id)
+        .where(Strategy.status != "deleted")
+        .group_by(Strategy.uuid, User.name)
+    )
 
     if search:
         query = query.where(Strategy.name.ilike(f"%{search}%"))
 
     # Count total
     count_result = await db.execute(
-        select(func.count(Strategy.uuid)).where(Strategy.status != "deleted")
+        select(func.count(distinct(Strategy.uuid)))
+        .select_from(Strategy)
+        .where(Strategy.status != "deleted")
     )
     total = count_result.scalar()
 
-    # Fetch paginated
+    # Fetch paginated with owner name and build count
     result = await db.execute(
         query.offset(skip).limit(limit)
     )
-    strategies = result.scalars().all()
+    rows = result.all()
+
+    # Build response items with additional fields
+    items = []
+    for strategy, owner_name, build_count in rows:
+        # Extract annual return from backtest_results if available
+        annual_return = None
+        if strategy.backtest_results and isinstance(strategy.backtest_results, dict):
+            # Try to get total_return_pct or total_return from backtest results
+            annual_return = strategy.backtest_results.get('total_return_pct') or strategy.backtest_results.get('total_return')
+
+        # Create response dict from strategy
+        strategy_dict = {
+            "uuid": strategy.uuid,
+            "name": strategy.name,
+            "description": strategy.description,
+            "status": strategy.status,
+            "strategy_type": strategy.strategy_type,
+            "symbols": strategy.symbols,
+            "target_return": strategy.target_return,
+            "backtest_results": strategy.backtest_results,
+            "marketplace_listed": strategy.marketplace_listed,
+            "marketplace_price": strategy.marketplace_price,
+            "version": strategy.version,
+            "subscriber_count": strategy.subscriber_count,
+            "rating": strategy.rating,
+            "user_id": strategy.user_id,
+            "created_at": strategy.created_at,
+            "updated_at": strategy.updated_at,
+            "owner_name": owner_name,
+            "build_count": build_count,
+            "annual_return": annual_return
+        }
+        items.append(StrategyResponse(**strategy_dict))
 
     return {
-        "items": strategies,
+        "items": items,
         "total": total,
         "skip": skip,
         "limit": limit

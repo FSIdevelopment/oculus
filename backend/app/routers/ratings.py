@@ -12,6 +12,32 @@ from app.schemas.ratings import RatingCreate, RatingUpdate, RatingResponse, Rati
 router = APIRouter()
 
 
+async def _update_strategy_rating(db: AsyncSession, strategy_id: str):
+    """
+    Calculate and update the average rating for a strategy.
+
+    Args:
+        db: Database session
+        strategy_id: Strategy UUID
+    """
+    # Calculate average rating
+    result = await db.execute(
+        select(func.avg(Rating.rating)).where(Rating.strategy_id == strategy_id)
+    )
+    avg_rating = result.scalar()
+
+    # Get the strategy
+    strategy_result = await db.execute(
+        select(Strategy).where(Strategy.uuid == strategy_id)
+    )
+    strategy = strategy_result.scalar_one_or_none()
+
+    if strategy:
+        # Update the rating (round to 1 decimal place)
+        strategy.rating = round(avg_rating, 1) if avg_rating else None
+        await db.commit()
+
+
 @router.post("/api/strategies/{strategy_id}/ratings", response_model=RatingResponse)
 async def create_rating(
     strategy_id: str,
@@ -57,11 +83,14 @@ async def create_rating(
         user_id=current_user.uuid,
         strategy_id=strategy_id
     )
-    
+
     db.add(rating)
     await db.commit()
     await db.refresh(rating)
-    
+
+    # Update strategy's average rating
+    await _update_strategy_rating(db, strategy_id)
+
     return RatingResponse(
         uuid=rating.uuid,
         user_id=rating.user_id,
@@ -160,10 +189,13 @@ async def update_rating(
         rating.rating = rating_data.score
     if rating_data.review is not None:
         rating.review_text = rating_data.review
-    
+
     await db.commit()
     await db.refresh(rating)
-    
+
+    # Update strategy's average rating
+    await _update_strategy_rating(db, rating.strategy_id)
+
     return RatingResponse(
         uuid=rating.uuid,
         user_id=rating.user_id,
@@ -235,6 +267,49 @@ async def delete_rating(
             detail="Rating not found"
         )
     
+    strategy_id = rating.strategy_id
+
     await db.delete(rating)
     await db.commit()
+
+    # Update strategy's average rating
+    await _update_strategy_rating(db, strategy_id)
+
+
+@router.post("/api/admin/ratings/recalculate-all", status_code=status.HTTP_200_OK)
+async def recalculate_all_ratings(
+    admin_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Recalculate average ratings for all strategies.
+    This is useful for fixing any inconsistencies or populating ratings for existing strategies.
+    Admin only.
+    """
+    # Get all strategies
+    result = await db.execute(select(Strategy))
+    strategies = result.scalars().all()
+
+    updated_count = 0
+    for strategy in strategies:
+        # Calculate average rating for this strategy
+        rating_result = await db.execute(
+            select(func.avg(Rating.rating)).where(Rating.strategy_id == strategy.uuid)
+        )
+        avg_rating = rating_result.scalar()
+
+        # Update the rating
+        old_rating = strategy.rating
+        strategy.rating = round(avg_rating, 1) if avg_rating else None
+
+        if old_rating != strategy.rating:
+            updated_count += 1
+
+    await db.commit()
+
+    return {
+        "message": f"Successfully recalculated ratings for {len(strategies)} strategies",
+        "updated_count": updated_count,
+        "total_strategies": len(strategies)
+    }
 

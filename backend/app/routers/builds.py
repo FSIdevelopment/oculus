@@ -909,6 +909,7 @@ async def _run_build_loop(
 
                     await _publish_progress(build_id, {
                         "phase": "designing",
+                        "status": "building",  # Include status to update frontend
                         "iteration": iteration,
                         "message": "Designing initial strategy...",
                         "tokens_consumed": build.tokens_consumed,
@@ -991,6 +992,7 @@ async def _run_build_loop(
                     await bg_db.commit()
                     await _publish_progress(build_id, {
                         "phase": "refining",
+                        "status": "building",  # Include status to update frontend
                         "iteration": iteration,
                         "message": f"Refining strategy (iteration {iteration + 1})...",
                         "tokens_consumed": build.tokens_consumed,
@@ -1130,6 +1132,7 @@ async def _run_build_loop(
 
                 await _publish_progress(build_id, {
                     "phase": "training",
+                    "status": "building",  # Include status to update frontend
                     "iteration": iteration,
                     "message": f"Training model (iteration {iteration + 1})...",
                     "tokens_consumed": build.tokens_consumed,
@@ -1726,6 +1729,101 @@ async def _run_build_loop(
                 await orchestrator.cleanup()
             except Exception as cleanup_error:
                 logger.error("Error during orchestrator cleanup for build %s: %s", build_id, cleanup_error)
+
+
+async def start_build_background(
+    build_id: str,
+    user_id: str,
+    strategy_id: str,
+    max_iterations: int = 5,
+):
+    """
+    Public function to start a build in the background.
+    Used by the scheduler to start queued builds.
+
+    Args:
+        build_id: The build UUID
+        user_id: The user UUID
+        strategy_id: The strategy UUID
+        max_iterations: Maximum number of iterations to run
+    """
+    # Create a new database session for this background task
+    async with AsyncSessionLocal() as db:
+        try:
+            # Fetch the build
+            result = await db.execute(
+                select(StrategyBuild).where(StrategyBuild.uuid == build_id)
+            )
+            build = result.scalar_one_or_none()
+
+            if not build:
+                logger.error(f"Build {build_id} not found")
+                return
+
+            # Fetch the strategy
+            strat_result = await db.execute(
+                select(Strategy).where(Strategy.uuid == strategy_id)
+            )
+            strategy = strat_result.scalar_one_or_none()
+
+            if not strategy:
+                logger.error(f"Strategy {strategy_id} not found for build {build_id}")
+                build.status = "failed"
+                build.phase = "complete"
+                build.completed_at = datetime.utcnow()
+                await db.commit()
+                return
+
+            # Extract strategy data
+            strategy_name = strategy.name
+            raw_symbols = strategy.symbols
+            if isinstance(raw_symbols, dict):
+                strategy_symbols = raw_symbols.get("symbols", [])
+            elif isinstance(raw_symbols, str):
+                strategy_symbols = raw_symbols.split()
+            elif isinstance(raw_symbols, list):
+                strategy_symbols = raw_symbols
+            else:
+                strategy_symbols = []
+
+            strategy_description = strategy.description or ""
+            strat_type = strategy.strategy_type
+            target_return = strategy.target_return or 10.0
+            timeframe = "1d"  # Default timeframe
+
+            # Clear any existing stop signal
+            try:
+                redis_client = await redis_async.from_url(settings.REDIS_URL)
+                await redis_client.delete(f"oculus:build:stop:{build_id}")
+                await redis_client.close()
+            except Exception as e:
+                logger.error(f"Failed to clear stop signal for build {build_id}: {e}")
+
+            # Launch the build loop as a background task
+            task = asyncio.create_task(
+                _run_build_loop(
+                    build_id=build_id,
+                    strategy_id=strategy_id,
+                    user_id=user_id,
+                    strategy_name=strategy_name,
+                    strategy_symbols=strategy_symbols,
+                    description=strategy_description,
+                    target_return=target_return,
+                    timeframe=timeframe,
+                    max_iterations=max_iterations,
+                    strategy_type=strat_type,
+                    customizations="",
+                    thoughts="",
+                ),
+                name=f"build-{build_id}",
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
+            logger.info(f"Started build {build_id} in background")
+
+        except Exception as e:
+            logger.error(f"Failed to start build {build_id}: {e}", exc_info=True)
 
 
 @router.post("/api/builds/trigger", response_model=BuildResponse)

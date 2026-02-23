@@ -108,7 +108,7 @@ class WorkerConfig:
         Defaults to localhost for development.
         Set BACKEND_URL environment variable for production.
         """
-        return os.getenv('BACKEND_URL', 'http://localhost:8000')
+        return os.getenv('BACKEND_URL', 'https://app.oculusalgorithms.com')
 
 
 # Global config instance

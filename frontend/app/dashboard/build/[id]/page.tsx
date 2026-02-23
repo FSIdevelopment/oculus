@@ -660,11 +660,12 @@ export default function BuildDetailPage() {
 
   // Tick every second for the Total Time counter
   useEffect(() => {
-    const isTerminal = build?.status && ['completed', 'failed', 'stopped'].includes(build.status)
+    if (!build) return
+    const isTerminal = build.status && ['complete', 'failed', 'stopped'].includes(build.status.toLowerCase())
     if (isTerminal) return
     const timer = setInterval(() => setElapsedTick(t => t + 1), 1000)
     return () => clearInterval(timer)
-  }, [build?.status])
+  }, [build, build?.status])
 
   // Fetch per-iteration pricing from the backend on page load
   useEffect(() => {
@@ -994,6 +995,16 @@ export default function BuildDetailPage() {
               setMaxIterations(progressData.max_iterations)
             }
 
+            // Update status from WebSocket progress (real-time, no 5s delay)
+            if (progressData.status != null) {
+              setBuild(prev => prev ? { ...prev, status: progressData.status } : prev)
+            }
+
+            // Update phase from WebSocket progress (real-time, no 5s delay)
+            if (progressData.phase != null) {
+              setBuild(prev => prev ? { ...prev, phase: progressData.phase } : prev)
+            }
+
             // Update tokens_consumed from WebSocket progress (real-time, no 5s delay)
             if (progressData.tokens_consumed != null) {
               setBuild(prev => prev ? { ...prev, tokens_consumed: progressData.tokens_consumed } : prev)
@@ -1086,8 +1097,9 @@ export default function BuildDetailPage() {
   // Helper: Calculate elapsed time — never show negative, stop counting on terminal states
   const getElapsedTime = (tick?: number) => { // tick forces re-render each second
     void tick
-    if (!build) return '0 00:00:00'
+    if (!build || !build.started_at) return '00:00:00'
     const start = new Date(build.started_at).getTime()
+    if (isNaN(start)) return '00:00:00'
     const end = build.completed_at ? new Date(build.completed_at).getTime() : Date.now()
     const totalSeconds = Math.max(0, Math.floor((end - start) / 1000))
     const days = Math.floor(totalSeconds / 86400)

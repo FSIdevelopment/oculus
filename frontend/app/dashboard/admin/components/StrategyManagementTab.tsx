@@ -9,12 +9,14 @@ import Link from 'next/link'
 interface Strategy {
   uuid: string
   name: string
-  owner_id: string
+  user_id: string
   owner_name?: string
-  type: string
+  strategy_type?: string
   status: string
   rating?: number
-  subscribers?: number
+  subscriber_count?: number
+  build_count?: number
+  annual_return?: number
   created_at: string
 }
 
@@ -111,6 +113,8 @@ export default function StrategyManagementTab() {
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Owner</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Type</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Status</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Annual Return</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Versions</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Rating</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Subscribers</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Actions</th>
@@ -123,11 +127,21 @@ export default function StrategyManagementTab() {
                     className={`border-b border-border ${idx % 2 === 0 ? 'bg-surface' : 'bg-surface-hover'}`}
                   >
                     <td className="px-6 py-4 text-text font-medium">{strategy.name}</td>
-                    <td className="px-6 py-4 text-text-secondary text-sm">{strategy.owner_name || strategy.owner_id}</td>
-                    <td className="px-6 py-4 text-text capitalize">{strategy.type}</td>
+                    <td className="px-6 py-4 text-text-secondary text-sm">{strategy.owner_name || strategy.user_id}</td>
+                    <td className="px-6 py-4 text-text capitalize">{strategy.strategy_type || 'N/A'}</td>
                     <td className="px-6 py-4 text-text capitalize">{strategy.status}</td>
+                    <td className="px-6 py-4 text-text">
+                      {strategy.annual_return !== null && strategy.annual_return !== undefined ? (
+                        <span className={strategy.annual_return >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {strategy.annual_return.toFixed(2)}%
+                        </span>
+                      ) : (
+                        'N/A'
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-text">{strategy.build_count || 0}</td>
                     <td className="px-6 py-4 text-text">{strategy.rating?.toFixed(1) || 'N/A'}</td>
-                    <td className="px-6 py-4 text-text">{strategy.subscribers || 0}</td>
+                    <td className="px-6 py-4 text-text">{strategy.subscriber_count || 0}</td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
                         <Link
