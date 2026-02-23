@@ -29,6 +29,7 @@ from app.database import AsyncSessionLocal
 from app.models.strategy_build import StrategyBuild
 from app.models.build_iteration import BuildIteration
 from app.models.strategy import Strategy
+from app.models.user import User
 from app.services.build_orchestrator import BuildOrchestrator
 from app.config import settings
 import logging
@@ -95,40 +96,42 @@ async def generate_readme_for_build(
     db: AsyncSession,
     build: StrategyBuild,
     strategy: Strategy,
+    user: User,
     dry_run: bool = False
 ) -> bool:
     """Generate and save README for a single build."""
     logger.info(f"Processing build {build.uuid} for strategy '{strategy.name}'...")
-    
+
     # Get best iteration
     best_iter = await get_best_iteration(db, build.uuid)
     if not best_iter:
         logger.warning(f"  No completed iterations found for build {build.uuid}")
         return False
-    
+
     logger.info(f"  Using iteration #{best_iter.iteration_number} (return: {(best_iter.backtest_results or {}).get('total_return', 0)}%)")
-    
+
     # Extract data from iteration
     design = best_iter.llm_design or {}
     backtest_results = best_iter.backtest_results or {}
     best_model = best_iter.best_model or {}
     model_metrics = best_model.get("metrics", {}) if isinstance(best_model, dict) else {}
-    
+
     # Build config from iteration data
     config = {
         "entry_rules": best_iter.entry_rules or [],
         "exit_rules": best_iter.exit_rules or [],
         "features": best_iter.features or {},
     }
-    
+
     if dry_run:
         logger.info(f"  [DRY RUN] Would generate README for build {build.uuid}")
         return True
-    
+
     # Generate README using BuildOrchestrator
     try:
-        orchestrator = BuildOrchestrator(settings.ANTHROPIC_API_KEY)
-        
+        # Create BuildOrchestrator with db, user, and build
+        orchestrator = BuildOrchestrator(db, user, build)
+
         readme = await orchestrator.generate_strategy_readme(
             strategy_name=strategy.name,
             symbols=strategy.symbols or [],
@@ -138,14 +141,14 @@ async def generate_readme_for_build(
             config=config,
             strategy_type=strategy.strategy_type or "",
         )
-        
+
         # Save to database
         build.readme = readme
         await db.commit()
-        
+
         logger.info(f"  ✓ Generated and saved README ({len(readme)} chars)")
         return True
-        
+
     except Exception as e:
         logger.error(f"  ✗ Failed to generate README: {e}")
         return False
@@ -154,9 +157,11 @@ async def generate_readme_for_build(
 async def main(build_id: str | None = None, dry_run: bool = False):
     """Main function to generate missing READMEs."""
     async with AsyncSessionLocal() as db:
-        # Find builds without READMEs
-        query = select(StrategyBuild, Strategy).join(
+        # Find builds without READMEs, joining with Strategy and User
+        query = select(StrategyBuild, Strategy, User).join(
             Strategy, StrategyBuild.strategy_id == Strategy.uuid
+        ).join(
+            User, StrategyBuild.user_id == User.uuid
         ).where(
             StrategyBuild.status == "complete",
             StrategyBuild.readme.is_(None)
@@ -166,23 +171,23 @@ async def main(build_id: str | None = None, dry_run: bool = False):
             query = query.where(StrategyBuild.uuid == build_id)
 
         result = await db.execute(query)
-        builds_and_strategies = result.all()
+        builds_strategies_users = result.all()
 
-        if not builds_and_strategies:
+        if not builds_strategies_users:
             if build_id:
                 logger.info(f"Build {build_id} not found or already has a README")
             else:
                 logger.info("No builds found that need READMEs")
             return
 
-        logger.info(f"Found {len(builds_and_strategies)} build(s) without READMEs")
+        logger.info(f"Found {len(builds_strategies_users)} build(s) without READMEs")
 
         success_count = 0
         fail_count = 0
 
-        for build, strategy in builds_and_strategies:
+        for build, strategy, user in builds_strategies_users:
             try:
-                success = await generate_readme_for_build(db, build, strategy, dry_run)
+                success = await generate_readme_for_build(db, build, strategy, user, dry_run)
                 if success:
                     success_count += 1
                 else:
