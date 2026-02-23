@@ -103,7 +103,11 @@ class WorkerConfig:
 
     @property
     def backend_url(self) -> str:
-        """Backend API URL for health tracking."""
+        """Backend API URL for health tracking.
+
+        Defaults to localhost for development.
+        Set BACKEND_URL environment variable for production.
+        """
         return os.getenv('BACKEND_URL', 'http://localhost:8000')
 
 

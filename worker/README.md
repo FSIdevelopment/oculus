@@ -48,23 +48,32 @@ cp .env.example .env
 
 Key environment variables:
 
+- `BACKEND_URL` — Backend API URL for worker registration (default: http://localhost:8000)
+- `REDIS_URL` — Full Redis connection URL (default: redis://localhost:6379/0)
 - `REDIS_HOST` — Redis server host (default: localhost)
 - `REDIS_PORT` — Redis server port (default: 6379)
 - `REDIS_DB` — Redis database number (default: 0)
-- `JOB_QUEUE` — Queue name for training jobs (default: training_queue)
+- `JOB_QUEUE` — Queue name for training jobs (default: oculus:training_queue)
 - `RESULT_KEY_PREFIX` — Prefix for result keys (default: result)
 - `WORKER_CONCURRENCY` — Number of concurrent jobs (default: 2)
 - `GPU_ENABLED` — Enable GPU acceleration (default: true)
 - `POLYGON_API_KEY` — Polygon API key for market data
 - `LOG_LEVEL` — Logging level (default: INFO)
+- `JOB_TIMEOUT_SECONDS` — Job timeout in seconds (default: 3600)
 
 ## Usage
 
 ### Start the worker
 
 ```bash
-# Using default config from .env
+# Local development (default - connects to localhost:8000)
 python -m worker.main
+
+# Production (connects to production backend)
+python -m worker.main --config worker/.env.production
+
+# Or set environment variable directly
+BACKEND_URL=https://app.oculusalgorithms.com python -m worker.main
 
 # Using custom config file
 python -m worker.main --config /path/to/.env
@@ -72,6 +81,12 @@ python -m worker.main --config /path/to/.env
 # With custom concurrency
 python -m worker.main --concurrency 4
 ```
+
+**Important**: The worker needs to know which backend to register with:
+- **Local development**: Uses `http://localhost:8000` by default
+- **Production**: Set `BACKEND_URL=https://app.oculusalgorithms.com` or use `.env.production`
+
+The worker will register itself with the backend and send heartbeats every 30 seconds to show it's active.
 
 ### Run integration test
 

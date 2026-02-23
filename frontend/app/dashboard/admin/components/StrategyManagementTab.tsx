@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { adminAPI } from '@/lib/api'
-import { Search, Trash2, KeyRound } from 'lucide-react'
+import { Search, Trash2, KeyRound, Eye } from 'lucide-react'
 import AdminLicenseModal from './AdminLicenseModal'
+import Link from 'next/link'
 
 interface Strategy {
   uuid: string
@@ -129,6 +130,13 @@ export default function StrategyManagementTab() {
                     <td className="px-6 py-4 text-text">{strategy.subscribers || 0}</td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
+                        <Link
+                          href={`/dashboard/strategies/${strategy.uuid}`}
+                          className="p-2 hover:bg-primary/10 rounded text-text-secondary hover:text-primary"
+                          title="View Strategy"
+                        >
+                          <Eye size={16} />
+                        </Link>
                         <button
                           onClick={() => setLicenseStrategy(strategy)}
                           className="p-2 hover:bg-primary/10 rounded text-text-secondary hover:text-primary"

@@ -1938,12 +1938,11 @@ async def get_build_iterations(
     Get all BuildIteration records for a build.
 
     Returns iterations ordered by iteration_number ascending.
-    Requires authentication and verifies user owns the build.
+    Admins can view any build's iterations; regular users can only view their own.
     """
-    # Fetch build with strategy relationship to check ownership
+    # Fetch build
     result = await db.execute(
-        select(StrategyBuild)
-        .where(StrategyBuild.uuid == build_id)
+        select(StrategyBuild).where(StrategyBuild.uuid == build_id)
     )
     build = result.scalar_one_or_none()
 
@@ -1953,17 +1952,19 @@ async def get_build_iterations(
             detail="Build not found"
         )
 
-    # Fetch strategy to verify ownership
-    strat_result = await db.execute(
-        select(Strategy).where(Strategy.uuid == build.strategy_id)
-    )
-    strategy = strat_result.scalar_one_or_none()
-
-    if not strategy or strategy.user_id != current_user.uuid:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Build not found"
+    # Check ownership (admins can view any build)
+    if not current_user.is_admin:
+        # Fetch strategy to verify ownership for non-admin users
+        strat_result = await db.execute(
+            select(Strategy).where(Strategy.uuid == build.strategy_id)
         )
+        strategy = strat_result.scalar_one_or_none()
+
+        if not strategy or strategy.user_id != current_user.uuid:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Build not found"
+            )
 
     # Fetch all iterations for this build, ordered by iteration_number
     iterations_result = await db.execute(
@@ -2005,15 +2006,22 @@ async def get_build_status(
     Get build status and progress.
 
     Returns current phase, status, tokens consumed, and iteration count.
+    Admins can view any build; regular users can only view their own builds.
     """
+    # Fetch build
     result = await db.execute(
-        select(StrategyBuild).where(
-            (StrategyBuild.uuid == build_id) & (StrategyBuild.user_id == current_user.uuid)
-        )
+        select(StrategyBuild).where(StrategyBuild.uuid == build_id)
     )
     build = result.scalar_one_or_none()
 
     if not build:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Build not found"
+        )
+
+    # Check ownership (admins can view any build)
+    if not current_user.is_admin and build.user_id != current_user.uuid:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Build not found"
