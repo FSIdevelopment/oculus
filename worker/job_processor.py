@@ -730,6 +730,32 @@ class JobProcessor:
             logger.info(f"[{job_id}] Job complete")
             return result
 
+        except ValueError as e:
+            # Check if this is an invalid symbol error
+            error_msg = str(e)
+            if "Invalid symbol" in error_msg:
+                logger.error(f"[{job_id}] Invalid symbol(s) detected: {error_msg}")
+                reporter.report_error("validation", error_msg)
+                return {
+                    "build_id": build_id,
+                    "iteration_uuid": job_data.get('iteration_uuid'),
+                    "status": "error",
+                    "phase": "validation_failed",
+                    "error": error_msg,
+                    "error_type": "invalid_symbols"
+                }
+            else:
+                # Other ValueError (e.g., "No data fetched!", "No valid configuration found!")
+                logger.exception(f"[{job_id}] Job failed: {e}")
+                reporter.report_error("processing", error_msg)
+                return {
+                    "build_id": build_id,
+                    "iteration_uuid": job_data.get('iteration_uuid'),
+                    "status": "error",
+                    "phase": "failed",
+                    "error": error_msg
+                }
+
         except Exception as e:
             logger.exception(f"[{job_id}] Job failed: {e}")
             reporter.report_error("processing", str(e))

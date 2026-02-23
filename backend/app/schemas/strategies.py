@@ -31,6 +31,7 @@ class BuildResponse(BaseModel):
     completed_at: Optional[datetime] = None
     strategy_type: Optional[str] = None
     strategy_name: Optional[str] = None
+    queue_position: Optional[int] = None
 
     class Config:
         from_attributes = True

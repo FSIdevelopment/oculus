@@ -17,6 +17,7 @@ interface BuildListItem {
   iteration_count: number
   started_at: string
   completed_at: string | null
+  queue_position?: number | null
 }
 
 export default function BuildListPage() {
@@ -207,6 +208,14 @@ export default function BuildListPage() {
                           {build.status.charAt(0).toUpperCase() + build.status.slice(1)}
                         </span>
                       </div>
+                      {build.status.toLowerCase() === 'queued' && build.queue_position && (
+                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-900/20 border border-yellow-500/30">
+                          <Clock size={14} className="text-yellow-400" />
+                          <span className="text-yellow-400 text-sm font-medium">
+                            Queue Position: #{build.queue_position}
+                          </span>
+                        </div>
+                      )}
                       {build.phase && (
                         <div className="text-text-secondary text-sm">
                           Phase: <span className="text-text capitalize">{getPhaseDisplayName(build.phase)}</span>

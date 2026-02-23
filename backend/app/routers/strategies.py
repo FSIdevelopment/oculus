@@ -692,6 +692,59 @@ async def get_build_config(
         )
 
 
+@router.get("/{strategy_id}/builds/{build_id}/readme")
+async def get_build_readme(
+    strategy_id: str,
+    build_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return the README.md generated for a specific build.
+
+    The file lives at backend/strategy_outputs/{build_id}/README.md.
+    """
+    # Verify strategy ownership
+    strat_result = await db.execute(
+        select(Strategy).where(
+            Strategy.uuid == strategy_id,
+            Strategy.user_id == current_user.uuid,
+            Strategy.status != "deleted",
+        )
+    )
+    if not strat_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
+
+    # Verify build belongs to this strategy
+    build_result = await db.execute(
+        select(StrategyBuild).where(
+            StrategyBuild.uuid == build_id,
+            StrategyBuild.strategy_id == strategy_id,
+        )
+    )
+    if not build_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build not found")
+
+    # Construct path: backend/strategy_outputs/{build_id}/README.md
+    readme_path = Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id / "README.md"
+
+    if not readme_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="README file not found for this build",
+        )
+
+    try:
+        readme_content = readme_path.read_text(encoding="utf-8")
+        return {"readme": readme_content}
+    except Exception as e:
+        logger.error(f"Failed to read README for build {build_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to read README file",
+        )
+
+
 @router.get("/{strategy_id}/internal", response_model=StrategyInternalResponse)
 async def get_strategy_internal(
     strategy_id: str,

@@ -828,6 +828,22 @@ class EnhancedMLTrainer:
         if self.timeframe in ['1h', '5m', '15m', '30m', '1m', '60min']:
             print(f"  ⚠️  NOTE: Free APIs limit intraday data to ~30-60 days (not {self.period_years} years)")
 
+        # Validate symbols first (quick check with 30 days of data)
+        print(f"\n  🔍 Validating symbols...")
+        validation_results = await self.data_provider.validate_symbols(
+            self.symbols, days=30, interval=self.timeframe
+        )
+
+        # Check for invalid symbols
+        invalid_symbols = [sym for sym, is_valid in validation_results.items() if not is_valid]
+        if invalid_symbols:
+            error_msg = f"Invalid symbol(s): {', '.join(invalid_symbols)}"
+            print(f"\n  ❌ {error_msg}")
+            print(f"  💡 Please check the symbol ticker(s) and try again.")
+            raise ValueError(error_msg)
+
+        print(f"  ✓ All symbols validated successfully")
+
         # Fetch all symbols in parallel for speed
         self.stock_data = await self.data_provider.get_multiple_symbols(
             self.symbols, days=days, interval=self.timeframe, parallel=True

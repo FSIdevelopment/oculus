@@ -9,6 +9,7 @@ import UserManagementTab from './components/UserManagementTab'
 import StrategyManagementTab from './components/StrategyManagementTab'
 import ProductManagementTab from './components/ProductManagementTab'
 import RatingsManagementTab from './components/RatingsManagementTab'
+import QueueManagementTab from './components/QueueManagementTab'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -32,6 +33,7 @@ export default function AdminPage() {
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: '📊' },
+    { id: 'queue', label: 'Build Queue', icon: '⏱️' },
     { id: 'users', label: 'Users', icon: '👥' },
     { id: 'strategies', label: 'Strategies', icon: '📈' },
     { id: 'products', label: 'Products', icon: '📦' },
@@ -56,11 +58,10 @@ export default function AdminPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 font-medium whitespace-nowrap border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-text-secondary hover:text-text'
-              }`}
+              className={`px-4 py-3 font-medium whitespace-nowrap border-b-2 transition-colors ${activeTab === tab.id
+                ? 'border-primary text-primary'
+                : 'border-transparent text-text-secondary hover:text-text'
+                }`}
             >
               <span className="mr-2">{tab.icon}</span>
               {tab.label}
@@ -72,6 +73,7 @@ export default function AdminPage() {
       {/* Tab Content */}
       <div className="mt-6">
         {activeTab === 'overview' && <OverviewTab />}
+        {activeTab === 'queue' && <QueueManagementTab />}
         {activeTab === 'users' && <UserManagementTab />}
         {activeTab === 'strategies' && <StrategyManagementTab />}
         {activeTab === 'products' && <ProductManagementTab />}

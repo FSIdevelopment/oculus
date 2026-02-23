@@ -144,6 +144,11 @@ export const strategyAPI = {
     const response = await api.get(`/api/strategies/${strategyId}/builds/${buildId}/config`)
     return response.data
   },
+
+  getBuildReadme: async (strategyId: string, buildId: string) => {
+    const response = await api.get(`/api/strategies/${strategyId}/builds/${buildId}/readme`)
+    return response.data
+  },
 }
 
 // Build API functions
@@ -438,6 +443,17 @@ export const adminAPI = {
 
   listProducts: async () => {
     const response = await api.get('/api/products')
+    return response.data
+  },
+
+  // Queue management endpoints
+  getQueueStatus: async () => {
+    const response = await api.get('/api/admin/queue/status')
+    return response.data
+  },
+
+  getSystemHealth: async () => {
+    const response = await api.get('/api/admin/health')
     return response.data
   },
 }

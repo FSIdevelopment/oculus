@@ -41,6 +41,34 @@ class DataProvider:
         self._rate_limit_delay = 12.5  # AlphaVantage: 5 calls/min = 12 sec between calls
         self._last_api_call = 0
 
+    async def validate_symbols(self, symbols: List[str], days: int = 30, interval: str = 'daily') -> Dict[str, bool]:
+        """
+        Validate that symbols are valid and return data.
+
+        Args:
+            symbols: List of stock tickers to validate
+            days: Number of days to test (default: 30 for quick validation)
+            interval: Timeframe to test
+
+        Returns:
+            Dict mapping symbol -> is_valid (True if data was found, False otherwise)
+        """
+        logger.info(f"Validating {len(symbols)} symbols: {symbols}")
+        validation_results = {}
+
+        for symbol in symbols:
+            # Try to fetch a small amount of data to validate the symbol
+            df = await self.get_historical_data(symbol, days=days, interval=interval)
+            is_valid = df is not None and not df.empty and len(df) > 0
+            validation_results[symbol] = is_valid
+
+            if is_valid:
+                logger.info(f"✓ Symbol {symbol} is valid ({len(df)} bars)")
+            else:
+                logger.warning(f"✗ Symbol {symbol} is INVALID (no data found)")
+
+        return validation_results
+
     async def get_historical_data(
         self,
         symbol: str,

@@ -882,12 +882,15 @@ async def _run_build_loop(
                 await bg_db.refresh(iteration_record)
                 iteration_uuid = iteration_record.uuid
 
+                # Set build status to "building" for all iterations (not just iteration 0)
+                # Only set to "building" if not already "stopping"
+                if build.status != "stopping":
+                    build.status = "building"
+                    await bg_db.commit()
+
                 if iteration == 0:
                     # First iteration: initial design
                     build.phase = "designing"
-                    # Only set to "building" if not already "stopping"
-                    if build.status != "stopping":
-                        build.status = "building"
                     iteration_record.status = "designing"
                     await bg_db.commit()
 
@@ -1139,6 +1142,41 @@ async def _run_build_loop(
                 try:
                     training_results = await orchestrator.listen_for_results(job_id, stop_check_callback=check_stop_signal)
                     iteration_logs.append(f"Iteration {iteration}: Training completed")
+
+                    # Check for invalid symbols error (only on first iteration)
+                    if training_results.get("error_type") == "invalid_symbols" and iteration == 0:
+                        error_msg = training_results.get("error", "Invalid symbols detected")
+                        logger.error(f"Build {build_id} failed due to invalid symbols: {error_msg}")
+
+                        # Mark build and iteration as failed
+                        build.status = "failed"
+                        build.phase = "validation_failed"
+                        build.completed_at = datetime.utcnow()
+                        iteration_record.status = "failed"
+                        iteration_record.duration_seconds = time.time() - iter_start_time
+
+                        # Store error details
+                        build.logs = json.dumps({
+                            "error": error_msg,
+                            "error_type": "invalid_symbols",
+                            "message": "Build failed due to invalid symbol(s). Please check the ticker symbols and try again.",
+                            "iteration": iteration,
+                            "timeframe": timeframe,
+                        })
+
+                        await bg_db.commit()
+
+                        # Publish error to frontend
+                        await _publish_progress(build_id, {
+                            "phase": "failed",
+                            "status": "validation_failed",
+                            "error": error_msg,
+                            "error_type": "invalid_symbols",
+                            "message": f"{error_msg}. Please check the ticker symbols and try again.",
+                        })
+
+                        logger.info(f"Build {build_id} terminated due to invalid symbols")
+                        return
 
                     # Diagnostic: log whether strategy_files are present in worker response
                     sf = training_results.get("strategy_files") if isinstance(training_results, dict) else None
@@ -1878,6 +1916,7 @@ async def list_builds(
             "completed_at": build.completed_at,
             "strategy_name": strategy_name,
             "strategy_type": strategy_type,
+            "queue_position": build.queue_position,
         }
         items.append(BuildListItem(**item_dict))
 
@@ -1998,6 +2037,7 @@ async def get_build_status(
         completed_at=build.completed_at,
         strategy_type=strategy.strategy_type if strategy else None,
         strategy_name=strategy.name if strategy else None,
+        queue_position=build.queue_position,
     )
 
 

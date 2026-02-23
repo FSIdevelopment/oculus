@@ -24,6 +24,7 @@ interface BuildStatus {
   completed_at: string | null
   strategy_type?: string
   strategy_name?: string
+  queue_position?: number | null
 }
 
 interface LogMessage {
@@ -1483,6 +1484,27 @@ export default function BuildDetailPage() {
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 text-red-700 dark:text-red-300 flex items-start gap-3">
           <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
           <div>{error}</div>
+        </div>
+      )}
+
+      {/* Queue Status Banner */}
+      {build.status.toLowerCase() === 'queued' && build.queue_position && (
+        <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4 flex items-start gap-3">
+          <Clock size={20} className="flex-shrink-0 mt-0.5 text-yellow-400" />
+          <div className="flex-1">
+            <h3 className="font-semibold text-yellow-400 mb-1">Build Queued</h3>
+            <p className="text-text-secondary text-sm">
+              Your build is in position <span className="font-semibold text-yellow-400">#{build.queue_position}</span> in the queue.
+              {build.queue_position > 1 && (
+                <span className="ml-1">
+                  Estimated wait time: <span className="font-semibold text-yellow-400">~{(build.queue_position - 1) * 6} minutes</span>
+                </span>
+              )}
+              {build.queue_position === 1 && (
+                <span className="ml-1 font-semibold text-green-400">Your build will start shortly!</span>
+              )}
+            </p>
+          </div>
         </div>
       )}
 

@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { strategyAPI, buildAPI, authAPI, licenseAPI, marketplaceAPI } from '@/lib/api'
-import { ArrowLeft, RefreshCw, ChevronDown } from 'lucide-react'
+import { ArrowLeft, RefreshCw, ChevronDown, FileText } from 'lucide-react'
 import StrategyActionModal from '@/components/StrategyActionModal'
+import StrategyExplainerModal from '@/components/StrategyExplainerModal'
 
 interface Strategy {
   uuid: string
@@ -185,6 +186,9 @@ export default function StrategyDetailPage() {
   // Deploy modal state
   const [isDeployModalOpen, setIsDeployModalOpen] = useState(false)
   const [licenses, setLicenses] = useState<License[]>([])
+
+  // Strategy Explainer modal state
+  const [isExplainerModalOpen, setIsExplainerModalOpen] = useState(false)
 
   // Trade table sort state
   const [tradeSort, setTradeSort] = useState<{ col: keyof Trade; asc: boolean }>({ col: 'entry_date', asc: false })
@@ -411,6 +415,15 @@ export default function StrategyDetailPage() {
               {strategy.status}
             </span>
             <div className="flex gap-2">
+              {selectedBuildId && (
+                <button
+                  onClick={() => setIsExplainerModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 rounded-lg transition-colors"
+                >
+                  <FileText size={15} />
+                  Strategy Explainer
+                </button>
+              )}
               <button
                 onClick={handleOpenRetrainModal}
                 disabled={retraining}
@@ -900,6 +913,17 @@ export default function StrategyDetailPage() {
           onWebhookUpdate={handleWebhookUpdate}
           onMarketplaceSubmit={handleMarketplaceSubmit}
           marketplaceListed={strategy.marketplace_listed ?? false}
+        />
+      )}
+
+      {/* Strategy Explainer Modal */}
+      {selectedBuildId && strategy && (
+        <StrategyExplainerModal
+          isOpen={isExplainerModalOpen}
+          onClose={() => setIsExplainerModalOpen(false)}
+          strategyId={strategyId}
+          buildId={selectedBuildId}
+          strategyName={strategy.name}
         />
       )}
     </div>

@@ -201,12 +201,10 @@ class BuildQueueManager:
                 queued_builds = result.scalars().all()
 
             # Get active builds (currently being processed)
+            # Note: We don't require assigned_worker_id because builds can run directly without going through the queue
             active_result = await db.execute(
                 select(StrategyBuild).where(
-                    and_(
-                        StrategyBuild.status.in_(["building", "designing", "training", "extracting_rules", "optimizing", "building_docker"]),
-                        StrategyBuild.assigned_worker_id.isnot(None)
-                    )
+                    StrategyBuild.status.in_(["building", "designing", "training", "extracting_rules", "optimizing", "building_docker"])
                 )
             )
             active_builds = active_result.scalars().all()
