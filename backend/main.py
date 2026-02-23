@@ -3,6 +3,7 @@ FastAPI application entry point for Oculus Strategy Platform.
 """
 import logging
 import asyncio
+import multiprocessing
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,8 +23,15 @@ setup_logging()
 
 
 async def generate_missing_readmes_background():
-    """Background task to generate READMEs for builds that are missing them."""
+    """Background task to generate READMEs for builds that are missing them.
+
+    Only runs on the master process to avoid duplicate work across workers.
+    Waits 30 seconds after startup to ensure the app is fully ready.
+    """
     try:
+        # Wait 30 seconds to ensure app is fully started and health checks pass
+        await asyncio.sleep(30)
+
         # Import here to avoid circular dependencies
         from scripts.generate_missing_readmes import main as generate_readmes
 
@@ -39,15 +47,24 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Startup
     logger.info("Starting up Oculus Strategy API...")
-    start_scheduler()
 
-    # Start README generation in background (don't await - let it run async)
-    asyncio.create_task(generate_missing_readmes_background())
+    # Only start scheduler and background tasks on SpawnProcess-1 (master worker)
+    # This prevents duplicate work when running with multiple uvicorn workers
+    current_process_name = multiprocessing.current_process().name
+    is_master = current_process_name == "SpawnProcess-1"
+
+    if is_master:
+        start_scheduler()
+        # Start README generation in background after a delay (don't await - let it run async)
+        asyncio.create_task(generate_missing_readmes_background())
+    else:
+        logger.info(f"Skipping background tasks on {current_process_name}")
 
     yield
     # Shutdown
     logger.info("Shutting down Oculus Strategy API...")
-    stop_scheduler()
+    if is_master:
+        stop_scheduler()
 
 
 app = FastAPI(
