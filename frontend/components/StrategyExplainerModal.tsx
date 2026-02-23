@@ -5,6 +5,7 @@ import { X, FileText, Loader2 } from 'lucide-react'
 import { strategyAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import type { Components } from 'react-markdown'
 
 interface StrategyExplainerModalProps {
   isOpen: boolean
@@ -12,6 +13,16 @@ interface StrategyExplainerModalProps {
   strategyId: string
   buildId: string
   strategyName: string
+}
+
+// Helper function to generate slug from heading text
+const generateSlug = (text: string): string => {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim()
 }
 
 export default function StrategyExplainerModal({
@@ -24,6 +35,55 @@ export default function StrategyExplainerModal({
   const [readme, setReadme] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Custom components for ReactMarkdown
+  const components: Components = {
+    // Add IDs to headings for anchor links
+    h1: ({ children, ...props }) => {
+      const text = children?.toString() || ''
+      const id = generateSlug(text)
+      return <h1 id={id} {...props}>{children}</h1>
+    },
+    h2: ({ children, ...props }) => {
+      const text = children?.toString() || ''
+      const id = generateSlug(text)
+      return <h2 id={id} {...props}>{children}</h2>
+    },
+    h3: ({ children, ...props }) => {
+      const text = children?.toString() || ''
+      const id = generateSlug(text)
+      return <h3 id={id} {...props}>{children}</h3>
+    },
+    h4: ({ children, ...props }) => {
+      const text = children?.toString() || ''
+      const id = generateSlug(text)
+      return <h4 id={id} {...props}>{children}</h4>
+    },
+    // Handle anchor links for TOC
+    a: ({ href, children, ...props }) => {
+      // If it's an internal anchor link (starts with #)
+      if (href?.startsWith('#')) {
+        return (
+          <a
+            href={href}
+            onClick={(e) => {
+              e.preventDefault()
+              const targetId = href.substring(1)
+              const element = document.getElementById(targetId)
+              if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+            }}
+            {...props}
+          >
+            {children}
+          </a>
+        )
+      }
+      // External links
+      return <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+    },
+  }
 
   const loadReadme = useCallback(async () => {
     setLoading(true)
@@ -102,7 +162,7 @@ export default function StrategyExplainerModal({
               prose-hr:border-border prose-hr:my-6
               prose-img:rounded-lg prose-img:shadow-lg
             ">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
                 {readme}
               </ReactMarkdown>
             </div>
