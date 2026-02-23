@@ -739,7 +739,7 @@ async def get_build_readme(
     """
     Return the README.md generated for a specific build.
 
-    The file lives at backend/strategy_outputs/{build_id}/README.md.
+    The README is stored in the database for production compatibility.
     """
     # Verify strategy ownership
     strat_result = await db.execute(
@@ -752,34 +752,26 @@ async def get_build_readme(
     if not strat_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
 
-    # Verify build belongs to this strategy
+    # Fetch build and verify it belongs to this strategy
     build_result = await db.execute(
         select(StrategyBuild).where(
             StrategyBuild.uuid == build_id,
             StrategyBuild.strategy_id == strategy_id,
         )
     )
-    if not build_result.scalar_one_or_none():
+    build = build_result.scalar_one_or_none()
+
+    if not build:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build not found")
 
-    # Construct path: backend/strategy_outputs/{build_id}/README.md
-    readme_path = Path(__file__).resolve().parent.parent.parent / "strategy_outputs" / build_id / "README.md"
-
-    if not readme_path.exists():
+    # Return README from database
+    if not build.readme:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="README file not found for this build",
+            detail="README not found for this build",
         )
 
-    try:
-        readme_content = readme_path.read_text(encoding="utf-8")
-        return {"readme": readme_content}
-    except Exception as e:
-        logger.error(f"Failed to read README for build {build_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to read README file",
-        )
+    return {"readme": build.readme}
 
 
 @router.get("/{strategy_id}/internal", response_model=StrategyInternalResponse)

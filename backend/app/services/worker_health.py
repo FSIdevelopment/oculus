@@ -149,6 +149,26 @@ class WorkerHealthManager:
             await db.rollback()
             return []
     
+    async def get_active_workers(self, db: AsyncSession) -> List[WorkerHealth]:
+        """Get all active workers.
+
+        Args:
+            db: Database session
+
+        Returns:
+            List of active WorkerHealth instances
+        """
+        try:
+            result = await db.execute(
+                select(WorkerHealth).where(WorkerHealth.status == "active")
+            )
+            workers = result.scalars().all()
+            return list(workers)
+
+        except Exception as e:
+            logger.error(f"Failed to get active workers: {e}")
+            return []
+
     async def get_available_worker(self, db: AsyncSession) -> Optional[WorkerHealth]:
         """Get an available worker with capacity.
 

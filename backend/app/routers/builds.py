@@ -641,7 +641,11 @@ async def _build_strategy_container(
             config=config,
             strategy_type=strategy_type or "",
         )
+        # Write to filesystem for Docker build
         (output_path / "README.md").write_text(readme)
+        # Save to database for production retrieval
+        build.readme = readme
+        await bg_db.commit()
     except Exception as e:
         logger.warning("README generation failed: %s", e)
 

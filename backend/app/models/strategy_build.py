@@ -18,7 +18,8 @@ class StrategyBuild(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False)  # "queued", "building", "designing", "waiting_for_worker", "training", "extracting_rules", "optimizing", "building_docker", "complete", "failed", "stopped"
     phase: Mapped[str | None] = mapped_column(String(100), nullable=True)
     logs: Mapped[str | None] = mapped_column(Text, nullable=True)
-    
+    readme: Mapped[str | None] = mapped_column(Text, nullable=True)  # LLM-generated README.md content
+
     # Build metrics
     tokens_consumed: Mapped[float] = mapped_column(Float, default=0.0)
     iteration_count: Mapped[int] = mapped_column(Integer, default=0)

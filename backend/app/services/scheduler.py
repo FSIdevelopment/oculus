@@ -422,11 +422,11 @@ async def assign_waiting_builds_to_workers():
                 logger.debug("No available worker capacity for waiting builds")
                 return
 
-            # Get builds waiting for workers (ordered by created_at)
+            # Get builds waiting for workers (ordered by started_at)
             result = await session.execute(
                 select(StrategyBuild)
                 .where(StrategyBuild.status == "waiting_for_worker")
-                .order_by(StrategyBuild.created_at)
+                .order_by(StrategyBuild.started_at)
                 .limit(available_capacity)
             )
             waiting_builds = result.scalars().all()
