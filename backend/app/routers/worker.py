@@ -103,7 +103,7 @@ async def worker_heartbeat(
 async def get_worker_stats(db: AsyncSession = Depends(get_db)):
     """
     Get worker statistics.
-    
+
     Returns:
     - Total workers
     - Active workers
@@ -116,13 +116,41 @@ async def get_worker_stats(db: AsyncSession = Depends(get_db)):
     try:
         manager = WorkerHealthManager()
         stats = await manager.get_worker_stats(db)
-        
+
         return stats
-        
+
     except Exception as e:
         logger.error(f"Failed to get worker stats: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get worker stats: {str(e)}"
+        )
+
+
+@router.post("/api/worker/cleanup-dead")
+async def cleanup_dead_workers(db: AsyncSession = Depends(get_db)):
+    """
+    Manually cleanup dead workers that have been dead for > 1 hour.
+
+    This is useful for immediately removing old dead workers from the dashboard
+    without waiting for the automatic cleanup scheduler.
+
+    Returns:
+    - Number of workers cleaned up
+    """
+    try:
+        manager = WorkerHealthManager()
+        cleaned_count = await manager.cleanup_dead_workers(db)
+
+        return {
+            "cleaned_count": cleaned_count,
+            "message": f"Cleaned up {cleaned_count} dead worker(s)"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to cleanup dead workers: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cleanup dead workers: {str(e)}"
         )
 

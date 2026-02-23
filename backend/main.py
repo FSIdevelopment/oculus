@@ -2,11 +2,15 @@
 FastAPI application entry point for Oculus Strategy Platform.
 """
 import logging
+import json
 import asyncio
 import multiprocessing
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -67,11 +71,39 @@ async def lifespan(app: FastAPI):
         stop_scheduler()
 
 
+class CustomJSONResponse(JSONResponse):
+    """Custom JSON response that ensures all datetime objects are serialized as UTC with 'Z' suffix."""
+
+    def render(self, content: Any) -> bytes:
+        """Render content to JSON with custom datetime serialization."""
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+            default=self.custom_serializer,
+        ).encode("utf-8")
+
+    @staticmethod
+    def custom_serializer(obj):
+        """Custom serializer for datetime objects."""
+        if isinstance(obj, datetime):
+            # If datetime is naive (no timezone), assume it's UTC and add 'Z'
+            if obj.tzinfo is None:
+                return obj.isoformat() + 'Z'
+            # If datetime has timezone, convert to UTC and add 'Z'
+            utc_dt = obj.astimezone(None)
+            return utc_dt.isoformat().replace('+00:00', 'Z')
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
 app = FastAPI(
     title="Oculus Strategy API",
     description="Backend API for the Oculus Strategy Platform",
     version="0.1.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    default_response_class=CustomJSONResponse
 )
 
 # Configure rate limiter

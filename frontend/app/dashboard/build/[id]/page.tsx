@@ -1074,17 +1074,21 @@ export default function BuildDetailPage() {
     if (build.status === 'failed') return -1
     const phaseMap: { [key: string]: number } = {
       'queued': 0,
+      'initializing': 0,    // Initializing is part of queued phase
+      'resuming': 0,        // Resuming is part of queued phase
       'designing': 1,
-      'refining': 1,        // NEW: refining is same phase as designing (LLM design step)
-      'selecting_best': 1,  // NEW: selecting best iteration (still in design phase)
+      'llm_thinking': 1,    // LLM thinking is part of the designing phase
+      'refining': 1,        // Refining is same phase as designing (LLM design step)
+      'selecting_best': 1,  // Selecting best iteration (still in design phase)
       'training': 2,
+      'training_complete': 2,  // Training complete is still part of training phase
       'optimizing': 3,
       'building_docker': 4,
       'testing_algorithm': 5,
       'complete': 6,
-      'completed': 6,       // NEW: backward compat alias
+      'completed': 6,       // Backward compat alias
     }
-    return phaseMap[build.phase] || 0
+    return phaseMap[build.phase.toLowerCase()] || 0
   }
 
   const getPhaseStatus = (index: number) => {
@@ -1708,15 +1712,33 @@ export default function BuildDetailPage() {
 
             {/* Success State */}
             {build.status.toLowerCase() === 'complete' && (
-              <div className="bg-green-500/10 border border-green-500/30 rounded p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle2 size={18} className="text-green-500" />
-                  <p className="font-semibold text-green-700 dark:text-green-300">Build Complete</p>
-                </div>
-                <p className="text-sm text-green-700 dark:text-green-300">
-                  Your strategy has been successfully built and is ready for deployment.
-                </p>
-              </div>
+              <>
+                {/* Check if goal was met from latestProgress data */}
+                {latestProgress?.data?.goal_met === false ? (
+                  // Goal not met - show warning
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertCircle size={18} className="text-amber-600 dark:text-amber-400" />
+                      <p className="font-semibold text-amber-700 dark:text-amber-300">Build Complete - Goal Not Met</p>
+                    </div>
+                    <p className="text-sm text-amber-700 dark:text-amber-300">
+                      Your strategy has been successfully built and is ready for deployment, but the target return of {latestProgress?.data?.target_return}% was not achieved.
+                      Best iteration achieved {latestProgress?.data?.best_return?.toFixed(2)}% return.
+                    </p>
+                  </div>
+                ) : (
+                  // Goal met or unknown - show success
+                  <div className="bg-green-500/10 border border-green-500/30 rounded p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle2 size={18} className="text-green-500" />
+                      <p className="font-semibold text-green-700 dark:text-green-300">Build Complete</p>
+                    </div>
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Your strategy has been successfully built and is ready for deployment.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
 
             {/* Failed State */}

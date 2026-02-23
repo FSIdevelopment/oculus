@@ -247,6 +247,53 @@ class WorkerHealthManager:
             await db.rollback()
             return []
 
+    async def cleanup_dead_workers(self, db: AsyncSession, age_threshold: timedelta = timedelta(hours=1)) -> int:
+        """Delete dead workers that have been dead for longer than the threshold.
+
+        This prevents the worker list from accumulating old dead workers when workers
+        are restarted with new IDs.
+
+        Args:
+            db: Database session
+            age_threshold: How long a worker must be dead before deletion (default: 1 hour)
+
+        Returns:
+            Number of workers deleted
+        """
+        try:
+            threshold = datetime.utcnow() - age_threshold
+
+            # Find dead workers that haven't been updated in a while
+            result = await db.execute(
+                select(WorkerHealth).where(
+                    and_(
+                        WorkerHealth.status == "dead",
+                        WorkerHealth.updated_at < threshold
+                    )
+                )
+            )
+            old_dead_workers = result.scalars().all()
+
+            deleted_count = 0
+            for worker in old_dead_workers:
+                logger.info(
+                    f"Deleting dead worker {worker.worker_id} "
+                    f"(last updated: {worker.updated_at})"
+                )
+                await db.delete(worker)
+                deleted_count += 1
+
+            if deleted_count > 0:
+                await db.commit()
+                logger.info(f"Cleaned up {deleted_count} dead workers")
+
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup dead workers: {e}")
+            await db.rollback()
+            return 0
+
     async def get_worker_stats(self, db: AsyncSession) -> dict:
         """Get worker statistics for monitoring.
 

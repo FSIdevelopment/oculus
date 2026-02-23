@@ -1385,6 +1385,9 @@ async def _run_build_loop(
                         "phase": "complete",
                         "iteration": iteration,
                         "message": f"Build complete — target achieved ({total_return}% >= {target_return}%)",
+                        "goal_met": True,
+                        "best_return": total_return,
+                        "target_return": target_return,
                         "tokens_consumed": build.tokens_consumed,
                         "iteration_count": build.iteration_count,
                         "max_iterations": max_iterations,
@@ -1642,9 +1645,14 @@ async def _run_build_loop(
 
                     build.status = "complete"
                     build.phase = "complete"
+                    # Check if goal was met
+                    goal_met = best_return >= target_return
                     await _publish_progress(build_id, {
                         "phase": "complete",
                         "message": f"Build complete — best iteration: #{best_iter_num + 1} ({best_return}% return, target was {target_return}%)",
+                        "goal_met": goal_met,
+                        "best_return": best_return,
+                        "target_return": target_return,
                         "tokens_consumed": build.tokens_consumed,
                         "iteration_count": build.iteration_count,
                         "max_iterations": max_iterations,

@@ -34,10 +34,10 @@ class BuildRecoveryService:
     
     async def recover_stuck_builds(self, db: AsyncSession) -> dict:
         """Recover builds that are stuck or assigned to dead workers.
-        
+
         Args:
             db: Database session
-            
+
         Returns:
             Dictionary with recovery statistics
         """
@@ -45,21 +45,26 @@ class BuildRecoveryService:
             "recovered": 0,
             "failed": 0,
             "requeued": 0,
-            "dead_workers": 0
+            "dead_workers": 0,
+            "cleaned_workers": 0
         }
-        
+
         try:
             # Step 1: Mark dead workers
             dead_worker_ids = await self.worker_manager.mark_dead_workers(db)
             stats["dead_workers"] = len(dead_worker_ids)
-            
+
             # Step 2: Reassign builds from dead workers
             for worker_id in dead_worker_ids:
                 reassigned = await self.worker_manager.reassign_builds_from_dead_worker(db, worker_id)
                 stats["requeued"] += len(reassigned)
                 logger.warning(f"Reassigned {len(reassigned)} builds from dead worker {worker_id}")
-            
-            # Step 3: Find builds with no progress
+
+            # Step 3: Cleanup old dead workers (dead for > 1 hour)
+            cleaned = await self.worker_manager.cleanup_dead_workers(db)
+            stats["cleaned_workers"] = cleaned
+
+            # Step 4: Find builds with no progress
             threshold = datetime.utcnow() - self.PROGRESS_TIMEOUT
             now = datetime.utcnow()
 
@@ -83,8 +88,8 @@ class BuildRecoveryService:
                 )
             )
             stuck_builds = result.scalars().all()
-            
-            # Step 4: Recover or fail stuck builds
+
+            # Step 5: Recover or fail stuck builds
             for build in stuck_builds:
                 if build.retry_count >= self.MAX_RETRIES:
                     # Max retries reached - fail the build
@@ -94,11 +99,12 @@ class BuildRecoveryService:
                     # Retry the build
                     await self._retry_build(db, build)
                     stats["recovered"] += 1
-            
+
             logger.info(
                 f"Build recovery complete: {stats['recovered']} recovered, "
                 f"{stats['failed']} failed, {stats['requeued']} requeued, "
-                f"{stats['dead_workers']} dead workers"
+                f"{stats['dead_workers']} dead workers, "
+                f"{stats['cleaned_workers']} cleaned up"
             )
             
             return stats
