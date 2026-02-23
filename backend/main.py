@@ -2,6 +2,7 @@
 FastAPI application entry point for Oculus Strategy Platform.
 """
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,12 +21,29 @@ logger = logging.getLogger(__name__)
 setup_logging()
 
 
+async def generate_missing_readmes_background():
+    """Background task to generate READMEs for builds that are missing them."""
+    try:
+        # Import here to avoid circular dependencies
+        from scripts.generate_missing_readmes import main as generate_readmes
+
+        logger.info("Starting background README generation...")
+        await generate_readmes()
+        logger.info("Background README generation complete")
+    except Exception as e:
+        logger.error(f"Background README generation failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Startup
     logger.info("Starting up Oculus Strategy API...")
     start_scheduler()
+
+    # Start README generation in background (don't await - let it run async)
+    asyncio.create_task(generate_missing_readmes_background())
+
     yield
     # Shutdown
     logger.info("Shutting down Oculus Strategy API...")

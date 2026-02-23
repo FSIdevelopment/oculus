@@ -28,10 +28,7 @@ echo "Seeding admin user..."
 python -m scripts.seed_admin
 echo "✓ Admin seed complete!"
 
-# Generate missing READMEs for existing builds (idempotent - safe to run every start)
-echo "Generating missing READMEs for existing builds..."
-python scripts/generate_missing_readmes.py || echo "⚠ README generation skipped (may have failed or no builds need READMEs)"
-echo "✓ README generation complete!"
+# Note: README generation now runs in background after app startup (see main.py lifespan)
 
 # Start the application
 PORT=${PORT:-8080}
