@@ -101,11 +101,16 @@ export const authAPI = {
 
 // Strategy API functions
 export const strategyAPI = {
-  listStrategies: async (skip: number = 0, limit: number = 10, has_completed_build?: boolean) => {
-    const params: any = { skip, limit }
-    if (has_completed_build !== undefined) {
-      params.has_completed_build = has_completed_build
-    }
+  listStrategies: async (params?: {
+    skip?: number
+    limit?: number
+    has_completed_build?: boolean
+    search?: string
+    strategy_type?: string
+    status?: string
+    sort_by?: string
+    sort_order?: string
+  }) => {
     const response = await api.get('/api/strategies', { params })
     return response.data
   },

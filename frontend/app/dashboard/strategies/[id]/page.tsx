@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { strategyAPI, buildAPI, authAPI, licenseAPI, marketplaceAPI } from '@/lib/api'
 import { ArrowLeft, RefreshCw, ChevronDown, FileText } from 'lucide-react'
 import StrategyActionModal from '@/components/StrategyActionModal'
@@ -777,7 +778,12 @@ export default function StrategyDetailPage() {
                       <span className={`text-xs font-medium px-2 py-0.5 rounded border ${getStatusColor(build.status)}`}>
                         {build.status}
                       </span>
-                      <span className="text-sm text-text font-medium">Build #{builds.length - idx}</span>
+                      <Link
+                        href={`/dashboard/build/${build.uuid}`}
+                        className="text-sm text-text font-medium hover:text-primary transition-colors cursor-pointer"
+                      >
+                        Build #{builds.length - idx}
+                      </Link>
                     </div>
                     <span className="text-xs text-text-secondary">{new Date(build.started_at).toLocaleString()}</span>
                   </div>

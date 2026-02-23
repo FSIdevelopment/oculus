@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { strategyAPI, marketplaceAPI, licenseAPI } from '@/lib/api'
 import StrategyActionModal from '@/components/StrategyActionModal'
-import { TrendingUp, Calendar, Users } from 'lucide-react'
+import { TrendingUp, Calendar, Users, Search, SlidersHorizontal } from 'lucide-react'
 
 interface Strategy {
   uuid: string
@@ -42,10 +42,26 @@ export default function StrategiesPage() {
   const [limit] = useState(10)
   const [total, setTotal] = useState(0)
 
-  const loadStrategies = async () => {
+  // Filter and sort state
+  const [searchTerm, setSearchTerm] = useState('')
+  const [strategyTypeFilter, setStrategyTypeFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [sortBy, setSortBy] = useState('created_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
+  const loadStrategies = useCallback(async () => {
     try {
       setLoading(true)
-      const data = await strategyAPI.listStrategies(skip, limit, true)
+      const data = await strategyAPI.listStrategies({
+        skip,
+        limit,
+        has_completed_build: true,
+        search: searchTerm || undefined,
+        strategy_type: strategyTypeFilter || undefined,
+        status: statusFilter || undefined,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      })
       setStrategies(data.items || [])
       setTotal(data.total || 0)
     } catch (err) {
@@ -54,7 +70,7 @@ export default function StrategiesPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [skip, limit, searchTerm, strategyTypeFilter, statusFilter, sortBy, sortOrder])
 
   const loadLicenses = async () => {
     try {
@@ -68,9 +84,11 @@ export default function StrategiesPage() {
 
   useEffect(() => {
     loadStrategies()
+  }, [loadStrategies])
+
+  useEffect(() => {
     loadLicenses()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skip, limit])
+  }, [])
 
   const openActionModal = (strategy: Strategy) => {
     setSelectedStrategy(strategy)
@@ -154,6 +172,121 @@ export default function StrategiesPage() {
           {error}
         </div>
       )}
+
+      {/* Filters and Sorting */}
+      <div className="bg-surface border border-border rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-4">
+          <SlidersHorizontal size={20} className="text-text-secondary" />
+          <h2 className="text-lg font-semibold text-text">Filters & Sorting</h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" size={18} />
+            <input
+              type="text"
+              placeholder="Search by name..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                setSkip(0)
+              }}
+              className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-lg text-text placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+
+          {/* Strategy Type Filter */}
+          <select
+            value={strategyTypeFilter}
+            onChange={(e) => {
+              setStrategyTypeFilter(e.target.value)
+              setSkip(0)
+            }}
+            className="px-4 py-2 bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">All Types</option>
+            <option value="Momentum">Momentum</option>
+            <option value="Mean Reversion">Mean Reversion</option>
+            <option value="Trend Following">Trend Following</option>
+            <option value="Breakout">Breakout</option>
+            <option value="Arbitrage">Arbitrage</option>
+            <option value="Statistical">Statistical</option>
+          </select>
+
+          {/* Status Filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value)
+              setSkip(0)
+            }}
+            className="px-4 py-2 bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">All Statuses</option>
+            <option value="complete">Complete</option>
+            <option value="draft">Draft</option>
+            <option value="building">Building</option>
+            <option value="failed">Failed</option>
+          </select>
+
+          {/* Sort By */}
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="px-4 py-2 bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="created_at">Date Created</option>
+            <option value="name">Name</option>
+            <option value="strategy_type">Type</option>
+            <option value="rating">Rating</option>
+            <option value="subscriber_count">Subscribers</option>
+          </select>
+
+          {/* Sort Order */}
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}
+            className="px-4 py-2 bg-background border border-border rounded-lg text-text focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </div>
+
+        {/* Active Filters Display */}
+        {(searchTerm || strategyTypeFilter || statusFilter) && (
+          <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border">
+            <span className="text-sm text-text-secondary">Active filters:</span>
+            {searchTerm && (
+              <span className="px-2 py-1 bg-primary/10 text-primary text-xs rounded border border-primary/20">
+                Search: {searchTerm}
+              </span>
+            )}
+            {strategyTypeFilter && (
+              <span className="px-2 py-1 bg-primary/10 text-primary text-xs rounded border border-primary/20">
+                Type: {strategyTypeFilter}
+              </span>
+            )}
+            {statusFilter && (
+              <span className="px-2 py-1 bg-primary/10 text-primary text-xs rounded border border-primary/20">
+                Status: {statusFilter}
+              </span>
+            )}
+            <button
+              onClick={() => {
+                setSearchTerm('')
+                setStrategyTypeFilter('')
+                setStatusFilter('')
+                setSkip(0)
+              }}
+              className="ml-auto text-xs text-text-secondary hover:text-primary transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Strategies Grid */}
       {strategies.length === 0 ? (

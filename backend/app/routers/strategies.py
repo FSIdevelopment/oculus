@@ -82,10 +82,15 @@ async def list_strategies(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     has_completed_build: Optional[bool] = Query(None),
+    search: str = Query("", min_length=0),
+    strategy_type: str = Query("", min_length=0),
+    status: str = Query("", min_length=0),
+    sort_by: str = Query("created_at", regex="^(name|created_at|strategy_type|rating|subscriber_count)$"),
+    sort_order: str = Query("desc", regex="^(asc|desc)$"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """List current user's strategies (paginated)."""
+    """List current user's strategies (paginated, filterable, sortable)."""
     # Build base query conditions
     base_conditions = [
         Strategy.user_id == current_user.uuid,
@@ -102,6 +107,38 @@ async def list_strategies(
         )
         base_conditions.append(Strategy.uuid.in_(completed_build_subquery))
 
+    # Add search filter (name)
+    if search:
+        base_conditions.append(Strategy.name.ilike(f"%{search}%"))
+
+    # Add strategy_type filter
+    if strategy_type:
+        base_conditions.append(Strategy.strategy_type == strategy_type)
+
+    # Add status filter
+    if status:
+        base_conditions.append(Strategy.status == status)
+
+    # Build query
+    query = select(Strategy).where(*base_conditions)
+
+    # Apply sorting
+    if sort_by == "name":
+        sort_column = Strategy.name
+    elif sort_by == "strategy_type":
+        sort_column = Strategy.strategy_type
+    elif sort_by == "rating":
+        sort_column = Strategy.rating
+    elif sort_by == "subscriber_count":
+        sort_column = Strategy.subscriber_count
+    else:  # created_at
+        sort_column = Strategy.created_at
+
+    if sort_order == "asc":
+        query = query.order_by(sort_column.asc())
+    else:
+        query = query.order_by(sort_column.desc())
+
     # Count total
     count_result = await db.execute(
         select(func.count(Strategy.uuid)).where(*base_conditions)
@@ -110,10 +147,7 @@ async def list_strategies(
 
     # Fetch paginated
     result = await db.execute(
-        select(Strategy)
-        .where(*base_conditions)
-        .offset(skip)
-        .limit(limit)
+        query.offset(skip).limit(limit)
     )
     strategies = result.scalars().all()
 
