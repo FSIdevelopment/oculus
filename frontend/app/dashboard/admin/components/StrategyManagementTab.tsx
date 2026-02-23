@@ -17,6 +17,7 @@ interface Strategy {
   subscriber_count?: number
   build_count?: number
   annual_return?: number
+  best_return_pct?: number
   created_at: string
 }
 
@@ -117,6 +118,7 @@ export default function StrategyManagementTab() {
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Versions</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Rating</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Subscribers</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-text">Best Return %</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-text">Actions</th>
                 </tr>
               </thead>
@@ -142,6 +144,15 @@ export default function StrategyManagementTab() {
                     <td className="px-6 py-4 text-text">{strategy.build_count || 0}</td>
                     <td className="px-6 py-4 text-text">{strategy.rating?.toFixed(1) || 'N/A'}</td>
                     <td className="px-6 py-4 text-text">{strategy.subscriber_count || 0}</td>
+                    <td className="px-6 py-4 text-text">
+                      {strategy.best_return_pct !== null && strategy.best_return_pct !== undefined ? (
+                        <span className={strategy.best_return_pct >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {strategy.best_return_pct.toFixed(2)}%
+                        </span>
+                      ) : (
+                        'N/A'
+                      )}
+                    </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
                         <Link

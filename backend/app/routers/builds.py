@@ -1868,11 +1868,12 @@ async def trigger_build(
             detail=f"Insufficient token balance. You need at least {settings.TOKENS_PER_ITERATION} tokens per iteration. Current balance: {current_user.balance}"
         )
 
-    # Create build record
+    # Create build record with status "building" to ensure dashboard shows it immediately
+    # when worker picks it up (worker might start before background task runs)
     build = StrategyBuild(
         strategy_id=strategy_id,
         user_id=current_user.uuid,
-        status="queued",
+        status="building",  # Changed from "queued" to "building"
         phase="initializing",
         started_at=datetime.utcnow(),
         max_iterations=max_iterations,
@@ -2288,7 +2289,8 @@ async def restart_build(
         )
 
     # Reuse the same build record - reset status and clear completed_at
-    build.status = "queued"
+    # Set to "building" immediately so dashboard shows it when worker picks it up
+    build.status = "building"  # Changed from "queued" to "building"
     build.phase = "resuming"
     build.completed_at = None
     build.started_at = datetime.utcnow()  # Reset started_at to prevent timeout checks from failing

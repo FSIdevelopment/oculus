@@ -128,8 +128,8 @@ class BuildRecoveryService:
             build.assigned_worker_id = None
             build.last_heartbeat = None
 
-            # Set status back to queued
-            build.status = "queued"
+            # Set status to "building" so dashboard shows it immediately when worker picks it up
+            build.status = "building"  # Changed from "queued" to "building"
 
             # Requeue the build with lower priority (higher retry count = lower priority)
             await self.queue_manager.enqueue_build(db, build.uuid, priority=build.retry_count)

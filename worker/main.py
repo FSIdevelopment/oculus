@@ -40,7 +40,11 @@ logger = logging.getLogger(__name__)
 
 
 class TrainingWorker:
-    """Redis-based training worker for ML jobs."""
+    """Redis-based training worker for ML jobs.
+
+    Uses a semaphore to limit concurrent job processing and ensures
+    accurate job tracking through the health client.
+    """
 
     def __init__(self, redis_client: redis.Redis, concurrency: int = 2,
                  health_client: Optional[WorkerHealthClient] = None):
@@ -59,6 +63,8 @@ class TrainingWorker:
         self.health_client = health_client
         self.heartbeat_thread: Optional[threading.Thread] = None
         self.heartbeat_stop_event = threading.Event()
+        # Semaphore to limit concurrent job processing
+        self.job_semaphore = asyncio.Semaphore(concurrency)
 
     def _heartbeat_thread_loop(self):
         """Send periodic heartbeats to backend in a separate thread.
@@ -130,7 +136,8 @@ class TrainingWorker:
                         continue
 
                     job = json.loads(job_json)
-                    logger.info(f"Received job: {job_id}")
+                    build_id = job.get('build_id', 'unknown')
+                    logger.info(f"📥 Received job: {job_id} (build_id: {build_id})")
 
                     # Verify job belongs to this worker (prevents cross-project contamination)
                     job_source = job.get("source")
@@ -138,7 +145,12 @@ class TrainingWorker:
                         logger.warning(f"Skipping job {job_id}: source '{job_source}' != expected '{config.expected_job_source}'")
                         continue
 
-                    # Process job asynchronously
+                    # Log current job queue status
+                    if self.health_client:
+                        active_count = await self.health_client.get_active_job_count()
+                        logger.info(f"📊 Job queue status: {active_count}/{self.concurrency} slots in use")
+
+                    # Process job asynchronously (will wait for semaphore inside _process_and_report)
                     asyncio.create_task(self._process_and_report(job, job_id))
 
                 except json.JSONDecodeError as e:
@@ -154,6 +166,9 @@ class TrainingWorker:
     async def _process_and_report(self, job: dict, job_id: str):
         """Process a job and report results back to Redis.
 
+        Uses semaphore to limit concurrent execution and ensures proper
+        check-in/check-out with the health tracking system.
+
         Args:
             job: Job configuration dictionary
             job_id: Job ID from Redis queue
@@ -161,33 +176,37 @@ class TrainingWorker:
         # Extract build_id for health tracking
         build_id = job.get('build_id', 'unknown')
 
-        # Add job to active jobs list
-        if self.health_client and build_id != 'unknown':
-            self.health_client.add_job(build_id)
-
-        try:
-            # Process job
-            result = await self.processor.process_job(job, job_id)
-
-            # Store result in Redis with 24h TTL
-            result_key = f"{config.result_key_prefix}:{job_id}"
-            self.redis.set(result_key, json.dumps(result), ex=86400)
-            logger.info(f"[{job_id}] Result stored at {result_key}")
-
-        except Exception as e:
-            logger.exception(f"[{job_id}] Failed to process job: {e}")
-            error_result = {
-                "build_id": build_id,
-                "status": "error",
-                "error": str(e)
-            }
-            result_key = f"{config.result_key_prefix}:{job_id}"
-            self.redis.set(result_key, json.dumps(error_result), ex=86400)
-
-        finally:
-            # Remove job from active jobs list
+        # Acquire semaphore to limit concurrency
+        async with self.job_semaphore:
+            # Check in: Add job to active jobs list
             if self.health_client and build_id != 'unknown':
-                self.health_client.remove_job(build_id)
+                await self.health_client.add_job(build_id)
+
+            logger.info(f"🚀 Starting job processing: {job_id} (build_id: {build_id})")
+
+            try:
+                # Process job
+                result = await self.processor.process_job(job, job_id)
+
+                # Store result in Redis with 24h TTL
+                result_key = f"{config.result_key_prefix}:{job_id}"
+                self.redis.set(result_key, json.dumps(result), ex=86400)
+                logger.info(f"[{job_id}] Result stored at {result_key}")
+
+            except Exception as e:
+                logger.exception(f"[{job_id}] Failed to process job: {e}")
+                error_result = {
+                    "build_id": build_id,
+                    "status": "error",
+                    "error": str(e)
+                }
+                result_key = f"{config.result_key_prefix}:{job_id}"
+                self.redis.set(result_key, json.dumps(error_result), ex=86400)
+
+            finally:
+                # Check out: Remove job from active jobs list
+                if self.health_client and build_id != 'unknown':
+                    await self.health_client.remove_job(build_id)
 
     def stop(self):
         """Stop the worker gracefully."""

@@ -13,6 +13,7 @@ from app.config import settings
 from app.models.user import User
 from app.models.strategy import Strategy
 from app.models.strategy_build import StrategyBuild
+from app.models.build_iteration import BuildIteration
 from app.models.license import License
 from app.schemas.users import (
     UserAdminUpdate, UserDetailResponse, UserListResponse,
@@ -401,6 +402,40 @@ async def list_all_strategies(
             # Try to get total_return_pct or total_return from backtest results
             annual_return = strategy.backtest_results.get('total_return_pct') or strategy.backtest_results.get('total_return')
 
+        # Calculate best return % from all builds
+        best_return_pct = None
+        builds_result = await db.execute(
+            select(StrategyBuild)
+            .where(
+                StrategyBuild.strategy_id == strategy.uuid,
+                StrategyBuild.status == "complete"
+            )
+        )
+        builds = builds_result.scalars().all()
+
+        max_return = None
+        for build in builds:
+            # Get all iterations for this build
+            iterations_result = await db.execute(
+                select(BuildIteration)
+                .where(
+                    BuildIteration.build_id == build.uuid,
+                    BuildIteration.status == "complete"
+                )
+            )
+            iterations = iterations_result.scalars().all()
+
+            # Find max return from all iterations
+            for iteration in iterations:
+                if iteration.backtest_results and isinstance(iteration.backtest_results, dict):
+                    # Try to get total_return_pct or total_return
+                    return_val = iteration.backtest_results.get('total_return_pct') or iteration.backtest_results.get('total_return')
+                    if return_val is not None:
+                        if max_return is None or return_val > max_return:
+                            max_return = return_val
+
+        best_return_pct = max_return
+
         # Create response dict from strategy
         strategy_dict = {
             "uuid": strategy.uuid,
@@ -421,7 +456,8 @@ async def list_all_strategies(
             "updated_at": strategy.updated_at,
             "owner_name": owner_name,
             "build_count": build_count,
-            "annual_return": annual_return
+            "annual_return": annual_return,
+            "best_return_pct": best_return_pct
         }
         items.append(StrategyResponse(**strategy_dict))
 

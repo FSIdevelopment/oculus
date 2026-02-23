@@ -65,6 +65,7 @@ class StrategyResponse(BaseModel):
     owner_name: Optional[str] = None
     build_count: Optional[int] = None
     annual_return: Optional[float] = None
+    best_return_pct: Optional[float] = None
 
     class Config:
         from_attributes = True
