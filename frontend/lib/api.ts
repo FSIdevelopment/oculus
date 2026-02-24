@@ -320,6 +320,11 @@ export const connectAPI = {
     const response = await api.get('/api/connect/dashboard-link')
     return response.data
   },
+
+  getEarnings: async () => {
+    const response = await api.get('/api/users/me/earnings')
+    return response.data
+  },
 }
 
 // Admin API functions
