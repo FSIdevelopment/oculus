@@ -218,8 +218,8 @@ async def create_license_checkout(
             cancel_url=f"{settings.FRONTEND_URL}/dashboard/strategies?license_cancelled=1",
             **({"transfer_data": {"destination": creator_connect_id}} if creator_connect_id else {}),
             subscription_data={
-                "application_fee_percent": 35,
                 "metadata": {"strategy_id": strategy_id},
+                **({"application_fee_percent": 35} if creator_connect_id else {}),
             },
         )
     except stripe.error.StripeError as e:
