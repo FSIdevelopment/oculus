@@ -322,10 +322,10 @@ export default function StrategyDetailPage() {
   /**
    * Toggles the marketplace listing for the current strategy.
    */
-  const handleMarketplaceSubmit = async (price: number) => {
+  const handleMarketplaceSubmit = async (price: number, buildId: string) => {
     if (!strategy) return
     const currentlyListed = strategy.marketplace_listed ?? false
-    await marketplaceAPI.updateMarketplaceListing(strategy.uuid, !currentlyListed, currentlyListed ? undefined : price)
+    await marketplaceAPI.updateMarketplaceListing(strategy.uuid, !currentlyListed, currentlyListed ? undefined : price, currentlyListed ? undefined : buildId)
     setIsDeployModalOpen(false)
     loadStrategy()
   }

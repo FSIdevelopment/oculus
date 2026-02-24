@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { X, CheckCircle, Zap, Users, Globe, ArrowRight, ExternalLink } from 'lucide-react'
-import { licenseAPI } from '@/lib/api'
+import { licenseAPI, strategyAPI } from '@/lib/api'
 import LicensePaymentForm from '@/components/LicensePaymentForm'
 
 /** Minimal license shape needed by the modal. */
@@ -29,7 +29,7 @@ interface StrategyActionModalProps {
   onLicensePurchase?: () => Promise<void>
   /** Called when the user saves a new webhook URL against an active license. */
   onWebhookUpdate?: (licenseId: string, webhookUrl: string) => Promise<void>
-  onMarketplaceSubmit?: (price: number) => Promise<void>
+  onMarketplaceSubmit?: (price: number, buildId: string) => Promise<void>
   /** Whether the strategy is currently listed on the marketplace. */
   marketplaceListed?: boolean
 }
@@ -64,6 +64,11 @@ export default function StrategyActionModal({
   const [licensePrice, setLicensePrice] = useState<{ monthly_price: number; annual_price: number } | null>(null)
   const [priceLoading, setPriceLoading] = useState(false)
 
+  // Completed builds for version selection on the Marketplace tab
+  const [completedBuilds, setCompletedBuilds] = useState<Array<{ uuid: string; iteration_count: number; completed_at: string }>>([])
+  const [buildsLoading, setBuildsLoading] = useState(false)
+  const [selectedBuildId, setSelectedBuildId] = useState<string>('')
+
   useEffect(() => {
     if (!isOpen || !strategyId) return
     // Reset all transient state whenever the modal opens
@@ -80,6 +85,23 @@ export default function StrategyActionModal({
       })
       .finally(() => setPriceLoading(false))
   }, [isOpen, strategyId])
+
+  // Fetch completed builds when the marketplace tab is opened (listing only)
+  useEffect(() => {
+    if (!isOpen || !strategyId || activeTab !== 'marketplace' || marketplaceListed) return
+    setBuildsLoading(true)
+    strategyAPI
+      .getStrategyBuilds(strategyId, 0, 50)
+      .then((data: any) => {
+        const builds = (data.items ?? data).filter((b: any) => b.status === 'complete')
+        setCompletedBuilds(builds)
+        if (builds.length > 0 && !selectedBuildId) {
+          setSelectedBuildId(builds[0].uuid)
+        }
+      })
+      .catch(() => setCompletedBuilds([]))
+      .finally(() => setBuildsLoading(false))
+  }, [isOpen, strategyId, activeTab, marketplaceListed])
 
   if (!isOpen) return null
 
@@ -123,10 +145,11 @@ export default function StrategyActionModal({
 
   const handleMarketplaceSubmit = async () => {
     if (!onMarketplaceSubmit) return
+    if (!marketplaceListed && !selectedBuildId) return
     setIsSubmitting(true)
     setMarketplaceError('')
     try {
-      await onMarketplaceSubmit(marketplacePrice)
+      await onMarketplaceSubmit(marketplacePrice, selectedBuildId)
       onClose()
     } catch (err: any) {
       const message = err?.response?.data?.detail || err?.message || 'Failed to update marketplace listing'
@@ -448,6 +471,40 @@ export default function StrategyActionModal({
               </div>
             </div>
 
+            {/* Version selector — only shown when listing (not when unlisting) */}
+            {!marketplaceListed && (
+              <div className="space-y-2">
+                <label className="block">
+                  <span className="text-sm font-medium text-text mb-2 block">Strategy Version</span>
+                  {buildsLoading ? (
+                    <p className="text-sm text-text-secondary">Loading builds…</p>
+                  ) : completedBuilds.length === 0 ? (
+                    <p className="text-sm text-red-400">No completed builds found. Build your strategy first.</p>
+                  ) : (
+                    <select
+                      value={selectedBuildId}
+                      onChange={(e) => setSelectedBuildId(e.target.value)}
+                      className="w-full bg-surface-hover border border-border rounded-lg px-4 py-2 text-text focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      {completedBuilds.map((build, idx) => {
+                        const date = new Date(build.completed_at).toLocaleDateString(undefined, {
+                          year: 'numeric', month: 'short', day: 'numeric',
+                        })
+                        return (
+                          <option key={build.uuid} value={build.uuid}>
+                            Version {completedBuilds.length - idx} — {build.iteration_count} iterations · {date}
+                          </option>
+                        )
+                      })}
+                    </select>
+                  )}
+                </label>
+                <p className="text-xs text-text-secondary">
+                  Marketplace visitors will see the performance data and explainer for the selected version.
+                </p>
+              </div>
+            )}
+
             {marketplaceError && (
               <div className="bg-red-900/20 border border-red-700 rounded-lg px-4 py-3 text-red-400 text-sm">
                 {marketplaceError}
@@ -456,7 +513,7 @@ export default function StrategyActionModal({
 
             <button
               onClick={handleMarketplaceSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || (!marketplaceListed && (buildsLoading || completedBuilds.length === 0 || !selectedBuildId))}
               className={`w-full disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-all hover:shadow-lg hover:opacity-90 ${marketplaceListed
                 ? 'bg-red-600 hover:bg-red-700'
                 : 'bg-gradient-to-r from-[#007cf0] to-[#00dfd8]'

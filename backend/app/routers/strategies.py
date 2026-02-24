@@ -232,14 +232,17 @@ async def get_marketplace_strategy(strategy_id: str, db: AsyncSession = Depends(
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
 
-    # Attach latest complete build ID so the frontend can show the Strategy Explainer
-    build_result = await db.execute(
-        select(StrategyBuild.uuid)
-        .where(StrategyBuild.strategy_id == strategy_id, StrategyBuild.status == "complete")
-        .order_by(StrategyBuild.completed_at.desc())
-        .limit(1)
-    )
-    latest_build_id = build_result.scalar_one_or_none()
+    # Prefer the owner-pinned build version; fall back to the most recent complete build.
+    if strategy.marketplace_build_id:
+        latest_build_id = strategy.marketplace_build_id
+    else:
+        build_result = await db.execute(
+            select(StrategyBuild.uuid)
+            .where(StrategyBuild.strategy_id == strategy_id, StrategyBuild.status == "complete")
+            .order_by(StrategyBuild.completed_at.desc())
+            .limit(1)
+        )
+        latest_build_id = build_result.scalar_one_or_none()
 
     response = StrategyResponse.model_validate(strategy)
     response.latest_build_id = latest_build_id
@@ -279,6 +282,8 @@ async def update_marketplace_listing(
     strategy.marketplace_listed = listing_data.listed
     if listing_data.price is not None:
         strategy.marketplace_price = listing_data.price
+    if listing_data.build_id is not None:
+        strategy.marketplace_build_id = listing_data.build_id
     strategy.updated_at = datetime.utcnow()
 
     await db.commit()

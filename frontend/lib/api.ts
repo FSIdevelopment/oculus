@@ -269,8 +269,8 @@ export const marketplaceAPI = {
     return response.data
   },
 
-  updateMarketplaceListing: async (strategyId: string, listed: boolean, price?: number) => {
-    const response = await api.put(`/api/strategies/${strategyId}/marketplace`, { listed, price })
+  updateMarketplaceListing: async (strategyId: string, listed: boolean, price?: number, buildId?: string) => {
+    const response = await api.put(`/api/strategies/${strategyId}/marketplace`, { listed, price, build_id: buildId })
     return response.data
   },
 }

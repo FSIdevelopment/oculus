@@ -42,6 +42,7 @@ class MarketplaceListRequest(BaseModel):
     """Schema for listing/unlisting a strategy on the marketplace."""
     listed: bool
     price: Optional[float] = None
+    build_id: Optional[str] = None
 
 
 class StrategyResponse(BaseModel):
@@ -64,6 +65,7 @@ class StrategyResponse(BaseModel):
     updated_at: datetime
     config: Optional[dict] = None
     latest_build_id: Optional[str] = None
+    marketplace_build_id: Optional[str] = None
 
     # Admin-specific fields (populated only in admin endpoints)
     owner_name: Optional[str] = None

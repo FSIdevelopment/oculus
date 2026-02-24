@@ -33,6 +33,7 @@ class Strategy(Base):
     # Marketplace
     marketplace_listed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     marketplace_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    marketplace_build_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     # Metrics
     version: Mapped[int] = mapped_column(Integer, default=1)
