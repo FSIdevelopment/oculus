@@ -142,6 +142,11 @@ async def create_license_checkout(
             detail="Strategy not found"
         )
 
+    # Look up strategy creator's Connect account for revenue routing
+    creator_result = await db.execute(select(User).where(User.uuid == strategy.user_id))
+    creator = creator_result.scalar_one_or_none()
+    creator_connect_id = creator.stripe_connect_account_id if creator else None
+
     # Require Stripe to be configured
     if not settings.STRIPE_SECRET_KEY:
         raise HTTPException(
@@ -211,6 +216,11 @@ async def create_license_checkout(
                 "?license_success=1&session_id={CHECKOUT_SESSION_ID}"
             ),
             cancel_url=f"{settings.FRONTEND_URL}/dashboard/strategies?license_cancelled=1",
+            **({"transfer_data": {"destination": creator_connect_id}} if creator_connect_id else {}),
+            subscription_data={
+                "application_fee_percent": 35,
+                "metadata": {"strategy_id": strategy_id},
+            },
         )
     except stripe.error.StripeError as e:
         raise HTTPException(
