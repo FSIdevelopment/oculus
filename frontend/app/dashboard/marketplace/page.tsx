@@ -50,6 +50,37 @@ const STRATEGY_TYPES = [
   'Williams %R',
 ]
 
+function getAnnualReturn(strategy: Strategy): number | null {
+  const br = strategy.backtest_results
+  if (!br) return null
+  const val = br.annual_return ?? br.total_return_pct ?? br.total_return
+  return val != null ? Number(val) : null
+}
+
+function getMaxDrawdown(strategy: Strategy): number | null {
+  const br = strategy.backtest_results
+  if (!br) return null
+  const val = br.max_drawdown
+  return val != null ? Number(val) : null
+}
+
+function getFeaturedStrategy(list: Strategy[]): Strategy | null {
+  if (list.length < 2) return null
+  return list.reduce((best, s) => {
+    const annualReturn = getAnnualReturn(s) ?? 0
+    const bestAnnualReturn = getAnnualReturn(best) ?? 0
+    const score =
+      annualReturn / 100 +
+      (s.rating ?? 0) * 20 +
+      Math.log10((s.subscriber_count ?? 0) + 1) * 10
+    const bestScore =
+      bestAnnualReturn / 100 +
+      (best.rating ?? 0) * 20 +
+      Math.log10((best.subscriber_count ?? 0) + 1) * 10
+    return score > bestScore ? s : best
+  })
+}
+
 export default function MarketplacePage() {
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,7 +88,7 @@ export default function MarketplacePage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedType, setSelectedType] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
-  const [sortOrder] = useState('desc')
+  const sortOrder = 'desc'
   const [skip, setSkip] = useState(0)
   const [total, setTotal] = useState(0)
 
@@ -107,37 +138,6 @@ export default function MarketplacePage() {
     )
   }
 
-  const getAnnualReturn = (strategy: Strategy): number | null => {
-    const br = strategy.backtest_results
-    if (!br) return null
-    const val = br.annual_return ?? br.total_return_pct ?? br.total_return
-    return val != null ? Number(val) : null
-  }
-
-  const getMaxDrawdown = (strategy: Strategy): number | null => {
-    const br = strategy.backtest_results
-    if (!br) return null
-    const val = br.max_drawdown
-    return val != null ? Number(val) : null
-  }
-
-  const getFeaturedStrategy = (list: Strategy[]): Strategy | null => {
-    if (list.length < 2) return null
-    return list.reduce((best, s) => {
-      const annualReturn = getAnnualReturn(s) ?? 0
-      const bestAnnualReturn = getAnnualReturn(best) ?? 0
-      const score =
-        annualReturn / 100 +
-        (s.rating ?? 0) * 20 +
-        Math.log10((s.subscriber_count ?? 0) + 1) * 10
-      const bestScore =
-        bestAnnualReturn / 100 +
-        (best.rating ?? 0) * 20 +
-        Math.log10((best.subscriber_count ?? 0) + 1) * 10
-      return score > bestScore ? s : best
-    })
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -156,7 +156,7 @@ export default function MarketplacePage() {
               type="text"
               placeholder="Search strategies..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => { setSearchTerm(e.target.value); setSkip(0) }}
               className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-lg text-text placeholder-text-secondary focus:outline-none focus:border-primary"
             />
           </div>
