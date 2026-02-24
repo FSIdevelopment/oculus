@@ -247,6 +247,29 @@ async def get_marketplace_strategy(strategy_id: str, db: AsyncSession = Depends(
 
     response = StrategyResponse.model_validate(strategy)
     response.latest_build_id = latest_build_id
+
+    # strategy.backtest_results and strategy.config always reflect the latest build,
+    # not the pinned marketplace version. Override them with data from the resolved build.
+    if latest_build_id:
+        iter_result = await db.execute(
+            select(BuildIteration.backtest_results, BuildIteration.strategy_files)
+            .where(
+                BuildIteration.build_id == latest_build_id,
+                BuildIteration.status == "complete",
+            )
+        )
+        iterations = iter_result.all()
+        if iterations:
+            def _score(row: tuple) -> float:
+                br = row[0] or {}
+                return float(br.get("total_return_pct") or br.get("total_return") or 0)
+            best = max(iterations, key=_score)
+            best_backtest, best_files = best
+            if best_backtest:
+                response.backtest_results = best_backtest
+            if best_files and "config.json" in best_files:
+                response.config = best_files["config.json"]
+
     return response
 
 
