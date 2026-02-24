@@ -406,28 +406,28 @@ export default function MarketplaceStrategyPage() {
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Total Return</p>
             <p className={`text-2xl font-bold ${totalReturn == null ? 'text-text-secondary' : totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {totalReturn != null ? `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(1)}%` : '—'}
+              {totalReturn != null ? `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(1)}%` : <span className="text-text-secondary">N/A</span>}
             </p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Total Trades</p>
-            <p className="text-2xl font-bold text-text">{br.total_trades ?? '—'}</p>
+            <p className="text-2xl font-bold text-text">{br.total_trades != null ? br.total_trades : <span className="text-text-secondary">N/A</span>}</p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Win Rate</p>
-            <p className="text-2xl font-bold text-text">{winRate != null ? `${winRate.toFixed(1)}%` : '—'}</p>
+            <p className="text-2xl font-bold text-text">{winRate != null ? `${winRate.toFixed(1)}%` : <span className="text-text-secondary">N/A</span>}</p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Sharpe Ratio</p>
-            <p className="text-2xl font-bold text-text">{br.sharpe_ratio != null ? br.sharpe_ratio.toFixed(2) : '—'}</p>
+            <p className="text-2xl font-bold text-text">{br.sharpe_ratio != null ? br.sharpe_ratio.toFixed(2) : <span className="text-text-secondary">N/A</span>}</p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Profit Factor</p>
-            <p className="text-2xl font-bold text-text">{br.profit_factor != null ? br.profit_factor.toFixed(2) : '—'}</p>
+            <p className="text-2xl font-bold text-text">{br.profit_factor != null ? br.profit_factor.toFixed(2) : <span className="text-text-secondary">N/A</span>}</p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Max Drawdown</p>
-            <p className="text-2xl font-bold text-red-400">{maxDrawdown != null ? `-${Math.abs(maxDrawdown).toFixed(1)}%` : '—'}</p>
+            <p className="text-2xl font-bold text-red-400">{maxDrawdown != null ? `-${Math.abs(maxDrawdown).toFixed(1)}%` : <span className="text-text-secondary">N/A</span>}</p>
           </div>
         </div>
       )}
@@ -437,21 +437,21 @@ export default function MarketplaceStrategyPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Best Trade</p>
-            <p className="text-lg font-bold text-green-400">{br.best_trade_pnl != null ? `$${br.best_trade_pnl.toFixed(2)}` : '—'}</p>
+            <p className="text-lg font-bold text-green-400">{br.best_trade_pnl != null ? `$${br.best_trade_pnl.toFixed(2)}` : <span className="text-text-secondary">N/A</span>}</p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Worst Trade</p>
-            <p className="text-lg font-bold text-red-400">{br.worst_trade_pnl != null ? `$${br.worst_trade_pnl.toFixed(2)}` : '—'}</p>
+            <p className="text-lg font-bold text-red-400">{br.worst_trade_pnl != null ? `$${br.worst_trade_pnl.toFixed(2)}` : <span className="text-text-secondary">N/A</span>}</p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Avg Trade P&L</p>
             <p className={`text-lg font-bold ${(br.avg_trade_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {br.avg_trade_pnl != null ? `$${br.avg_trade_pnl.toFixed(2)}` : '—'}
+              {br.avg_trade_pnl != null ? `$${br.avg_trade_pnl.toFixed(2)}` : <span className="text-text-secondary">N/A</span>}
             </p>
           </div>
           <div className="bg-surface border border-border rounded-lg p-4">
             <p className="text-text-secondary text-xs mb-1">Avg Duration</p>
-            <p className="text-lg font-bold text-text">{br.avg_trade_duration_hours != null ? `${br.avg_trade_duration_hours.toFixed(1)}h` : '—'}</p>
+            <p className="text-lg font-bold text-text">{br.avg_trade_duration_hours != null ? `${br.avg_trade_duration_hours.toFixed(1)}h` : <span className="text-text-secondary">N/A</span>}</p>
           </div>
         </div>
       )}
