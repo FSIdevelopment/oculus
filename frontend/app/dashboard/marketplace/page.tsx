@@ -278,7 +278,7 @@ export default function MarketplacePage() {
                 >
                   <div className="flex flex-col md:flex-row">
                     {/* Left: info + metrics */}
-                    <div className="flex flex-col justify-between p-6 md:w-2/5 md:border-r border-border">
+                    <div className="flex flex-col justify-between p-6 md:w-2/5 xl2:w-[30%] md:border-r border-border">
                       {/* Badges + rating */}
                       <div>
                         <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
@@ -338,7 +338,7 @@ export default function MarketplacePage() {
                     </div>
 
                     {/* Right: equity curve */}
-                    <div className="relative md:w-3/5 h-48 md:h-auto bg-background/40 p-4">
+                    <div className="relative md:w-3/5 xl2:w-[70%] h-48 md:h-auto bg-background/40 p-4">
                       <p className="text-xs text-text-secondary opacity-60 mb-2 uppercase tracking-wider">Equity Curve</p>
                       <div className="h-full pb-6">
                         <EquityCurve data={equityCurve} positive={positive} />

@@ -8,6 +8,7 @@ const config: Config = {
   theme: {
     extend: {
       screens: {
+        'xl2': '1440px',
         '3xl': '2560px',
       },
       colors: {
