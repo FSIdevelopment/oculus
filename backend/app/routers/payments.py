@@ -243,7 +243,7 @@ async def stripe_webhook(
             if user_id and strategy_id:
                 # Prevent duplicate license creation for the same session
                 existing_result = await db.execute(
-                    select(License).where(License.subscription_id == session["id"])
+                    select(License).where(License.subscription_id == subscription_id)
                 )
                 if existing_result.scalar_one_or_none():
                     return {"status": "already_processed"}
@@ -259,7 +259,7 @@ async def stripe_webhook(
                     license_type=license_type,
                     strategy_id=strategy_id,
                     user_id=user_id,
-                    subscription_id=session["id"],
+                    subscription_id=subscription_id,
                     expires_at=expires_at,
                 )
                 db.add(license_obj)
