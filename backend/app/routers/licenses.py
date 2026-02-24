@@ -460,6 +460,73 @@ async def renew_license(
     return license_obj
 
 
+
+@router.delete("/api/licenses/{license_id}", response_model=LicenseResponse)
+async def cancel_license(
+    license_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Cancel a license subscription at period end.
+
+    - Marks the Stripe subscription to cancel_at_period_end=True
+    - Sets license status to 'cancelling'
+    - The license remains active until expires_at
+    """
+    result = await db.execute(
+        select(License).where(License.uuid == license_id)
+    )
+    license_obj = result.scalar_one_or_none()
+
+    if not license_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="License not found")
+
+    if license_obj.user_id != current_user.uuid:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    if license_obj.status not in ("active",):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel a license with status '{license_obj.status}'"
+        )
+
+    # Cancel Stripe subscription at period end (if one exists)
+    if license_obj.subscription_id:
+        try:
+            stripe.Subscription.modify(
+                license_obj.subscription_id,
+                cancel_at_period_end=True
+            )
+        except stripe.error.StripeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Stripe error: {str(e)}"
+            )
+
+    license_obj.status = "cancelling"
+    await db.commit()
+    await db.refresh(license_obj)
+
+    # Fetch strategy_name for response
+    strat_result = await db.execute(
+        select(Strategy.name).where(Strategy.uuid == license_obj.strategy_id)
+    )
+    strategy_name = strat_result.scalar_one_or_none()
+
+    return LicenseResponse(
+        uuid=license_obj.uuid,
+        status=license_obj.status,
+        license_type=license_obj.license_type,
+        strategy_id=license_obj.strategy_id,
+        user_id=license_obj.user_id,
+        strategy_version=license_obj.strategy_version,
+        webhook_url=license_obj.webhook_url,
+        strategy_name=strategy_name,
+        created_at=license_obj.created_at,
+        expires_at=license_obj.expires_at,
+    )
+
 @router.put("/api/licenses/{license_id}/webhook", response_model=LicenseResponse)
 async def update_license_webhook(
     license_id: str,
