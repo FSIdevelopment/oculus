@@ -220,6 +220,9 @@ export const licenseAPI = {
     return response.data
   },
 
+  cancelLicense: (licenseId: string) =>
+    api.delete(`/api/licenses/${licenseId}`),
+
   /**
    * Create a Stripe SetupIntent so the frontend can collect a payment method
    * in-app with Stripe Elements.  Returns `client_secret` and `publishable_key`.
