@@ -29,7 +29,7 @@ interface StrategyActionModalProps {
   onLicensePurchase?: () => Promise<void>
   /** Called when the user saves a new webhook URL against an active license. */
   onWebhookUpdate?: (licenseId: string, webhookUrl: string) => Promise<void>
-  onMarketplaceSubmit?: (price: number, buildId: string) => Promise<void>
+  onMarketplaceSubmit?: (buildId: string) => Promise<void>
   /** Whether the strategy is currently listed on the marketplace. */
   marketplaceListed?: boolean
 }
@@ -46,7 +46,6 @@ export default function StrategyActionModal({
   marketplaceListed = false,
 }: StrategyActionModalProps) {
   const [activeTab, setActiveTab] = useState<'partner' | 'webhook' | 'marketplace'>('partner')
-  const [marketplacePrice, setMarketplacePrice] = useState(10)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [marketplaceError, setMarketplaceError] = useState('')
   const [webhookUrl, setWebhookUrl] = useState('')
@@ -149,7 +148,7 @@ export default function StrategyActionModal({
     setIsSubmitting(true)
     setMarketplaceError('')
     try {
-      await onMarketplaceSubmit(marketplacePrice, selectedBuildId)
+      await onMarketplaceSubmit(selectedBuildId)
       onClose()
     } catch (err: any) {
       const message = err?.response?.data?.detail || err?.message || 'Failed to update marketplace listing'
@@ -424,7 +423,7 @@ export default function StrategyActionModal({
               <h4 className="text-sm font-semibold text-text mb-3 uppercase tracking-wider">How it works</h4>
               <div className="space-y-3">
                 {[
-                  'Set a monthly subscription price for your strategy.',
+                  'Pricing is set automatically based on your strategy\'s backtest performance.',
                   'Submit your strategy to the marketplace listing.',
                   'Traders discover and subscribe to your strategy.',
                   'You receive 65% of each subscription payment directly to your account.',
@@ -439,36 +438,42 @@ export default function StrategyActionModal({
               </div>
             </div>
 
-            {/* Price + revenue */}
-            <div className="space-y-4">
-              <label className="block">
-                <span className="text-sm font-medium text-text mb-2 block">Monthly Subscription Price (USD)</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-text-secondary text-sm">$</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max="1000"
-                    value={marketplacePrice}
-                    onChange={(e) => setMarketplacePrice(Number(e.target.value))}
-                    className="w-40 bg-surface-hover border border-border rounded-lg px-4 py-2 text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <span className="text-text-secondary text-sm">/ month per subscriber</span>
-                </div>
-              </label>
-
-              <div className="bg-surface-hover border border-border rounded-lg p-5 grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">You receive</p>
-                  <p className="text-2xl font-bold text-primary">${(marketplacePrice * 0.65).toFixed(2)}</p>
-                  <p className="text-xs text-text-secondary mt-0.5">65% per subscriber / month</p>
-                </div>
-                <div>
-                  <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">Platform fee</p>
-                  <p className="text-2xl font-bold text-text">${(marketplacePrice * 0.35).toFixed(2)}</p>
-                  <p className="text-xs text-text-secondary mt-0.5">35% per subscriber / month</p>
-                </div>
+            {/* System-calculated pricing + revenue share */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-text uppercase tracking-wider">Subscription Pricing</h4>
+                <span className="text-xs text-text-secondary italic">Auto-calculated from performance</span>
               </div>
+              {priceLoading ? (
+                <p className="text-sm text-text-secondary">Calculating prices…</p>
+              ) : (
+                <div className="bg-surface-hover border border-border rounded-lg overflow-hidden">
+                  {/* Header row */}
+                  <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-2">
+                    <div />
+                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider text-center">Monthly</p>
+                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider text-center">Annual</p>
+                  </div>
+                  {/* Subscriber pays */}
+                  <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-3">
+                    <p className="text-xs text-text-secondary self-center">Subscriber pays</p>
+                    <p className="text-sm font-semibold text-text text-center">${licensePrice?.monthly_price ?? '—'}<span className="text-xs font-normal text-text-secondary">/mo</span></p>
+                    <p className="text-sm font-semibold text-text text-center">${licensePrice?.annual_price ?? '—'}<span className="text-xs font-normal text-text-secondary">/yr</span></p>
+                  </div>
+                  {/* You receive */}
+                  <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-3">
+                    <p className="text-xs text-text-secondary self-center">You receive <span className="text-primary">(65%)</span></p>
+                    <p className="text-sm font-bold text-primary text-center">${licensePrice ? Math.round(licensePrice.monthly_price * 0.65) : '—'}<span className="text-xs font-normal text-text-secondary">/mo</span></p>
+                    <p className="text-sm font-bold text-primary text-center">${licensePrice ? Math.round(licensePrice.annual_price * 0.65) : '—'}<span className="text-xs font-normal text-text-secondary">/yr</span></p>
+                  </div>
+                  {/* Platform fee */}
+                  <div className="grid grid-cols-3 gap-0 px-4 py-3">
+                    <p className="text-xs text-text-secondary self-center">Platform fee <span className="text-text-secondary">(35%)</span></p>
+                    <p className="text-sm font-semibold text-text-secondary text-center">${licensePrice ? Math.round(licensePrice.monthly_price * 0.35) : '—'}<span className="text-xs font-normal">/mo</span></p>
+                    <p className="text-sm font-semibold text-text-secondary text-center">${licensePrice ? Math.round(licensePrice.annual_price * 0.35) : '—'}<span className="text-xs font-normal">/yr</span></p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Version selector — only shown when listing (not when unlisting) */}

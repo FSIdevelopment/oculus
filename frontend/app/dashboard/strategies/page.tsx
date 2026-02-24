@@ -113,12 +113,12 @@ export default function StrategiesPage() {
     await loadLicenses()
   }
 
-  const handleMarketplaceSubmit = async (price: number, buildId: string) => {
+  const handleMarketplaceSubmit = async (buildId: string) => {
     if (!selectedStrategy) return
     // Toggle listing: if already listed, unlist; otherwise list it
     const currentlyListed = selectedStrategy.marketplace_listed ?? false
     // Re-throw on failure so the modal can display the error to the user
-    await marketplaceAPI.updateMarketplaceListing(selectedStrategy.uuid, !currentlyListed, currentlyListed ? undefined : price, currentlyListed ? undefined : buildId)
+    await marketplaceAPI.updateMarketplaceListing(selectedStrategy.uuid, !currentlyListed, undefined, currentlyListed ? undefined : buildId)
     setIsModalOpen(false)
     loadStrategies()
   }
