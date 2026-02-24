@@ -34,6 +34,8 @@ class BuildResponse(BaseModel):
     strategy_name: Optional[str] = None
     queue_position: Optional[int] = None
     best_return_pct: Optional[float] = None
+    monthly_price: Optional[int] = None
+    annual_price: Optional[int] = None
 
     class Config:
         from_attributes = True

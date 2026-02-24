@@ -21,6 +21,7 @@ from app.schemas.strategies import (
 )
 from app.auth.dependencies import get_current_active_user
 from app.config import settings
+from app.services.pricing import calculate_license_price
 
 logger = logging.getLogger(__name__)
 
@@ -443,7 +444,10 @@ async def get_strategy_builds(
 
     # Compute best total_return_pct per build from completed iterations (Python-side aggregation
     # avoids brittle JSON-in-SQL extraction across different DB backends).
+    # For each build, find the iteration with the best total_return_pct and keep its
+    # full backtest_results so we can compute version-specific pricing.
     best_returns: dict[str, float] = {}
+    best_backtest: dict[str, dict] = {}
     build_ids = [b.uuid for b in builds]
     if build_ids:
         iters_result = await db.execute(
@@ -458,11 +462,17 @@ async def get_strategy_builds(
                 ret = float(br.get("total_return_pct") or br.get("total_return") or 0)
                 if iter_build_id not in best_returns or ret > best_returns[iter_build_id]:
                     best_returns[iter_build_id] = ret
+                    best_backtest[iter_build_id] = br
 
     items = []
     for b in builds:
         resp = BuildResponse.model_validate(b)
         resp.best_return_pct = best_returns.get(b.uuid)
+        br = best_backtest.get(b.uuid)
+        if br:
+            monthly, annual, _ = calculate_license_price(br)
+            resp.monthly_price = monthly
+            resp.annual_price = annual
         items.append(resp)
 
     return {

@@ -64,7 +64,7 @@ export default function StrategyActionModal({
   const [priceLoading, setPriceLoading] = useState(false)
 
   // Completed builds for version selection on the Marketplace tab
-  const [completedBuilds, setCompletedBuilds] = useState<Array<{ uuid: string; iteration_count: number; completed_at: string; best_return_pct?: number | null }>>([])
+  const [completedBuilds, setCompletedBuilds] = useState<Array<{ uuid: string; iteration_count: number; completed_at: string; best_return_pct?: number | null; monthly_price?: number | null; annual_price?: number | null }>>([])
   const [buildsLoading, setBuildsLoading] = useState(false)
   const [selectedBuildId, setSelectedBuildId] = useState<string>('')
 
@@ -439,42 +439,52 @@ export default function StrategyActionModal({
             </div>
 
             {/* System-calculated pricing + revenue share */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-text uppercase tracking-wider">Subscription Pricing</h4>
-                <span className="text-xs text-text-secondary italic">Auto-calculated from performance</span>
-              </div>
-              {priceLoading ? (
-                <p className="text-sm text-text-secondary">Calculating prices…</p>
-              ) : (
-                <div className="bg-surface-hover border border-border rounded-lg overflow-hidden">
-                  {/* Header row */}
-                  <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-2">
-                    <div />
-                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider text-center">Monthly</p>
-                    <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider text-center">Annual</p>
+            {(() => {
+              // When listing: use the selected build's prices (updates as version changes).
+              // When unlisting or builds not loaded yet: fall back to the strategy-level price.
+              const selectedBuild = completedBuilds.find((b) => b.uuid === selectedBuildId)
+              const monthlyPrice = selectedBuild?.monthly_price ?? licensePrice?.monthly_price ?? null
+              const annualPrice = selectedBuild?.annual_price ?? licensePrice?.annual_price ?? null
+              const showLoading = !marketplaceListed ? buildsLoading : priceLoading
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-text uppercase tracking-wider">Subscription Pricing</h4>
+                    <span className="text-xs text-text-secondary italic">Auto-calculated from performance</span>
                   </div>
-                  {/* Subscriber pays */}
-                  <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-3">
-                    <p className="text-xs text-text-secondary self-center">Subscriber pays</p>
-                    <p className="text-sm font-semibold text-text text-center">${licensePrice?.monthly_price ?? '—'}<span className="text-xs font-normal text-text-secondary">/mo</span></p>
-                    <p className="text-sm font-semibold text-text text-center">${licensePrice?.annual_price ?? '—'}<span className="text-xs font-normal text-text-secondary">/yr</span></p>
-                  </div>
-                  {/* You receive */}
-                  <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-3">
-                    <p className="text-xs text-text-secondary self-center">You receive <span className="text-primary">(65%)</span></p>
-                    <p className="text-sm font-bold text-primary text-center">${licensePrice ? Math.round(licensePrice.monthly_price * 0.65) : '—'}<span className="text-xs font-normal text-text-secondary">/mo</span></p>
-                    <p className="text-sm font-bold text-primary text-center">${licensePrice ? Math.round(licensePrice.annual_price * 0.65) : '—'}<span className="text-xs font-normal text-text-secondary">/yr</span></p>
-                  </div>
-                  {/* Platform fee */}
-                  <div className="grid grid-cols-3 gap-0 px-4 py-3">
-                    <p className="text-xs text-text-secondary self-center">Platform fee <span className="text-text-secondary">(35%)</span></p>
-                    <p className="text-sm font-semibold text-text-secondary text-center">${licensePrice ? Math.round(licensePrice.monthly_price * 0.35) : '—'}<span className="text-xs font-normal">/mo</span></p>
-                    <p className="text-sm font-semibold text-text-secondary text-center">${licensePrice ? Math.round(licensePrice.annual_price * 0.35) : '—'}<span className="text-xs font-normal">/yr</span></p>
-                  </div>
+                  {showLoading ? (
+                    <p className="text-sm text-text-secondary">Calculating prices…</p>
+                  ) : (
+                    <div className="bg-surface-hover border border-border rounded-lg overflow-hidden">
+                      {/* Header row */}
+                      <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-2">
+                        <div />
+                        <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider text-center">Monthly</p>
+                        <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider text-center">Annual</p>
+                      </div>
+                      {/* Subscriber pays */}
+                      <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-3">
+                        <p className="text-xs text-text-secondary self-center">Subscriber pays</p>
+                        <p className="text-sm font-semibold text-text text-center">{monthlyPrice != null ? `$${monthlyPrice}` : '—'}<span className="text-xs font-normal text-text-secondary">/mo</span></p>
+                        <p className="text-sm font-semibold text-text text-center">{annualPrice != null ? `$${annualPrice}` : '—'}<span className="text-xs font-normal text-text-secondary">/yr</span></p>
+                      </div>
+                      {/* You receive */}
+                      <div className="grid grid-cols-3 gap-0 border-b border-border px-4 py-3">
+                        <p className="text-xs text-text-secondary self-center">You receive <span className="text-primary">(65%)</span></p>
+                        <p className="text-sm font-bold text-primary text-center">{monthlyPrice != null ? `$${Math.round(monthlyPrice * 0.65)}` : '—'}<span className="text-xs font-normal text-text-secondary">/mo</span></p>
+                        <p className="text-sm font-bold text-primary text-center">{annualPrice != null ? `$${Math.round(annualPrice * 0.65)}` : '—'}<span className="text-xs font-normal text-text-secondary">/yr</span></p>
+                      </div>
+                      {/* Platform fee */}
+                      <div className="grid grid-cols-3 gap-0 px-4 py-3">
+                        <p className="text-xs text-text-secondary self-center">Platform fee <span className="text-text-secondary">(35%)</span></p>
+                        <p className="text-sm font-semibold text-text-secondary text-center">{monthlyPrice != null ? `$${Math.round(monthlyPrice * 0.35)}` : '—'}<span className="text-xs font-normal">/mo</span></p>
+                        <p className="text-sm font-semibold text-text-secondary text-center">{annualPrice != null ? `$${Math.round(annualPrice * 0.35)}` : '—'}<span className="text-xs font-normal">/yr</span></p>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              )
+            })()}
 
             {/* Version selector — only shown when listing (not when unlisting) */}
             {!marketplaceListed && (
