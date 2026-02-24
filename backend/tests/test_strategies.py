@@ -354,7 +354,8 @@ def test_strategy_response_computed_prices_with_backtest():
     assert resp.monthly_price is not None
     assert resp.monthly_price > 0
     assert resp.annual_price is not None
-    assert resp.annual_price >= resp.monthly_price
+    from app.config import settings
+    assert resp.annual_price == round(resp.monthly_price * settings.LICENSE_ANNUAL_MULTIPLIER)
 
 
 def test_strategy_response_computed_prices_without_backtest():

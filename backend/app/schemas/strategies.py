@@ -68,10 +68,12 @@ class StrategyResponse(BaseModel):
     annual_return: Optional[float] = None
     best_return_pct: Optional[float] = None
 
+    # calculate_license_price is a pure arithmetic function (no I/O), so calling
+    # it separately for each field is safe. Both calls produce identical results.
     @computed_field  # type: ignore[misc]
     @property
     def monthly_price(self) -> int | None:
-        if not self.backtest_results:
+        if self.backtest_results is None:
             return None
         monthly, _, _ = calculate_license_price(self.backtest_results)
         return monthly
@@ -79,7 +81,7 @@ class StrategyResponse(BaseModel):
     @computed_field  # type: ignore[misc]
     @property
     def annual_price(self) -> int | None:
-        if not self.backtest_results:
+        if self.backtest_results is None:
             return None
         _, annual, _ = calculate_license_price(self.backtest_results)
         return annual
