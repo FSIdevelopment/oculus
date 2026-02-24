@@ -238,7 +238,14 @@ async def list_marketplace_strategies(
             if br:
                 resp.backtest_results = br
             if sf and "config.json" in sf:
-                resp.config = sf["config.json"]
+                config_val = sf["config.json"]
+                if isinstance(config_val, str):
+                    try:
+                        config_val = json.loads(config_val)
+                    except (json.JSONDecodeError, ValueError):
+                        config_val = None
+                if isinstance(config_val, dict):
+                    resp.config = config_val
         items.append(resp)
 
     return {
@@ -298,7 +305,14 @@ async def get_marketplace_strategy(strategy_id: str, db: AsyncSession = Depends(
             if best_backtest:
                 response.backtest_results = best_backtest
             if best_files and "config.json" in best_files:
-                response.config = best_files["config.json"]
+                config_val = best_files["config.json"]
+                if isinstance(config_val, str):
+                    try:
+                        config_val = json.loads(config_val)
+                    except (json.JSONDecodeError, ValueError):
+                        config_val = None
+                if isinstance(config_val, dict):
+                    response.config = config_val
 
         # Compute the version number of the pinned build: how many complete builds
         # for this strategy started at or before this one (chronological position).
