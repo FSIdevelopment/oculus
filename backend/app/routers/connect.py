@@ -39,14 +39,11 @@ async def create_onboard_link(
                 country="US"
             )
             current_user.stripe_connect_account_id = account.id
-            await db.flush()
-        
+            await db.commit()
+
         # Use account_update for existing complete accounts, account_onboarding otherwise
-        if current_user.stripe_connect_account_id:
-            existing = stripe.Account.retrieve(current_user.stripe_connect_account_id)
-            link_type = "account_update" if (existing.charges_enabled and existing.details_submitted) else "account_onboarding"
-        else:
-            link_type = "account_onboarding"
+        existing = stripe.Account.retrieve(current_user.stripe_connect_account_id)
+        link_type = "account_update" if (existing.charges_enabled and existing.details_submitted) else "account_onboarding"
 
         # Create Account Link for onboarding / settings update
         account_link = stripe.AccountLink.create(

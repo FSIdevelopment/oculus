@@ -199,7 +199,7 @@ function LicenseCard({
           ) : (
             <button
               onClick={() => setConfirming(true)}
-              className="text-sm text-text-secondary hover:text-red-400 transition-colors underline underline-offset-2"
+              className="px-4 py-2 border border-red-700 text-red-400 hover:bg-red-900/20 text-sm font-medium rounded-lg transition-colors"
             >
               Cancel Subscription
             </button>

@@ -22,8 +22,8 @@ html.dark {
   --surface: #141414;
   --surface-hover: #1a1a1a;
   --border: #262626;
-  --primary: #00dfd8;
-  --primary-hover: #00c4be;
+  --primary: #009e98;
+  --primary-hover: #0e6f6b;
   --primary-gradient: linear-gradient(90deg, #007cf0, #00dfd8);
   --text-secondary: #a3a3a3;
 }
@@ -74,9 +74,12 @@ input:focus-visible {
 
 /* Subtle pulse animation for current iteration card when build is running */
 @keyframes pulse-subtle {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.95;
   }
@@ -85,4 +88,3 @@ input:focus-visible {
 .animate-pulse-subtle {
   animation: pulse-subtle 3s ease-in-out infinite;
 }
-

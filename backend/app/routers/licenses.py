@@ -161,12 +161,12 @@ async def create_license_checkout(
         monthly_price = settings.LICENSE_MONTHLY_MIN_PRICE
 
     if license_data.license_type == "monthly":
-        unit_amount = monthly_price * 100  # Stripe uses cents
+        unit_amount = int(monthly_price * 100)  # Stripe uses cents
         interval = "month"
         price_label = f"${monthly_price}/month"
     else:
         annual_total = monthly_price * settings.LICENSE_ANNUAL_MULTIPLIER
-        unit_amount = annual_total * 100
+        unit_amount = int(annual_total * 100)
         interval = "year"
         price_label = f"${annual_total}/year"
 
@@ -216,10 +216,9 @@ async def create_license_checkout(
                 "?license_success=1&session_id={CHECKOUT_SESSION_ID}"
             ),
             cancel_url=f"{settings.FRONTEND_URL}/dashboard/strategies?license_cancelled=1",
-            **({"transfer_data": {"destination": creator_connect_id}} if creator_connect_id else {}),
             subscription_data={
                 "metadata": {"strategy_id": strategy_id},
-                **({"application_fee_percent": 35} if creator_connect_id else {}),
+                **({"transfer_data": {"destination": creator_connect_id}, "application_fee_percent": 35} if creator_connect_id else {}),
             },
         )
     except stripe.error.StripeError as e:
