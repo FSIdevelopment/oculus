@@ -2,16 +2,41 @@
 
 import { useEffect, useState } from 'react'
 import { connectAPI } from '@/lib/api'
-import { ExternalLink, CreditCard, CheckCircle, Loader } from 'lucide-react'
+import { ExternalLink, CreditCard, CheckCircle, Loader, AlertCircle } from 'lucide-react'
 
 interface ConnectStatus {
   status: 'not_started' | 'pending' | 'complete'
   account_id?: string
 }
 
+interface StrategyEarning {
+  strategy_id: string
+  strategy_name: string
+  total_earned: number
+  payment_count: number
+}
+
+interface Earnings {
+  total_earned: number
+  balance_available: number
+  balance_pending: number
+  by_strategy: StrategyEarning[]
+}
+
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+  }).format(amount)
+}
+
 export default function EarningsTab() {
   const [loading, setLoading] = useState(true)
   const [connectStatus, setConnectStatus] = useState<ConnectStatus | null>(null)
+  const [earnings, setEarnings] = useState<Earnings | null>(null)
+  const [earningsLoading, setEarningsLoading] = useState(false)
+  const [earningsError, setEarningsError] = useState<string | null>(null)
   const [onboarding, setOnboarding] = useState(false)
 
   useEffect(() => {
@@ -22,6 +47,9 @@ export default function EarningsTab() {
     try {
       const status = await connectAPI.connectStatus()
       setConnectStatus(status)
+      if (status.status === 'complete') {
+        fetchEarnings()
+      }
     } catch (error) {
       console.error('Failed to fetch connect status:', error)
     } finally {
@@ -29,11 +57,23 @@ export default function EarningsTab() {
     }
   }
 
+  const fetchEarnings = async () => {
+    setEarningsLoading(true)
+    setEarningsError(null)
+    try {
+      const data = await connectAPI.getEarnings()
+      setEarnings(data)
+    } catch (err: any) {
+      setEarningsError(err.response?.data?.detail || 'Failed to load earnings')
+    } finally {
+      setEarningsLoading(false)
+    }
+  }
+
   const handleSetupPayouts = async () => {
     setOnboarding(true)
     try {
       const response = await connectAPI.connectOnboard()
-      // Redirect to Stripe onboarding
       window.location.href = response.url
     } catch (error) {
       console.error('Failed to start onboarding:', error)
@@ -54,7 +94,7 @@ export default function EarningsTab() {
     return <div className="text-text-secondary">Loading earnings...</div>
   }
 
-  // Not started - show setup card
+  // Not started
   if (connectStatus?.status === 'not_started') {
     return (
       <div className="space-y-6">
@@ -86,7 +126,6 @@ export default function EarningsTab() {
             </div>
           </div>
         </div>
-
         <div className="bg-surface border border-border rounded-lg p-6">
           <h3 className="text-lg font-bold text-text mb-4">Earnings by Strategy</h3>
           <p className="text-text-secondary">No strategies with earnings yet</p>
@@ -95,7 +134,7 @@ export default function EarningsTab() {
     )
   }
 
-  // Pending - show incomplete message
+  // Pending
   if (connectStatus?.status === 'pending') {
     return (
       <div className="space-y-6">
@@ -117,7 +156,6 @@ export default function EarningsTab() {
             </div>
           </div>
         </div>
-
         <div className="bg-surface border border-border rounded-lg p-6">
           <h3 className="text-lg font-bold text-text mb-4">Earnings by Strategy</h3>
           <p className="text-text-secondary">No strategies with earnings yet</p>
@@ -126,9 +164,10 @@ export default function EarningsTab() {
     )
   }
 
-  // Complete - show earnings cards and dashboard link
+  // Complete — show real earnings
   return (
     <div className="space-y-6">
+      {/* Connect active banner */}
       <div className="flex items-center justify-between bg-gradient-to-r from-green-900/30 to-green-800/30 border border-green-700 rounded-lg p-6">
         <div className="flex items-center gap-3">
           <CheckCircle className="text-green-400" size={24} />
@@ -146,26 +185,70 @@ export default function EarningsTab() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-surface-hover border border-border rounded-lg p-6">
-          <p className="text-text-secondary text-sm mb-2">Total Earnings</p>
-          <p className="text-3xl font-bold text-primary">$0.00</p>
+      {/* Earnings error */}
+      {earningsError && (
+        <div className="flex items-center gap-3 p-4 bg-red-900/20 border border-red-700 rounded-lg text-red-400">
+          <AlertCircle size={20} />
+          {earningsError}
         </div>
-        <div className="bg-surface-hover border border-border rounded-lg p-6">
-          <p className="text-text-secondary text-sm mb-2">Pending</p>
-          <p className="text-3xl font-bold text-yellow-400">$0.00</p>
-        </div>
-        <div className="bg-surface-hover border border-border rounded-lg p-6">
-          <p className="text-text-secondary text-sm mb-2">Paid Out</p>
-          <p className="text-3xl font-bold text-green-400">$0.00</p>
-        </div>
-      </div>
+      )}
 
-      <div className="bg-surface border border-border rounded-lg p-6">
-        <h3 className="text-lg font-bold text-text mb-4">Earnings by Strategy</h3>
-        <p className="text-text-secondary">No strategies with earnings yet</p>
-      </div>
+      {/* Summary cards */}
+      {earningsLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader className="animate-spin text-primary" size={28} />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-surface-hover border border-border rounded-lg p-6">
+              <p className="text-text-secondary text-sm mb-2">Total Earnings</p>
+              <p className="text-3xl font-bold text-primary">
+                {formatCurrency(earnings?.total_earned ?? 0)}
+              </p>
+            </div>
+            <div className="bg-surface-hover border border-border rounded-lg p-6">
+              <p className="text-text-secondary text-sm mb-2">Available in Stripe</p>
+              <p className="text-3xl font-bold text-green-400">
+                {formatCurrency(earnings?.balance_available ?? 0)}
+              </p>
+            </div>
+            <div className="bg-surface-hover border border-border rounded-lg p-6">
+              <p className="text-text-secondary text-sm mb-2">Pending</p>
+              <p className="text-3xl font-bold text-yellow-400">
+                {formatCurrency(earnings?.balance_pending ?? 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Per-strategy breakdown */}
+          <div className="bg-surface border border-border rounded-lg p-6">
+            <h3 className="text-lg font-bold text-text mb-4">Earnings by Strategy</h3>
+            {!earnings?.by_strategy?.length ? (
+              <p className="text-text-secondary">No strategies with earnings yet</p>
+            ) : (
+              <div className="space-y-3">
+                {earnings.by_strategy.map((s) => (
+                  <div
+                    key={s.strategy_id}
+                    className="flex items-center justify-between py-3 border-b border-border last:border-0"
+                  >
+                    <div>
+                      <p className="text-text font-medium">{s.strategy_name}</p>
+                      <p className="text-text-secondary text-sm">
+                        {s.payment_count} {s.payment_count === 1 ? 'payment' : 'payments'}
+                      </p>
+                    </div>
+                    <p className="text-primary font-bold text-lg">
+                      {formatCurrency(s.total_earned)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
-
