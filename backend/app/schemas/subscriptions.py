@@ -31,15 +31,20 @@ class SubscriptionListResponse(BaseModel):
     limit: int
 
 
+class StrategyEarning(BaseModel):
+    """Per-strategy earnings breakdown."""
+    strategy_id: str
+    strategy_name: str
+    total_earned: float   # dollars
+    payment_count: int
+
+
 class EarningsResponse(BaseModel):
     """Schema for creator earnings dashboard."""
-    total_earnings: float
-    pending_earnings: float
-    paid_out_earnings: float
-    subscriber_count: int
-    active_subscriptions: int
-    strategies: list[dict]  # List of strategies with earnings breakdown
-    
+    total_earned: float         # lifetime earnings in dollars (from DB)
+    balance_available: float    # available in Stripe Connect account (dollars)
+    balance_pending: float      # pending in Stripe Connect account (dollars)
+    by_strategy: list[StrategyEarning]
+
     class Config:
         from_attributes = True
-

@@ -11,9 +11,10 @@ from app.models.user import User
 from app.models.subscription import Subscription
 from app.models.strategy import Strategy
 from app.models.balance import Balance
+from app.models.earning import Earning
 from app.schemas.subscriptions import (
     SubscriptionCreateRequest, SubscriptionResponse, 
-    SubscriptionListResponse, EarningsResponse
+    SubscriptionListResponse, EarningsResponse, StrategyEarning
 )
 from app.auth.dependencies import get_current_active_user
 
@@ -127,52 +128,64 @@ async def get_creator_earnings(
 ):
     """
     Get creator earnings dashboard.
-    Shows total earnings, pending, paid out, and breakdown by strategy.
+    - total_earned: sum of all Earning records for this creator (from DB)
+    - balance_available / balance_pending: from Stripe Connect Balance API
+    - by_strategy: breakdown per strategy from Earning records
     """
-    # Get all strategies owned by user
-    result = await db.execute(
-        select(Strategy).where(Strategy.user_id == current_user.uuid)
-    )
-    strategies = result.scalars().all()
-    
-    total_earnings = 0.0
-    pending_earnings = 0.0
-    paid_out_earnings = 0.0
-    total_subscribers = 0
-    
-    strategies_breakdown = []
-    
-    for strategy in strategies:
-        # Count active subscriptions
-        sub_result = await db.execute(
-            select(func.count(Subscription.uuid)).where(
-                Subscription.strategy_id == strategy.uuid,
-                Subscription.status == "active"
-            )
+    # Query all earnings for this creator grouped by strategy
+    earn_result = await db.execute(
+        select(
+            Earning.strategy_id,
+            func.sum(Earning.amount_creator).label("total_cents"),
+            func.count(Earning.uuid).label("payment_count"),
         )
-        subscriber_count = sub_result.scalar() or 0
-        
-        # Calculate earnings (placeholder - would be from actual payments)
-        strategy_earnings = subscriber_count * 10.0 * CREATOR_EARNINGS_PERCENT  # $10/month per subscriber
-        total_earnings += strategy_earnings
-        pending_earnings += strategy_earnings
-        
-        strategies_breakdown.append({
-            "strategy_id": strategy.uuid,
-            "strategy_name": strategy.name,
-            "subscriber_count": subscriber_count,
-            "earnings": strategy_earnings
-        })
-        
-        total_subscribers += subscriber_count
-    
+        .where(Earning.creator_user_id == current_user.uuid)
+        .group_by(Earning.strategy_id)
+    )
+    rows = earn_result.all()
+
+    # Fetch strategy names
+    strategy_ids = [row.strategy_id for row in rows]
+    strat_result = await db.execute(
+        select(Strategy).where(Strategy.uuid.in_(strategy_ids))
+    )
+    strategies_by_id = {s.uuid: s for s in strat_result.scalars().all()}
+
+    total_earned_cents = sum(row.total_cents or 0 for row in rows)
+
+    by_strategy = [
+        StrategyEarning(
+            strategy_id=row.strategy_id,
+            strategy_name=strategies_by_id[row.strategy_id].name if row.strategy_id in strategies_by_id else "Unknown",
+            total_earned=round((row.total_cents or 0) / 100, 2),
+            payment_count=row.payment_count or 0,
+        )
+        for row in rows
+    ]
+
+    # Query Stripe Connect account balance (if creator has Connect set up)
+    balance_available = 0.0
+    balance_pending = 0.0
+
+    if current_user.stripe_connect_account_id:
+        try:
+            balance = stripe.Balance.retrieve(
+                stripe_account=current_user.stripe_connect_account_id
+            )
+            balance_available = round(
+                sum(b["amount"] for b in balance["available"]) / 100, 2
+            )
+            balance_pending = round(
+                sum(b["amount"] for b in balance["pending"]) / 100, 2
+            )
+        except stripe.error.StripeError:
+            pass  # If Stripe call fails, return zeros for balance
+
     return EarningsResponse(
-        total_earnings=total_earnings,
-        pending_earnings=pending_earnings,
-        paid_out_earnings=paid_out_earnings,
-        subscriber_count=total_subscribers,
-        active_subscriptions=total_subscribers,
-        strategies=strategies_breakdown
+        total_earned=round(total_earned_cents / 100, 2),
+        balance_available=balance_available,
+        balance_pending=balance_pending,
+        by_strategy=by_strategy,
     )
 
 
@@ -215,4 +228,3 @@ async def cancel_subscription(
     await db.refresh(subscription)
     
     return subscription
-
