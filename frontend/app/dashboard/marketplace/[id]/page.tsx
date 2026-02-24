@@ -191,7 +191,7 @@ export default function MarketplaceStrategyPage() {
   const loadLicenses = useCallback(async () => {
     try {
       const data = await licenseAPI.listLicenses(0, 100)
-      const licenses: License[] = data.licenses || []
+      const licenses: License[] = data.items || []
       const active = licenses.find(l => l.strategy_id === strategyId && l.status === 'active') ?? null
       setActiveLicense(active)
       setWebhookUrl(active?.webhook_url ?? '')

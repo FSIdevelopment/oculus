@@ -181,7 +181,7 @@ export default function MarketplacePage() {
     licenseAPI.listLicenses(0, 100)
       .then(data => {
         const ids = new Set<string>(
-          (data.licenses || [])
+          (data.items || [])
             .filter((l: any) => l.status === 'active')
             .map((l: any) => l.strategy_id as string)
         )
