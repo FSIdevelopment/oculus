@@ -11,6 +11,8 @@ from app.models.user import User
 from app.models.product import Product
 from app.models.purchase import Purchase
 from app.models.license import License
+from app.models.earning import Earning
+from app.models.strategy import Strategy
 from app.auth.dependencies import get_current_active_user
 from app.services.balance import add_tokens
 from app.schemas.payments import (
@@ -325,5 +327,68 @@ async def stripe_webhook(
                 await db.rollback()
                 return {"status": "error", "message": str(e)}
     
+    # Handle invoice.payment_succeeded for creator earnings tracking
+    if event["type"] == "invoice.payment_succeeded":
+        invoice = event["data"]["object"]
+        subscription_id = invoice.get("subscription")
+
+        if not subscription_id:
+            return {"status": "ignored"}
+
+        # Look up the license by subscription_id
+        lic_result = await db.execute(
+            select(License).where(License.subscription_id == subscription_id)
+        )
+        license_obj = lic_result.scalar_one_or_none()
+
+        if not license_obj:
+            return {"status": "ignored"}
+
+        # Deduplicate — skip if already recorded this invoice
+        dedup_result = await db.execute(
+            select(Earning).where(Earning.stripe_invoice_id == invoice["id"])
+        )
+        if dedup_result.scalar_one_or_none():
+            return {"status": "already_processed"}
+
+        # Look up the strategy and its creator
+        strat_result = await db.execute(
+            select(Strategy).where(Strategy.uuid == license_obj.strategy_id)
+        )
+        strategy = strat_result.scalar_one_or_none()
+
+        if not strategy:
+            return {"status": "ignored"}
+
+        creator_result = await db.execute(
+            select(User).where(User.uuid == strategy.user_id)
+        )
+        creator = creator_result.scalar_one_or_none()
+
+        # Only record if creator has a Connect account set up
+        if not creator or not creator.stripe_connect_account_id:
+            return {"status": "ignored"}
+
+        amount_gross = invoice.get("amount_paid", 0)
+        amount_platform = int(amount_gross * 0.35)
+        amount_creator = amount_gross - amount_platform
+
+        earning = Earning(
+            strategy_id=strategy.uuid,
+            creator_user_id=creator.uuid,
+            amount_gross=amount_gross,
+            amount_creator=amount_creator,
+            amount_platform=amount_platform,
+            stripe_invoice_id=invoice["id"],
+            stripe_subscription_id=subscription_id,
+        )
+        db.add(earning)
+        try:
+            await db.commit()
+            return {"status": "earning_recorded"}
+        except Exception as e:
+            await db.rollback()
+            return {"status": "error", "message": str(e)}
+
     return {"status": "ignored"}
 
