@@ -59,6 +59,7 @@ interface Strategy {
   target_return?: number
   backtest_results?: BacktestResults
   config?: Record<string, any>
+  version: number
   subscriber_count: number
   rating?: number
   monthly_price?: number
@@ -332,6 +333,9 @@ export default function MarketplaceStrategyPage() {
 
         {/* Metadata */}
         <div className="flex items-center gap-4 text-sm text-text-secondary mb-5 flex-wrap">
+          <span className="inline-block bg-surface-hover border border-border text-xs px-2 py-0.5 rounded text-text-secondary font-medium">
+            v{strategy.version}
+          </span>
           <span className="flex items-center gap-1.5">
             <Users size={14} />
             {strategy.subscriber_count} subscribers
