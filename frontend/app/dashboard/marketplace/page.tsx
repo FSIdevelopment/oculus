@@ -13,16 +13,15 @@ interface Strategy {
   symbols?: Record<string, any>
   target_return?: number
   backtest_results?: {
-    total_return: number
-    total_return_pct: number
-    annual_return: number
-    max_drawdown: number
-    win_rate: number
+    total_return?: number
+    total_return_pct?: number
+    annual_return?: number
+    max_drawdown?: number
+    win_rate?: number
     [key: string]: any
   }
   subscriber_count: number
   rating?: number
-  rating_count?: number
   monthly_price?: number
   annual_price?: number
   created_at: string
