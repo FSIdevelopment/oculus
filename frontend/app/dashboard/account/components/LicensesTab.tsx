@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import api from '@/lib/api'
+import api, { licenseAPI } from '@/lib/api'
 import { Loader, AlertCircle, Eye, EyeOff, Copy, Check } from 'lucide-react'
 
 interface License {
@@ -104,7 +104,7 @@ function LicenseCard({
     setCancelling(true)
     setError(null)
     try {
-      await api.delete(`/api/licenses/${license.uuid}`)
+      await licenseAPI.cancelLicense(license.uuid)
       onCancelled(license.uuid)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to cancel subscription')
