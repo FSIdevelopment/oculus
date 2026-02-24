@@ -80,6 +80,64 @@ function getFeaturedStrategy(list: Strategy[]): Strategy | null {
   })
 }
 
+function EquityCurve({ data, positive }: { data: Array<{ date: string; value: number }>, positive: boolean }) {
+  if (!data || data.length < 2) {
+    return (
+      <div className="flex items-center justify-center h-full text-text-secondary text-sm opacity-50">
+        No chart data
+      </div>
+    )
+  }
+
+  const W = 600, H = 160, PAD = 8
+  const values = data.map(d => d.value)
+  const minV = Math.min(...values)
+  const maxV = Math.max(...values)
+  const range = maxV - minV || 1
+
+  const coords = data.map((d, i) => ({
+    x: PAD + (i / (data.length - 1)) * (W - PAD * 2),
+    y: PAD + ((maxV - d.value) / range) * (H - PAD * 2),
+  }))
+
+  const lineColor = positive ? '#4ade80' : '#f87171'
+  const gradId = `ecg-${positive ? 'pos' : 'neg'}`
+  const polylinePoints = coords.map(p => `${p.x},${p.y}`).join(' ')
+  const fillPath =
+    `M ${coords[0].x},${coords[0].y} ` +
+    coords.slice(1).map(p => `L ${p.x},${p.y}`).join(' ') +
+    ` L ${W - PAD},${H - PAD} L ${PAD},${H - PAD} Z`
+
+  const startDate = data[0].date.slice(0, 7)
+  const endDate = data[data.length - 1].date.slice(0, 7)
+
+  return (
+    <div className="w-full h-full relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={lineColor} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={lineColor} stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <path d={fillPath} fill={`url(#${gradId})`} />
+        <polyline
+          points={polylinePoints}
+          fill="none"
+          stroke={lineColor}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <div className="absolute bottom-1 left-2 right-2 flex justify-between text-xs text-text-secondary opacity-50 pointer-events-none">
+        <span>{startDate}</span>
+        <span>{endDate}</span>
+      </div>
+    </div>
+  )
+}
+
 export default function MarketplacePage() {
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [loading, setLoading] = useState(true)
@@ -209,63 +267,83 @@ export default function MarketplacePage() {
             if (!featured) return null
             const annualReturn = getAnnualReturn(featured)
             const maxDrawdown = getMaxDrawdown(featured)
+            const equityCurve: Array<{ date: string; value: number }> = featured.backtest_results?.equity_curve ?? []
+            const positive = (annualReturn ?? 0) >= 0
             return (
               <div>
                 <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Featured Strategy</p>
                 <Link
                   href={`/dashboard/marketplace/${featured.uuid}`}
-                  className="block bg-primary/5 border border-primary/40 rounded-lg p-6 hover:border-primary transition-colors"
+                  className="block bg-primary/5 border border-primary/40 rounded-lg overflow-hidden hover:border-primary transition-colors"
                 >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="inline-block bg-primary/20 text-primary text-xs px-2 py-1 rounded font-medium">
-                        Featured
-                      </span>
-                      {featured.strategy_type && (
-                        <span className="inline-block bg-surface border border-border text-text-secondary text-xs px-2 py-1 rounded">
-                          {featured.strategy_type}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex-shrink-0">{renderStars(featured.rating)}</div>
-                  </div>
+                  <div className="flex flex-col md:flex-row">
+                    {/* Left: info + metrics */}
+                    <div className="flex flex-col justify-between p-6 md:w-2/5 md:border-r border-border">
+                      {/* Badges + rating */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="inline-block bg-primary/20 text-primary text-xs px-2 py-1 rounded font-medium">
+                              Featured
+                            </span>
+                            {featured.strategy_type && (
+                              <span className="inline-block bg-surface border border-border text-text-secondary text-xs px-2 py-1 rounded">
+                                {featured.strategy_type}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0">{renderStars(featured.rating)}</div>
+                        </div>
 
-                  <h3 className="text-xl font-bold text-text mb-3">{featured.name}</h3>
+                        <h3 className="text-xl font-bold text-text mb-4">{featured.name}</h3>
 
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div className="bg-background rounded-lg p-3 text-center">
-                      <p className={`text-2xl font-bold ${annualReturn == null ? 'text-text-secondary' : annualReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {annualReturn == null ? 'N/A' : `${annualReturn >= 0 ? '+' : ''}${annualReturn.toFixed(1)}%`}
-                      </p>
-                      <p className="text-xs text-text-secondary mt-1">Annual Return</p>
-                    </div>
-                    <div className="bg-background rounded-lg p-3 text-center">
-                      <p className={`text-2xl font-bold ${maxDrawdown == null ? 'text-text-secondary' : 'text-red-400'}`}>
-                        {maxDrawdown == null ? 'N/A' : `-${Math.abs(maxDrawdown).toFixed(1)}%`}
-                      </p>
-                      <p className="text-xs text-text-secondary mt-1">Max Drawdown</p>
-                    </div>
-                  </div>
+                        {/* Metric panels */}
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          <div className="bg-background rounded-lg p-3 text-center">
+                            <p className={`text-2xl font-bold ${annualReturn == null ? 'text-text-secondary' : positive ? 'text-green-400' : 'text-red-400'}`}>
+                              {annualReturn == null ? 'N/A' : `${positive ? '+' : ''}${annualReturn.toFixed(1)}%`}
+                            </p>
+                            <p className="text-xs text-text-secondary mt-1">Annual Return</p>
+                          </div>
+                          <div className="bg-background rounded-lg p-3 text-center">
+                            <p className={`text-2xl font-bold ${maxDrawdown == null ? 'text-text-secondary' : 'text-red-400'}`}>
+                              {maxDrawdown == null ? 'N/A' : `-${Math.abs(maxDrawdown).toFixed(1)}%`}
+                            </p>
+                            <p className="text-xs text-text-secondary mt-1">Max Drawdown</p>
+                          </div>
+                        </div>
 
-                  <div className="flex items-center gap-2 text-text-secondary text-sm mb-4">
-                    <Users size={15} />
-                    <span>{featured.subscriber_count} subscribers</span>
-                  </div>
+                        <div className="flex items-center gap-2 text-text-secondary text-sm">
+                          <Users size={15} />
+                          <span>{featured.subscriber_count} subscribers</span>
+                        </div>
+                      </div>
 
-                  <div className="flex items-center justify-between pt-4 border-t border-border">
-                    <div className="flex items-center gap-3">
-                      {featured.monthly_price != null ? (
-                        <>
-                          <span className="text-primary font-semibold">${featured.monthly_price} <span className="text-text-secondary font-normal text-sm">/mo</span></span>
-                          {featured.annual_price != null && (
-                            <span className="text-text-secondary text-sm">· ${featured.annual_price} /yr</span>
+                      {/* Price strip + CTA */}
+                      <div className="flex items-center justify-between pt-4 mt-4 border-t border-border">
+                        <div className="flex items-center gap-2">
+                          {featured.monthly_price != null ? (
+                            <>
+                              <span className="text-primary font-semibold">${featured.monthly_price} <span className="text-text-secondary font-normal text-sm">/mo</span></span>
+                              {featured.annual_price != null && (
+                                <span className="text-text-secondary text-sm">· ${featured.annual_price} /yr</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-text-secondary text-sm">Pricing unavailable</span>
                           )}
-                        </>
-                      ) : (
-                        <span className="text-text-secondary text-sm">Pricing unavailable</span>
-                      )}
+                        </div>
+                        <span className="text-primary text-sm font-medium whitespace-nowrap">View Details →</span>
+                      </div>
                     </div>
-                    <span className="text-primary text-sm font-medium">View Details →</span>
+
+                    {/* Right: equity curve */}
+                    <div className="relative md:w-3/5 h-48 md:h-auto bg-background/40 p-4">
+                      <p className="text-xs text-text-secondary opacity-60 mb-2 uppercase tracking-wider">Equity Curve</p>
+                      <div className="h-full pb-6">
+                        <EquityCurve data={equityCurve} positive={positive} />
+                      </div>
+                    </div>
                   </div>
                 </Link>
               </div>
@@ -273,7 +351,7 @@ export default function MarketplacePage() {
           })()}
 
           {/* Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 3xl:grid-cols-4 gap-6">
             {filteredStrategies.map(strategy => {
               const annualReturn = getAnnualReturn(strategy)
               const maxDrawdown = getMaxDrawdown(strategy)
