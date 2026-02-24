@@ -306,7 +306,10 @@ export default function MarketplacePage() {
                               </span>
                             )}
                             {subscribedIds.has(featured.uuid) && (
-                              <span className="inline-flex items-center gap-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded px-2 py-0.5 text-xs font-medium">
+                              <span
+                                aria-label="Subscribed"
+                                className="inline-flex items-center gap-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded px-2 py-0.5 text-xs font-medium"
+                              >
                                 ✓ Subscribed
                               </span>
                             )}
@@ -378,14 +381,9 @@ export default function MarketplacePage() {
                 <Link
                   key={strategy.uuid}
                   href={`/dashboard/marketplace/${strategy.uuid}`}
-                  className="bg-surface border border-border rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col relative"
+                  className="bg-surface border border-border rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col"
                 >
-                  {subscribedIds.has(strategy.uuid) && (
-                    <span className="absolute top-3 right-3 inline-flex items-center gap-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded px-2 py-0.5 text-xs font-medium z-10">
-                      ✓ Subscribed
-                    </span>
-                  )}
-                  {/* Top row: type badge + stars */}
+                  {/* Top row: type badge + subscribed badge + stars */}
                   <div className="flex items-start justify-between mb-2 min-h-[28px]">
                     {strategy.strategy_type ? (
                       <span className="inline-block bg-primary/20 text-primary text-xs px-2 py-1 rounded">
@@ -394,7 +392,17 @@ export default function MarketplacePage() {
                     ) : (
                       <span />
                     )}
-                    <div className="flex-shrink-0">{renderStars(strategy.rating)}</div>
+                    <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+                      {subscribedIds.has(strategy.uuid) && (
+                        <span
+                          aria-label="Subscribed"
+                          className="inline-flex items-center gap-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded px-2 py-0.5 text-xs font-medium"
+                        >
+                          ✓ Subscribed
+                        </span>
+                      )}
+                      <div className="flex-shrink-0">{renderStars(strategy.rating)}</div>
+                    </div>
                   </div>
 
                   {/* Strategy name */}
