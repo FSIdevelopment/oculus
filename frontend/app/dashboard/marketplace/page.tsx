@@ -12,9 +12,19 @@ interface Strategy {
   strategy_type?: string
   symbols?: Record<string, any>
   target_return?: number
-  backtest_results?: Record<string, any>
+  backtest_results?: {
+    total_return?: number
+    total_return_pct?: number
+    annual_return?: number
+    max_drawdown?: number
+    win_rate?: number
+    [key: string]: any
+  }
   subscriber_count: number
   rating?: number
+  rating_count?: number
+  monthly_price?: number
+  annual_price?: number
   created_at: string
 }
 
@@ -97,10 +107,35 @@ export default function MarketplacePage() {
     )
   }
 
-  const getSymbolsDisplay = (symbols?: Record<string, any>) => {
-    if (!symbols) return 'N/A'
-    const symbolList = symbols.symbols || []
-    return symbolList.slice(0, 3).join(', ') + (symbolList.length > 3 ? '...' : '')
+  const getAnnualReturn = (strategy: Strategy): number | null => {
+    const br = strategy.backtest_results
+    if (!br) return null
+    const val = br.annual_return ?? br.total_return_pct ?? br.total_return
+    return val != null ? Number(val) : null
+  }
+
+  const getMaxDrawdown = (strategy: Strategy): number | null => {
+    const br = strategy.backtest_results
+    if (!br) return null
+    const val = br.max_drawdown
+    return val != null ? Number(val) : null
+  }
+
+  const getFeaturedStrategy = (list: Strategy[]): Strategy | null => {
+    if (list.length < 2) return null
+    return list.reduce((best, s) => {
+      const annualReturn = getAnnualReturn(s) ?? 0
+      const bestAnnualReturn = getAnnualReturn(best) ?? 0
+      const score =
+        annualReturn / 100 +
+        (s.rating ?? 0) * 20 +
+        Math.log10((s.subscriber_count ?? 0) + 1) * 10
+      const bestScore =
+        bestAnnualReturn / 100 +
+        (best.rating ?? 0) * 20 +
+        Math.log10((best.subscriber_count ?? 0) + 1) * 10
+      return score > bestScore ? s : best
+    })
   }
 
   return (
@@ -169,51 +204,142 @@ export default function MarketplacePage() {
         </div>
       ) : (
         <>
+          {/* Featured Strategy */}
+          {(() => {
+            const featured = getFeaturedStrategy(filteredStrategies)
+            if (!featured) return null
+            const annualReturn = getAnnualReturn(featured)
+            const maxDrawdown = getMaxDrawdown(featured)
+            return (
+              <div>
+                <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Featured Strategy</p>
+                <Link
+                  href={`/dashboard/marketplace/${featured.uuid}`}
+                  className="block bg-primary/5 border border-primary/40 rounded-lg p-6 hover:border-primary transition-colors"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="inline-block bg-primary/20 text-primary text-xs px-2 py-1 rounded font-medium">
+                        Featured
+                      </span>
+                      {featured.strategy_type && (
+                        <span className="inline-block bg-surface border border-border text-text-secondary text-xs px-2 py-1 rounded">
+                          {featured.strategy_type}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-shrink-0">{renderStars(featured.rating)}</div>
+                  </div>
+
+                  <h3 className="text-xl font-bold text-text mb-3">{featured.name}</h3>
+
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="bg-background rounded-lg p-3 text-center">
+                      <p className={`text-2xl font-bold ${annualReturn == null ? 'text-text-secondary' : annualReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {annualReturn == null ? 'N/A' : `${annualReturn >= 0 ? '+' : ''}${annualReturn.toFixed(1)}%`}
+                      </p>
+                      <p className="text-xs text-text-secondary mt-1">Annual Return</p>
+                    </div>
+                    <div className="bg-background rounded-lg p-3 text-center">
+                      <p className={`text-2xl font-bold ${maxDrawdown == null ? 'text-text-secondary' : 'text-red-400'}`}>
+                        {maxDrawdown == null ? 'N/A' : `-${Math.abs(maxDrawdown).toFixed(1)}%`}
+                      </p>
+                      <p className="text-xs text-text-secondary mt-1">Max Drawdown</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-text-secondary text-sm mb-4">
+                    <Users size={15} />
+                    <span>{featured.subscriber_count} subscribers</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-4 border-t border-border">
+                    <div className="flex items-center gap-3">
+                      {featured.monthly_price != null ? (
+                        <>
+                          <span className="text-primary font-semibold">${featured.monthly_price} <span className="text-text-secondary font-normal text-sm">/mo</span></span>
+                          {featured.annual_price != null && (
+                            <span className="text-text-secondary text-sm">${featured.annual_price} /yr</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-text-secondary text-sm">Pricing unavailable</span>
+                      )}
+                    </div>
+                    <span className="text-primary text-sm font-medium">View Details →</span>
+                  </div>
+                </Link>
+              </div>
+            )
+          })()}
+
           {/* Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredStrategies.map(strategy => (
-              <Link
-                key={strategy.uuid}
-                href={`/dashboard/marketplace/${strategy.uuid}`}
-                className="bg-surface border border-border rounded-lg p-6 hover:border-primary transition-colors cursor-pointer"
-              >
-                <h3 className="text-lg font-bold text-text mb-2">{strategy.name}</h3>
-                <p className="text-text-secondary text-sm mb-4 line-clamp-2">
-                  {strategy.description || 'No description'}
-                </p>
+            {filteredStrategies.map(strategy => {
+              const annualReturn = getAnnualReturn(strategy)
+              const maxDrawdown = getMaxDrawdown(strategy)
+              return (
+                <Link
+                  key={strategy.uuid}
+                  href={`/dashboard/marketplace/${strategy.uuid}`}
+                  className="bg-surface border border-border rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col"
+                >
+                  {/* Top row: type badge + stars */}
+                  <div className="flex items-start justify-between mb-2 min-h-[28px]">
+                    {strategy.strategy_type ? (
+                      <span className="inline-block bg-primary/20 text-primary text-xs px-2 py-1 rounded">
+                        {strategy.strategy_type}
+                      </span>
+                    ) : (
+                      <span />
+                    )}
+                    <div className="flex-shrink-0">{renderStars(strategy.rating)}</div>
+                  </div>
 
-                {strategy.strategy_type && (
-                  <div className="mb-3">
-                    <span className="inline-block bg-primary/20 text-primary text-xs px-2 py-1 rounded">
-                      {strategy.strategy_type}
-                    </span>
-                  </div>
-                )}
+                  {/* Strategy name */}
+                  <h3 className="text-lg font-bold text-text mb-4">{strategy.name}</h3>
 
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">Symbols:</span>
-                    <span className="text-text">{getSymbolsDisplay(strategy.symbols)}</span>
+                  {/* Metric panels */}
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    <div className="bg-background rounded-lg p-3 text-center">
+                      <p className={`text-xl font-bold ${annualReturn == null ? 'text-text-secondary' : annualReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {annualReturn == null ? 'N/A' : `${annualReturn >= 0 ? '+' : ''}${annualReturn.toFixed(1)}%`}
+                      </p>
+                      <p className="text-xs text-text-secondary mt-1">Annual Return</p>
+                    </div>
+                    <div className="bg-background rounded-lg p-3 text-center">
+                      <p className={`text-xl font-bold ${maxDrawdown == null ? 'text-text-secondary' : 'text-red-400'}`}>
+                        {maxDrawdown == null ? 'N/A' : `-${Math.abs(maxDrawdown).toFixed(1)}%`}
+                      </p>
+                      <p className="text-xs text-text-secondary mt-1">Max Drawdown</p>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">Target Return:</span>
-                    <span className="text-text">{strategy.target_return?.toFixed(1) || 'N/A'}%</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-text-secondary">Rating:</span>
-                    {renderStars(strategy.rating)}
-                  </div>
-                  <div className="flex items-center gap-2 text-text-secondary">
-                    <Users size={16} />
+
+                  {/* Subscriber count */}
+                  <div className="flex items-center gap-2 text-text-secondary text-sm mb-4">
+                    <Users size={15} />
                     <span>{strategy.subscriber_count} subscribers</span>
                   </div>
-                </div>
 
-                <button className="w-full mt-4 bg-primary hover:bg-primary-hover text-white font-medium py-2 rounded-lg transition-colors">
-                  View Details
-                </button>
-              </Link>
-            ))}
+                  {/* Price strip + CTA */}
+                  <div className="flex items-center justify-between pt-4 border-t border-border mt-auto">
+                    <div className="flex items-center gap-2">
+                      {strategy.monthly_price != null ? (
+                        <>
+                          <span className="text-primary font-semibold text-sm">${strategy.monthly_price}<span className="text-text-secondary font-normal"> /mo</span></span>
+                          {strategy.annual_price != null && (
+                            <span className="text-text-secondary text-xs">· ${strategy.annual_price} /yr</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-text-secondary text-xs">—</span>
+                      )}
+                    </div>
+                    <span className="text-primary text-sm font-medium whitespace-nowrap">View Details →</span>
+                  </div>
+                </Link>
+              )
+            })}
           </div>
 
           {/* Pagination */}
@@ -241,4 +367,3 @@ export default function MarketplacePage() {
     </div>
   )
 }
-
