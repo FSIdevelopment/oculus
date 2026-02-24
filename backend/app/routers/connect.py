@@ -41,10 +41,17 @@ async def create_onboard_link(
             current_user.stripe_connect_account_id = account.id
             await db.flush()
         
-        # Create Account Link for onboarding
+        # Use account_update for existing complete accounts, account_onboarding otherwise
+        if current_user.stripe_connect_account_id:
+            existing = stripe.Account.retrieve(current_user.stripe_connect_account_id)
+            link_type = "account_update" if (existing.charges_enabled and existing.details_submitted) else "account_onboarding"
+        else:
+            link_type = "account_onboarding"
+
+        # Create Account Link for onboarding / settings update
         account_link = stripe.AccountLink.create(
             account=current_user.stripe_connect_account_id,
-            type="account_onboarding",
+            type=link_type,
             return_url=f"{settings.FRONTEND_URL}/dashboard/account/connect/return",
             refresh_url=f"{settings.FRONTEND_URL}/dashboard/account?tab=earnings"
         )
@@ -76,16 +83,27 @@ async def get_connect_status(
         # Retrieve account details from Stripe
         account = stripe.Account.retrieve(current_user.stripe_connect_account_id)
         
+        # Collect any fields Stripe is requiring right now
+        reqs = account.get("requirements", {})
+        requirements_due = list(set(
+            (reqs.get("currently_due") or []) + (reqs.get("past_due") or [])
+        ))
+        disabled_reason = reqs.get("disabled_reason") or None
+
         # Check if account is fully onboarded
         if account.charges_enabled and account.details_submitted:
             return ConnectStatusResponse(
                 status="complete",
-                account_id=current_user.stripe_connect_account_id
+                account_id=current_user.stripe_connect_account_id,
+                requirements_due=requirements_due,
+                disabled_reason=disabled_reason,
             )
         else:
             return ConnectStatusResponse(
                 status="pending",
-                account_id=current_user.stripe_connect_account_id
+                account_id=current_user.stripe_connect_account_id,
+                requirements_due=requirements_due,
+                disabled_reason=disabled_reason,
             )
     
     except stripe.error.StripeError as e:
