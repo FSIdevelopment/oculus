@@ -332,3 +332,46 @@ def test_get_strategy_response_excludes_docker(client, test_db, test_user, user_
     assert "docker_registry" not in data
     assert "docker_image_url" not in data
 
+
+
+def test_strategy_response_computed_prices_with_backtest():
+    """StrategyResponse exposes monthly_price and annual_price when backtest_results present."""
+    from app.schemas.strategies import StrategyResponse
+    from datetime import datetime
+
+    data = dict(
+        uuid="abc",
+        name="Test",
+        status="complete",
+        version=1,
+        subscriber_count=0,
+        user_id="user-1",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+        backtest_results={"total_return": 80.0, "sharpe_ratio": 1.5},
+    )
+    resp = StrategyResponse(**data)
+    assert resp.monthly_price is not None
+    assert resp.monthly_price > 0
+    assert resp.annual_price is not None
+    assert resp.annual_price >= resp.monthly_price
+
+
+def test_strategy_response_computed_prices_without_backtest():
+    """StrategyResponse returns None prices when no backtest_results."""
+    from app.schemas.strategies import StrategyResponse
+    from datetime import datetime
+
+    data = dict(
+        uuid="abc",
+        name="Test",
+        status="complete",
+        version=1,
+        subscriber_count=0,
+        user_id="user-1",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    resp = StrategyResponse(**data)
+    assert resp.monthly_price is None
+    assert resp.annual_price is None

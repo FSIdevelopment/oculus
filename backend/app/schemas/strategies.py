@@ -1,7 +1,8 @@
 """Pydantic schemas for strategy endpoints."""
 from typing import Optional, List, Any, Union
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+from app.services.pricing import calculate_license_price
 
 
 class StrategyCreate(BaseModel):
@@ -66,6 +67,22 @@ class StrategyResponse(BaseModel):
     build_count: Optional[int] = None
     annual_return: Optional[float] = None
     best_return_pct: Optional[float] = None
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def monthly_price(self) -> int | None:
+        if not self.backtest_results:
+            return None
+        monthly, _, _ = calculate_license_price(self.backtest_results)
+        return monthly
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def annual_price(self) -> int | None:
+        if not self.backtest_results:
+            return None
+        _, annual, _ = calculate_license_price(self.backtest_results)
+        return annual
 
     class Config:
         from_attributes = True
