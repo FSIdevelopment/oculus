@@ -308,6 +308,11 @@ async def create_license_subscription(
             detail="Strategy not found"
         )
 
+    # Look up strategy creator's Connect account for revenue routing
+    creator_result = await db.execute(select(User).where(User.uuid == strategy.user_id))
+    creator = creator_result.scalar_one_or_none()
+    creator_connect_id = creator.stripe_connect_account_id if creator else None
+
     if not current_user.stripe_customer_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -358,6 +363,8 @@ async def create_license_subscription(
                 "strategy_id": strategy_id,
                 "license_type": subscribe_data.license_type,
             },
+            **({"transfer_data": {"destination": creator_connect_id}} if creator_connect_id else {}),
+            **({"application_fee_percent": 35} if creator_connect_id else {}),
         )
     except stripe.error.StripeError as e:
         raise HTTPException(
