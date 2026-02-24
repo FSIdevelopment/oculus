@@ -12,6 +12,7 @@ from app.models.strategy_build import StrategyBuild
 from app.models.build_history import BuildHistory, FeatureTracker
 from app.models.build_iteration import BuildIteration
 from app.models.strategy_creation_guide import StrategyCreationGuide
+from app.models.earning import Earning
 
 __all__ = [
     "User",
@@ -28,5 +29,5 @@ __all__ = [
     "FeatureTracker",
     "BuildIteration",
     "StrategyCreationGuide",
+    "Earning",
 ]
-
