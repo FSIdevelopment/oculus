@@ -109,7 +109,7 @@ function EquityCurve({ data }: { data: EquityPoint[] }) {
           <g key={t}>
             <line x1={PAD.left} y1={y} x2={W - PAD.right} y2={y} stroke="#374151" strokeDasharray="4,4" />
             <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={10} fill="#6b7280">
-              ${(v / 1000).toFixed(0)}k
+              {v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : v >= 1_000 ? `$${(v / 1_000).toFixed(0)}k` : `$${v.toFixed(0)}`}
             </text>
           </g>
         )
@@ -241,7 +241,7 @@ export default function MarketplaceStrategyPage() {
       await ratingsAPI.createRating(strategyId, ratingScore, ratingReview)
       setRatingScore(0)
       setRatingReview('')
-      loadData()
+      await loadData()
     } catch (err: any) {
       alert(err.response?.data?.detail || err.message || 'Failed to submit rating')
     } finally {
@@ -579,7 +579,7 @@ export default function MarketplaceStrategyPage() {
                 </thead>
                 <tbody>
                   {paginatedTrades.map((trade, idx) => (
-                    <tr key={idx} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                    <tr key={`${trade.entry_date}-${trade.symbol}-${trade.action}-${idx}`} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
                       <td className="py-2 px-3 text-text-secondary whitespace-nowrap">{trade.entry_date?.slice(0, 10) ?? '—'}</td>
                       <td className="py-2 px-3 text-text-secondary whitespace-nowrap">{trade.exit_date?.slice(0, 10) ?? '—'}</td>
                       <td className="py-2 px-3 text-text font-medium">{trade.symbol}</td>
@@ -631,6 +631,8 @@ export default function MarketplaceStrategyPage() {
                 <button
                   key={score}
                   onClick={() => setRatingScore(score)}
+                  aria-label={`Rate ${score} star${score !== 1 ? 's' : ''}`}
+                  aria-pressed={score <= ratingScore}
                   className={`text-2xl transition-colors ${score <= ratingScore ? 'text-yellow-400' : 'text-gray-600 hover:text-yellow-300'}`}
                 >
                   ★
@@ -674,12 +676,20 @@ export default function MarketplaceStrategyPage() {
 
       {/* Subscribe Modal */}
       {showSubscribeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="subscribe-modal-title"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowSubscribeModal(false) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowSubscribeModal(false) }}
+        >
           <div className="bg-surface border border-border rounded-lg p-6 w-full max-w-md shadow-xl">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-text">Subscribe to {strategy.name}</h2>
+              <h2 id="subscribe-modal-title" className="text-xl font-bold text-text">Subscribe to {strategy.name}</h2>
               <button
                 onClick={() => setShowSubscribeModal(false)}
+                aria-label="Close"
                 className="text-text-secondary hover:text-text text-2xl leading-none w-6 h-6 flex items-center justify-center"
               >
                 ×
