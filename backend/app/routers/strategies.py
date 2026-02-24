@@ -211,8 +211,38 @@ async def list_marketplace_strategies(
     )
     strategies = result.scalars().all()
 
+    # For strategies with a pinned marketplace build, override backtest_results/config
+    # with that build's best iteration data in one batch query.
+    pinned_ids = {s.marketplace_build_id for s in strategies if s.marketplace_build_id}
+    best_iter_data: dict[str, tuple] = {}  # build_id → (backtest_results, strategy_files)
+    if pinned_ids:
+        iters_result = await db.execute(
+            select(BuildIteration.build_id, BuildIteration.backtest_results, BuildIteration.strategy_files)
+            .where(
+                BuildIteration.build_id.in_(pinned_ids),
+                BuildIteration.status == "complete",
+            )
+        )
+        for iter_build_id, br, sf in iters_result.all():
+            ret = float((br or {}).get("total_return_pct") or (br or {}).get("total_return") or 0)
+            existing = best_iter_data.get(iter_build_id)
+            existing_ret = float((existing[0] or {}).get("total_return_pct") or 0) if existing else -999
+            if ret > existing_ret:
+                best_iter_data[iter_build_id] = (br, sf)
+
+    items = []
+    for s in strategies:
+        resp = StrategyResponse.model_validate(s)
+        if s.marketplace_build_id and s.marketplace_build_id in best_iter_data:
+            br, sf = best_iter_data[s.marketplace_build_id]
+            if br:
+                resp.backtest_results = br
+            if sf and "config.json" in sf:
+                resp.config = sf["config.json"]
+        items.append(resp)
+
     return {
-        "items": strategies,
+        "items": items,
         "total": total,
         "skip": skip,
         "limit": limit
