@@ -300,6 +300,25 @@ async def get_marketplace_strategy(strategy_id: str, db: AsyncSession = Depends(
             if best_files and "config.json" in best_files:
                 response.config = best_files["config.json"]
 
+        # Compute the version number of the pinned build: how many complete builds
+        # for this strategy started at or before this one (chronological position).
+        pinned_start_result = await db.execute(
+            select(StrategyBuild.started_at)
+            .where(StrategyBuild.uuid == latest_build_id)
+        )
+        pinned_start = pinned_start_result.scalar_one_or_none()
+        if pinned_start:
+            version_result = await db.execute(
+                select(func.count(StrategyBuild.uuid)).where(
+                    StrategyBuild.strategy_id == strategy_id,
+                    StrategyBuild.status == "complete",
+                    StrategyBuild.started_at <= pinned_start,
+                )
+            )
+            pinned_version = version_result.scalar()
+            if pinned_version:
+                response.version = pinned_version
+
     return response
 
 
