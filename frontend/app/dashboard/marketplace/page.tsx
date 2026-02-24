@@ -13,11 +13,11 @@ interface Strategy {
   symbols?: Record<string, any>
   target_return?: number
   backtest_results?: {
-    total_return?: number
-    total_return_pct?: number
-    annual_return?: number
-    max_drawdown?: number
-    win_rate?: number
+    total_return: number
+    total_return_pct: number
+    annual_return: number
+    max_drawdown: number
+    win_rate: number
     [key: string]: any
   }
   subscriber_count: number
@@ -259,7 +259,7 @@ export default function MarketplacePage() {
                         <>
                           <span className="text-primary font-semibold">${featured.monthly_price} <span className="text-text-secondary font-normal text-sm">/mo</span></span>
                           {featured.annual_price != null && (
-                            <span className="text-text-secondary text-sm">${featured.annual_price} /yr</span>
+                            <span className="text-text-secondary text-sm">· ${featured.annual_price} /yr</span>
                           )}
                         </>
                       ) : (
