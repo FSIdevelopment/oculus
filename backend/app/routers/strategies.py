@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from datetime import datetime
 
 from app.database import get_db
@@ -231,7 +231,19 @@ async def get_marketplace_strategy(strategy_id: str, db: AsyncSession = Depends(
     strategy = result.scalar_one_or_none()
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    return strategy
+
+    # Attach latest complete build ID so the frontend can show the Strategy Explainer
+    build_result = await db.execute(
+        select(StrategyBuild.uuid)
+        .where(StrategyBuild.strategy_id == strategy_id, StrategyBuild.status == "complete")
+        .order_by(StrategyBuild.completed_at.desc())
+        .limit(1)
+    )
+    latest_build_id = build_result.scalar_one_or_none()
+
+    response = StrategyResponse.model_validate(strategy)
+    response.latest_build_id = latest_build_id
+    return response
 
 
 @router.put("/{strategy_id}/marketplace", response_model=StrategyResponse)
@@ -802,9 +814,11 @@ async def get_build_readme(
     Return the README.md generated for a specific build.
 
     The README is stored in the database for production compatibility.
-    Admins can view any strategy's README; regular users can only view their own.
+    Admins can view any strategy's README; regular users can view their own
+    or any marketplace-listed strategy's README.
     """
-    # Verify strategy ownership (admins can view any strategy)
+    # Admins can view any strategy; owners can view their own; any authenticated
+    # user can view the readme of a marketplace-listed strategy.
     if current_user.user_role == "admin":
         strat_result = await db.execute(
             select(Strategy).where(
@@ -816,8 +830,11 @@ async def get_build_readme(
         strat_result = await db.execute(
             select(Strategy).where(
                 Strategy.uuid == strategy_id,
-                Strategy.user_id == current_user.uuid,
                 Strategy.status != "deleted",
+                or_(
+                    Strategy.user_id == current_user.uuid,
+                    Strategy.marketplace_listed == True,
+                ),
             )
         )
     if not strat_result.scalar_one_or_none():

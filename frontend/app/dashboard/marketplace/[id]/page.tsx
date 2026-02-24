@@ -5,8 +5,9 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { marketplaceAPI, ratingsAPI, licenseAPI } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
-import { ArrowLeft, Loader2, Users, CheckCircle2, CalendarDays } from 'lucide-react'
+import { ArrowLeft, Loader2, Users, CheckCircle2, CalendarDays, FileText } from 'lucide-react'
 import LicensePaymentForm from '@/components/LicensePaymentForm'
+import StrategyExplainerModal from '@/components/StrategyExplainerModal'
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ interface Strategy {
   rating?: number
   monthly_price?: number
   annual_price?: number
+  latest_build_id?: string
   created_at: string
   user_id: string
 }
@@ -171,6 +173,9 @@ export default function MarketplaceStrategyPage() {
   // Subscribe modal state
   const [showSubscribeModal, setShowSubscribeModal] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('monthly')
+
+  // Explainer modal state
+  const [isExplainerModalOpen, setIsExplainerModalOpen] = useState(false)
 
   // Rating state
   const [ratingScore, setRatingScore] = useState(0)
@@ -336,6 +341,19 @@ export default function MarketplaceStrategyPage() {
             Created {new Date(strategy.created_at).toLocaleDateString()}
           </span>
         </div>
+
+        {/* Strategy Explainer button */}
+        {user && strategy.latest_build_id && (
+          <div className="mb-4">
+            <button
+              onClick={() => setIsExplainerModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 rounded-lg transition-colors"
+            >
+              <FileText size={15} />
+              Strategy Explainer
+            </button>
+          </div>
+        )}
 
         {/* Subscribe CTA / License card */}
         <div className="pt-4 border-t border-border">
@@ -673,6 +691,17 @@ export default function MarketplaceStrategyPage() {
           )}
         </div>
       </div>
+
+      {/* Strategy Explainer Modal */}
+      {strategy.latest_build_id && (
+        <StrategyExplainerModal
+          isOpen={isExplainerModalOpen}
+          onClose={() => setIsExplainerModalOpen(false)}
+          strategyId={strategyId}
+          buildId={strategy.latest_build_id}
+          strategyName={strategy.name}
+        />
+      )}
 
       {/* Subscribe Modal */}
       {showSubscribeModal && (
