@@ -378,40 +378,47 @@ async def create_license_subscription(
 
 
 @router.get("/api/users/me/licenses", response_model=LicenseListResponse)
-async def list_user_licenses(
+async def list_my_licenses(
     skip: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """List current user's active licenses (paginated)."""
-    # Count total
+    """List all licenses belonging to the current user."""
+    # Total count
     count_result = await db.execute(
-        select(func.count(License.uuid)).where(
-            License.user_id == current_user.uuid,
-            License.status == "active"
-        )
+        select(func.count(License.uuid)).where(License.user_id == current_user.uuid)
     )
-    total = count_result.scalar()
-    
-    # Fetch paginated
+    total = count_result.scalar_one()
+
+    # Fetch licenses with strategy join
     result = await db.execute(
-        select(License)
-        .where(
-            License.user_id == current_user.uuid,
-            License.status == "active"
-        )
+        select(License, Strategy.name.label("strategy_name"))
+        .join(Strategy, License.strategy_id == Strategy.uuid, isouter=True)
+        .where(License.user_id == current_user.uuid)
+        .order_by(License.created_at.desc())
         .offset(skip)
         .limit(limit)
     )
-    licenses = result.scalars().all()
-    
-    return {
-        "items": licenses,
-        "total": total,
-        "skip": skip,
-        "limit": limit
-    }
+    rows = result.all()
+
+    items = []
+    for license_obj, strategy_name in rows:
+        item = LicenseResponse(
+            uuid=license_obj.uuid,
+            status=license_obj.status,
+            license_type=license_obj.license_type,
+            strategy_id=license_obj.strategy_id,
+            user_id=license_obj.user_id,
+            strategy_version=license_obj.strategy_version,
+            webhook_url=license_obj.webhook_url,
+            strategy_name=strategy_name,
+            created_at=license_obj.created_at,
+            expires_at=license_obj.expires_at,
+        )
+        items.append(item)
+
+    return LicenseListResponse(items=items, total=total, skip=skip, limit=limit)
 
 
 @router.put("/api/licenses/{license_id}/renew", response_model=LicenseResponse)
