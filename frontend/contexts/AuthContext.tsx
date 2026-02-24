@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         Cookies.set('refresh_token', response.refresh_token, {
           expires: 7,
           secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
+          sameSite: 'lax',
         })
       }
       const userData = await authAPI.getMe()
@@ -83,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         Cookies.set('refresh_token', response.refresh_token, {
           expires: 7,
           secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
+          sameSite: 'lax',
         })
       }
       const userData = await authAPI.getMe()

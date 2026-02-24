@@ -47,7 +47,7 @@ export const authAPI = {
       Cookies.set('auth_token', response.data.access_token, {
         expires: 7,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: 'lax',
       })
     }
     return response.data
@@ -69,7 +69,7 @@ export const authAPI = {
       Cookies.set('auth_token', response.data.access_token, {
         expires: 7,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: 'lax',
       })
     }
     return response.data
@@ -88,7 +88,7 @@ export const authAPI = {
       Cookies.set('auth_token', response.data.access_token, {
         expires: 7,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        sameSite: 'lax',
       })
     }
     return response.data
