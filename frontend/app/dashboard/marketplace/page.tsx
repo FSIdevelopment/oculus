@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { marketplaceAPI } from '@/lib/api'
+import { marketplaceAPI, licenseAPI } from '@/lib/api'
 import { Users, Search } from 'lucide-react'
 
 interface Strategy {
@@ -148,6 +148,7 @@ export default function MarketplacePage() {
   const sortOrder = 'desc'
   const [skip, setSkip] = useState(0)
   const [total, setTotal] = useState(0)
+  const [subscribedIds, setSubscribedIds] = useState<Set<string>>(new Set())
 
   const limit = 12
 
@@ -175,6 +176,19 @@ export default function MarketplacePage() {
   useEffect(() => {
     loadStrategies()
   }, [loadStrategies])
+
+  useEffect(() => {
+    licenseAPI.listLicenses(0, 100)
+      .then(data => {
+        const ids = new Set<string>(
+          (data.licenses || [])
+            .filter((l: any) => l.status === 'active')
+            .map((l: any) => l.strategy_id as string)
+        )
+        setSubscribedIds(ids)
+      })
+      .catch(() => { /* user not authenticated or request failed — treat as no subscriptions */ })
+  }, [])
 
   const filteredStrategies = strategies.filter(s =>
     s.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -291,6 +305,11 @@ export default function MarketplacePage() {
                                 {featured.strategy_type}
                               </span>
                             )}
+                            {subscribedIds.has(featured.uuid) && (
+                              <span className="inline-flex items-center gap-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded px-2 py-0.5 text-xs font-medium">
+                                ✓ Subscribed
+                              </span>
+                            )}
                           </div>
                           <div className="flex-shrink-0">{renderStars(featured.rating)}</div>
                         </div>
@@ -359,8 +378,13 @@ export default function MarketplacePage() {
                 <Link
                   key={strategy.uuid}
                   href={`/dashboard/marketplace/${strategy.uuid}`}
-                  className="bg-surface border border-border rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col"
+                  className="bg-surface border border-border rounded-lg p-6 hover:border-primary transition-colors cursor-pointer flex flex-col relative"
                 >
+                  {subscribedIds.has(strategy.uuid) && (
+                    <span className="absolute top-3 right-3 inline-flex items-center gap-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded px-2 py-0.5 text-xs font-medium z-10">
+                      ✓ Subscribed
+                    </span>
+                  )}
                   {/* Top row: type badge + stars */}
                   <div className="flex items-start justify-between mb-2 min-h-[28px]">
                     {strategy.strategy_type ? (
