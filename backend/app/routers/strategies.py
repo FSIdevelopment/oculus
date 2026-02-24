@@ -435,13 +435,38 @@ async def get_strategy_builds(
     builds_result = await db.execute(
         select(StrategyBuild)
         .where(StrategyBuild.strategy_id == strategy_id)
+        .order_by(StrategyBuild.started_at.desc())
         .offset(skip)
         .limit(limit)
     )
     builds = builds_result.scalars().all()
-    
+
+    # Compute best total_return_pct per build from completed iterations (Python-side aggregation
+    # avoids brittle JSON-in-SQL extraction across different DB backends).
+    best_returns: dict[str, float] = {}
+    build_ids = [b.uuid for b in builds]
+    if build_ids:
+        iters_result = await db.execute(
+            select(BuildIteration.build_id, BuildIteration.backtest_results)
+            .where(
+                BuildIteration.build_id.in_(build_ids),
+                BuildIteration.status == "complete",
+            )
+        )
+        for iter_build_id, br in iters_result.all():
+            if br:
+                ret = float(br.get("total_return_pct") or br.get("total_return") or 0)
+                if iter_build_id not in best_returns or ret > best_returns[iter_build_id]:
+                    best_returns[iter_build_id] = ret
+
+    items = []
+    for b in builds:
+        resp = BuildResponse.model_validate(b)
+        resp.best_return_pct = best_returns.get(b.uuid)
+        items.append(resp)
+
     return {
-        "items": [BuildResponse.model_validate(b) for b in builds],
+        "items": items,
         "total": total,
         "skip": skip,
         "limit": limit

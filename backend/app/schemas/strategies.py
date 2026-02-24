@@ -33,6 +33,7 @@ class BuildResponse(BaseModel):
     strategy_type: Optional[str] = None
     strategy_name: Optional[str] = None
     queue_position: Optional[int] = None
+    best_return_pct: Optional[float] = None
 
     class Config:
         from_attributes = True

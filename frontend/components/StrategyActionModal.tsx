@@ -65,7 +65,7 @@ export default function StrategyActionModal({
   const [priceLoading, setPriceLoading] = useState(false)
 
   // Completed builds for version selection on the Marketplace tab
-  const [completedBuilds, setCompletedBuilds] = useState<Array<{ uuid: string; iteration_count: number; completed_at: string }>>([])
+  const [completedBuilds, setCompletedBuilds] = useState<Array<{ uuid: string; iteration_count: number; completed_at: string; best_return_pct?: number | null }>>([])
   const [buildsLoading, setBuildsLoading] = useState(false)
   const [selectedBuildId, setSelectedBuildId] = useState<string>('')
 
@@ -490,9 +490,12 @@ export default function StrategyActionModal({
                         const date = new Date(build.completed_at).toLocaleDateString(undefined, {
                           year: 'numeric', month: 'short', day: 'numeric',
                         })
+                        const returnStr = build.best_return_pct != null
+                          ? ` · ${build.best_return_pct >= 0 ? '+' : ''}${build.best_return_pct.toFixed(1)}% return`
+                          : ''
                         return (
                           <option key={build.uuid} value={build.uuid}>
-                            Version {completedBuilds.length - idx} — {build.iteration_count} iterations · {date}
+                            Version {completedBuilds.length - idx}{returnStr} · {build.iteration_count} iterations · {date}
                           </option>
                         )
                       })}
