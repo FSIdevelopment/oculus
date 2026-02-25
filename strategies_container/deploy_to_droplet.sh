@@ -80,9 +80,10 @@ scp "${SSH_OPTS[@]}" \
     "$SCRIPT_DIR/requirements.txt" \
     "$SCRIPT_DIR/deploy.sh" \
     "$SCRIPT_DIR/recover_builds.py" \
+    "$SCRIPT_DIR/repair_main_py.py" \
     "$SSH_TARGET:$REMOTE_TMP/"
 
-echo "      Files copied: main.py  builder.py  containers.py  requirements.txt  deploy.sh"
+echo "      Files copied: main.py  builder.py  containers.py  requirements.txt  deploy.sh  recover_builds.py  repair_main_py.py"
 
 # ── Step 3: Run setup script on Droplet ──────────────────────
 echo "[3/4] Running deploy.sh on Droplet..."

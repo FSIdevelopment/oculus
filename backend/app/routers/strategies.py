@@ -1067,17 +1067,23 @@ async def get_strategy_internal(
         target_build = all_completed_builds[0] if all_completed_builds else None
 
     if target_build:
-        # Get the best iteration from this build
+        # Get the best iteration from this build (highest total_return_pct),
+        # matching the logic used by the marketplace and listing endpoints so that
+        # the backtest results returned here match what the user sees in the UI.
         iteration_result = await db.execute(
             select(BuildIteration)
             .where(
                 BuildIteration.build_id == target_build.uuid,
                 BuildIteration.status == "complete"
             )
-            .order_by(BuildIteration.iteration_number.desc())
-            .limit(1)
         )
-        target_iteration = iteration_result.scalar_one_or_none()
+        all_iterations = iteration_result.scalars().all()
+
+        def _iter_return(it: BuildIteration) -> float:
+            br = it.backtest_results or {}
+            return float(br.get("total_return_pct") or br.get("total_return") or 0)
+
+        target_iteration = max(all_iterations, key=_iter_return) if all_iterations else None
 
         if target_iteration:
             # Extract config.json from strategy_files
