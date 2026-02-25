@@ -28,11 +28,16 @@ BUILD_AGENT_URL = os.environ.get("BUILD_AGENT_URL", "")
 BUILD_AGENT_API_KEY = os.environ.get("BUILD_AGENT_API_KEY", "")
 
 
-def _pg_dsn(url: str) -> str:
-    """Normalise URL to a form asyncpg accepts."""
+def _pg_dsn(url: str) -> tuple:
+    """Normalise URL to a form asyncpg accepts. Returns (dsn, ssl_required)."""
     url = url.replace("postgresql+asyncpg://", "postgresql://")
-    url = url.replace("sslmode=require", "ssl=require")
-    return url
+    ssl_required = False
+    for param in ("sslmode=require", "ssl=require"):
+        if param in url:
+            ssl_required = True
+            url = url.replace("?" + param, "").replace("&" + param, "").replace(param, "")
+            url = url.rstrip("?&")
+    return url, ssl_required
 
 
 async def main() -> None:
@@ -60,7 +65,8 @@ async def main() -> None:
         sys.exit(1)
 
     print("Connecting to database...")
-    conn = await asyncpg.connect(_pg_dsn(DATABASE_URL))
+    dsn, ssl_required = _pg_dsn(DATABASE_URL)
+    conn = await asyncpg.connect(dsn, ssl="require" if ssl_required else None)
     print("Database: connected\n")
 
     # Fetch all complete strategies

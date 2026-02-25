@@ -78,6 +78,7 @@ scp "${SSH_OPTS[@]}" \
     "$SCRIPT_DIR/builder.py" \
     "$SCRIPT_DIR/requirements.txt" \
     "$SCRIPT_DIR/deploy.sh" \
+    "$SCRIPT_DIR/recover_builds.py" \
     "$SSH_TARGET:$REMOTE_TMP/"
 
 echo "      Files copied: main.py  builder.py  requirements.txt  deploy.sh"
