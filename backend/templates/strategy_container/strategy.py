@@ -101,7 +101,38 @@ class TradingStrategy:
             '1D': 86400
         }
         return timeframe_map.get(interval_str, 60)
-    
+
+    def get_loop_interval(self) -> int:
+        """Return how often (seconds) main.py should re-run the strategy loop.
+
+        This is intentionally shorter than the data timeframe so we check
+        frequently for new candle closes without fetching stale data.
+
+        Mapping (timeframe → loop interval):
+          1d  → 1800s (30 min)
+          4h  →  900s (15 min)
+          1h  →  300s  (5 min)
+          30m →  300s  (5 min)
+          15m →  900s (15 min)
+          10m →  600s (10 min)
+          5m  →  300s  (5 min)
+          1m  →   60s  (1 min)
+        """
+        trading_config = self.config.get('trading', {})
+        timeframe = trading_config.get('timeframe', '1d')
+        loop_map = {
+            '1d': 1800, '1D': 1800,
+            '4h': 900,
+            '1h': 300,
+            '30m': 300, '30min': 300,
+            '15m': 900, '15min': 900,
+            '10m': 600, '10min': 600,
+            '5m': 300, '5min': 300,
+            '2m': 120, '2min': 120,
+            '1m': 60, '1min': 60,
+        }
+        return loop_map.get(timeframe, 1800)
+
     async def get_market_data(self, symbol: str) -> Optional[pd.DataFrame]:
         """
         Fetch market data for a symbol using AlphaVantage Premium API.

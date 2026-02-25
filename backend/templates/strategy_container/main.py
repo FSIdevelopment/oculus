@@ -260,8 +260,8 @@ class StrategyRunner:
         Outside of trading hours, the strategy will sleep until the next
         trading window opens.
         """
-        interval = self.strategy.get_interval()
-        logger.info(f"Starting strategy loop (interval: {interval}s)")
+        loop_interval = self.strategy.get_loop_interval()
+        logger.info(f"Starting strategy loop (loop_interval: {loop_interval}s)")
 
         while self.running and self.connected and self.authenticated:
             try:
@@ -292,8 +292,8 @@ class StrategyRunner:
                     await self.send_signal(signal)
                     await asyncio.sleep(0.5)  # Small delay between signals
 
-                # Wait for next interval
-                await asyncio.sleep(interval)
+                # Wait for next loop interval (shorter than data timeframe)
+                await asyncio.sleep(loop_interval)
 
             except Exception as e:
                 logger.error(f"Strategy loop error: {e}")

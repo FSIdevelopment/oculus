@@ -992,11 +992,13 @@ async def get_build_readme(
 async def get_strategy_internal(
     strategy_id: str,
     api_key: str = Query(..., description="Internal API key for SignalSynk"),
+    strategy_version: int | None = Query(None, description="Specific strategy version to fetch (defaults to latest)"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get strategy with Docker info for internal use by SignalSynk.
     This endpoint is for internal system use only and requires an API key.
+    Pass strategy_version to get data for a specific version; omit for the latest.
     """
     # TODO: Validate API key against a secure internal API key
     # For now, this is a placeholder - you should implement proper API key validation
@@ -1031,38 +1033,56 @@ async def get_strategy_internal(
             detail="Strategy Docker image not yet built"
         )
 
-    # Get the latest successful build iteration to extract config.json and full backtest results
+    # Get the successful build iteration to extract config.json and full backtest results.
+    # All completed builds are fetched sorted by started_at DESC so that index 0 = current
+    # version, index 1 = current version - 1, etc.  This mirrors the logic in the admin
+    # /versions endpoint so version numbers stay consistent.
     config_data = None
     full_backtest_results = None
+    resolved_version = strategy.version
 
-    build_result = await db.execute(
+    builds_result = await db.execute(
         select(StrategyBuild)
         .where(
             StrategyBuild.strategy_id == strategy_id,
             StrategyBuild.status == "complete"
         )
-        .order_by(StrategyBuild.completed_at.desc())
-        .limit(1)
+        .order_by(StrategyBuild.started_at.desc())
     )
-    latest_build = build_result.scalar_one_or_none()
+    all_completed_builds = builds_result.scalars().all()
 
-    if latest_build:
-        # Get the latest successful iteration from this build
+    if strategy_version is not None:
+        # Locate the build that corresponds to the requested version.
+        # Index into the DESC-sorted list: index = current_version - requested_version
+        current_version = strategy.version or 1
+        build_index = current_version - strategy_version
+        if build_index < 0 or build_index >= len(all_completed_builds):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Version {strategy_version} not found for this strategy"
+            )
+        target_build = all_completed_builds[build_index]
+        resolved_version = strategy_version
+    else:
+        target_build = all_completed_builds[0] if all_completed_builds else None
+
+    if target_build:
+        # Get the best iteration from this build
         iteration_result = await db.execute(
             select(BuildIteration)
             .where(
-                BuildIteration.build_id == latest_build.uuid,
+                BuildIteration.build_id == target_build.uuid,
                 BuildIteration.status == "complete"
             )
             .order_by(BuildIteration.iteration_number.desc())
             .limit(1)
         )
-        latest_iteration = iteration_result.scalar_one_or_none()
+        target_iteration = iteration_result.scalar_one_or_none()
 
-        if latest_iteration:
+        if target_iteration:
             # Extract config.json from strategy_files
-            if latest_iteration.strategy_files:
-                config_json_str = latest_iteration.strategy_files.get("config.json")
+            if target_iteration.strategy_files:
+                config_json_str = target_iteration.strategy_files.get("config.json")
                 if config_json_str:
                     try:
                         config_data = json.loads(config_json_str)
@@ -1070,11 +1090,18 @@ async def get_strategy_internal(
                         logger.warning(f"Failed to parse config.json for strategy {strategy_id}")
 
             # Get FULL backtest results from BuildIteration (includes trades, equity_curve, etc.)
-            if latest_iteration.backtest_results:
-                full_backtest_results = latest_iteration.backtest_results
+            if target_iteration.backtest_results:
+                full_backtest_results = target_iteration.backtest_results
             else:
                 # Fallback to strategy.backtest_results if iteration doesn't have it
                 full_backtest_results = strategy.backtest_results
+
+    # Reconstruct the docker image URL for the resolved version so that it points to the
+    # correct registry tag (e.g. registry.../name:1 vs registry.../name:2).
+    docker_image_url = strategy.docker_image_url
+    if resolved_version and ":" in (strategy.docker_image_url or ""):
+        base_url = strategy.docker_image_url.rsplit(":", 1)[0]
+        docker_image_url = f"{base_url}:{resolved_version}"
 
     # Create response with config and full backtest results
     return StrategyInternalResponse(
@@ -1088,8 +1115,8 @@ async def get_strategy_internal(
         backtest_results=full_backtest_results,  # Full backtest results from BuildIteration
         config=config_data,
         docker_registry=strategy.docker_registry,
-        docker_image_url=strategy.docker_image_url,
-        version=strategy.version,
+        docker_image_url=docker_image_url,
+        version=resolved_version,
         subscriber_count=strategy.subscriber_count,
         rating=strategy.rating,
         user_id=strategy.user_id,

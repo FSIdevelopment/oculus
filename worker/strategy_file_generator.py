@@ -13,6 +13,7 @@ Author: SignalSynk AI
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -515,6 +516,87 @@ class TradingStrategy:
     def get_symbols(self) -> List[str]:
         """Return list of symbols to trade."""
         return self.symbols
+
+    def get_interval(self) -> int:
+        """Return signal generation interval in seconds (read from config)."""
+        trading_config = self.config.get('trading', {{}})
+        interval_str = (
+            trading_config.get('signal_generation_interval')
+            or trading_config.get('timeframe', '1d')
+        )
+        timeframe_map = {{
+            '30s': 30, '1m': 60, '2m': 120, '5m': 300, '10m': 600,
+            '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400,
+            '1d': 86400, '1D': 86400,
+        }}
+        return timeframe_map.get(interval_str, 86400)
+
+    def get_loop_interval(self) -> int:
+        """Return how often (seconds) main.py should re-run the strategy loop.
+
+        This is intentionally shorter than the data timeframe so we check
+        frequently for new candle closes without fetching stale data.
+
+        Mapping (timeframe → loop interval):
+          1d  → 1800s (30 min)
+          4h  →  900s (15 min)
+          1h  →  300s  (5 min)
+          30m →  300s  (5 min)
+          15m →  900s (15 min)
+          10m →  600s (10 min)
+          5m  →  300s  (5 min)
+          1m  →   60s  (1 min)
+        """
+        trading_config = self.config.get('trading', {{}})
+        timeframe = trading_config.get('timeframe', '1d')
+        loop_map = {{
+            '1d': 1800, '1D': 1800,
+            '4h': 900,
+            '1h': 300,
+            '30m': 300, '30min': 300,
+            '15m': 900, '15min': 900,
+            '10m': 600, '10min': 600,
+            '5m': 300, '5min': 300,
+            '2m': 120, '2min': 120,
+            '1m': 60, '1min': 60,
+        }}
+        return loop_map.get(timeframe, 1800)
+
+    async def analyze(self) -> List[Dict[str, Any]]:
+        """Fetch live data, calculate indicators, and return trade signals.
+
+        Called periodically by main.py during market hours.
+        """
+        from data_provider import DataProvider
+        signals = []
+        provider = DataProvider()
+
+        for symbol in self.symbols:
+            try:
+                df = await provider.get_historical_data_async(symbol, days=365)
+                if df is None or len(df) < 50:
+                    continue
+                indicators = self.calculate_indicators(df)
+                if not indicators:
+                    continue
+                signal = self.generate_signal(symbol, indicators)
+                if signal in ('BUY', 'SELL'):
+                    signals.append({{
+                        'ticker': symbol,
+                        'action': signal,
+                        'quantity': self.default_quantity,
+                        'order_type': 'MARKET',
+                        'price': indicators.get('close'),
+                        'indicators': {{
+                            k: round(float(v), 4)
+                            for k, v in indicators.items()
+                            if isinstance(v, (int, float)) and k != 'volume'
+                        }},
+                    }})
+            except Exception as e:
+                logger.error(f"Error analyzing {{symbol}}: {{e}}")
+
+        return signals
 '''
 
     def _generate_backtest_py(self) -> str:
@@ -1457,46 +1539,9 @@ class RiskManager:
 '''
 
     def _generate_main_py(self) -> str:
-        """Generate the main.py entry point."""
-        return f'''#!/usr/bin/env python3
-"""
-Main entry point for {self.strategy_name}
-
-Author: SignalSynk AI
-"""
-
-import sys
-import logging
-from pathlib import Path
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-from strategy import TradingStrategy
-from data_provider import DataProvider
-from risk_manager import RiskManager
-
-
-def main():
-    """Main entry point."""
-    print(f"\\n{{'='*60}}")
-    print(f"{self.strategy_name}")
-    print(f"{{'='*60}}\\n")
-
-    strategy = TradingStrategy()
-    data_provider = DataProvider()
-    risk_manager = RiskManager()
-
-    print("Strategy initialized successfully!")
-    print(f"  Symbols: {{strategy.get_symbols()}}")
-    print("\\nRun backtest.py to test the strategy.")
-
-
-if __name__ == '__main__':
-    main()
-'''
+        """Generate the main.py entry point (full WebSocket runner)."""
+        template_path = Path(__file__).parent.parent / "backend" / "templates" / "strategy_container" / "main.py"
+        return template_path.read_text(encoding="utf-8")
 
     def _generate_dockerfile(self) -> str:
         """Generate the Dockerfile for the strategy."""
@@ -1661,11 +1706,8 @@ networks:
 
     def _generate_requirements_txt(self) -> str:
         """Generate requirements.txt with Python dependencies."""
-        return """# Auto-generated requirements
-pandas>=2.0.0
-numpy>=1.24.0
-polygon-api-client>=1.12.0
-"""
+        template_path = Path(__file__).parent.parent / "backend" / "templates" / "strategy_container" / "requirements.txt"
+        return template_path.read_text(encoding="utf-8")
 
     def _generate_extracted_rules_json(self) -> str:
         """Generate extracted_rules.json with the raw extracted rules."""

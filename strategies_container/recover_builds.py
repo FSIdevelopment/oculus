@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
 import asyncpg
 import httpx
@@ -26,6 +27,21 @@ import httpx
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 BUILD_AGENT_URL = os.environ.get("BUILD_AGENT_URL", "")
 BUILD_AGENT_API_KEY = os.environ.get("BUILD_AGENT_API_KEY", "")
+
+# Apply the same safeguard as builds.py: always use the canonical template
+# for main.py and requirements.txt, regardless of what's stored in the DB.
+# The DB's strategy_files were saved before the safeguard copy in builds.py ran,
+# so they may contain stub versions of these files.
+_TEMPLATE_DIR = Path(__file__).parent.parent / "backend" / "templates" / "strategy_container"
+_CANONICAL_MAIN_PY = (_TEMPLATE_DIR / "main.py").read_text(encoding="utf-8")
+_CANONICAL_REQUIREMENTS_TXT = (_TEMPLATE_DIR / "requirements.txt").read_text(encoding="utf-8")
+
+
+def _apply_safeguards(files: dict) -> dict:
+    """Override main.py and requirements.txt with canonical templates."""
+    files["main.py"] = _CANONICAL_MAIN_PY
+    files["requirements.txt"] = _CANONICAL_REQUIREMENTS_TXT
+    return files
 
 
 def _pg_dsn(url: str) -> tuple:
@@ -146,6 +162,10 @@ async def main() -> None:
                 print(f"  [{build_id[:8]}] v{version}: strategy_files malformed ({type(files).__name__}, len={len(files) if isinstance(files, dict) else '?'}) — skipping")
                 total_skipped += 1
                 continue
+
+            # Apply the same safeguard as builds.py: override main.py and
+            # requirements.txt with the canonical templates before pushing.
+            files = _apply_safeguards(files)
 
             print(f"  [{build_id[:8]}] v{version}: pushing {len(files)} files...", end=" ", flush=True)
 

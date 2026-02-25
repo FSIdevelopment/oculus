@@ -76,12 +76,13 @@ ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "mkdir -p $REMOTE_TMP"
 scp "${SSH_OPTS[@]}" \
     "$SCRIPT_DIR/main.py" \
     "$SCRIPT_DIR/builder.py" \
+    "$SCRIPT_DIR/containers.py" \
     "$SCRIPT_DIR/requirements.txt" \
     "$SCRIPT_DIR/deploy.sh" \
     "$SCRIPT_DIR/recover_builds.py" \
     "$SSH_TARGET:$REMOTE_TMP/"
 
-echo "      Files copied: main.py  builder.py  requirements.txt  deploy.sh"
+echo "      Files copied: main.py  builder.py  containers.py  requirements.txt  deploy.sh"
 
 # ── Step 3: Run setup script on Droplet ──────────────────────
 echo "[3/4] Running deploy.sh on Droplet..."
