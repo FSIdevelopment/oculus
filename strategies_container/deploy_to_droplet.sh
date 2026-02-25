@@ -18,12 +18,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ── Load .env from project root ───────────────────────────────
+# ── Load specific vars from .env (grep only — never source the whole file) ────
+_load_env_var() {
+    local var="$1"
+    local file="$2"
+    # Extract VAR=value lines, strip quotes, ignore commented lines
+    grep -E "^${var}=" "$file" | tail -1 | cut -d= -f2- | sed "s/^['\"]//;s/['\"]$//"
+}
+
 if [ -f "$PROJECT_ROOT/.env" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$PROJECT_ROOT/.env"
-    set +a
+    [ -z "${DROPLET_IP:-}" ]   && DROPLET_IP=$(_load_env_var   DROPLET_IP   "$PROJECT_ROOT/.env")
+    [ -z "${SSH_KEY_PATH:-}" ] && SSH_KEY_PATH=$(_load_env_var SSH_KEY_PATH "$PROJECT_ROOT/.env")
+    [ -z "${SSH_USER:-}" ]     && SSH_USER=$(_load_env_var     SSH_USER     "$PROJECT_ROOT/.env")
 fi
 
 # ── Config ────────────────────────────────────────────────────

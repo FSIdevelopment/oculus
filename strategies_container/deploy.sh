@@ -9,6 +9,12 @@ SERVICE_NAME="strategies-build-agent"
 
 echo "=== Deploying Strategies Container Build Agent ==="
 
+# Ensure pip3 is available
+echo "Ensuring pip3 is available..."
+if ! command -v pip3 &>/dev/null; then
+    apt-get update -qq && apt-get install -y -qq python3-pip
+fi
+
 # Install Python deps
 echo "Installing Python dependencies..."
 pip3 install fastapi==0.115.0 "uvicorn[standard]==0.30.6" python-dotenv==1.0.1

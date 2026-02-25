@@ -670,6 +670,13 @@ async def atlas_validate_license(
         and license_obj.expires_at > datetime.utcnow()
     )
 
+    # Derive Docker image tag name from strategy name (same logic as DockerBuilder)
+    import re as _re
+    _tag_name = _re.sub(r"[^a-z0-9-]", "", strategy.name.lower().replace("_", "-").replace(" ", "-")).strip("-")[:128] or "strategy"
+    _derived_registry_url = f"{settings.DO_REGISTRY_URL}/{_tag_name}:latest"
+    # Prefer the stored docker_image_url (has exact version), fall back to derived :latest
+    _registry_url = strategy.docker_image_url or _derived_registry_url
+
     return AtlasLicenseValidationResponse(
         is_active=is_active,
         license_id=license_obj.uuid,
@@ -680,6 +687,9 @@ async def atlas_validate_license(
         strategy_version=license_obj.strategy_version or strategy.version,  # Use license version or fall back to current strategy version
         backtest_results=strategy.backtest_results,
         expires_at=license_obj.expires_at,
+        registry_url=_registry_url,
+        docker_image_name=_registry_url,
+        strategy_folder=_tag_name,
     )
 
 

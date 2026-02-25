@@ -127,6 +127,12 @@ services:
       - key: PERF_CURVE_EXPONENT
         scope: RUN_TIME
         value: 0.9
+      - key: BUILD_AGENT_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: BUILD_AGENT_API_KEY
+        scope: RUN_TIME
+        type: SECRET
     routes:
       - path: /api
 
