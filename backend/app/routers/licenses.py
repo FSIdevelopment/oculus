@@ -10,6 +10,8 @@ from app.config import settings
 from app.models.user import User
 from app.models.license import License
 from app.models.strategy import Strategy
+from app.models.strategy_build import StrategyBuild
+from app.models.build_iteration import BuildIteration
 from app.schemas.licenses import (
     LicensePurchaseRequest, LicenseRenewRequest, LicenseWebhookUpdate,
     LicenseResponse, LicenseListResponse, LicenseValidationResponse,
@@ -618,6 +620,7 @@ async def validate_license(
         license_id=license_obj.uuid,
         user_id=license_obj.user_id,
         strategy_id=license_obj.strategy_id,
+        strategy_version=license_obj.strategy_version,
         expires_at=license_obj.expires_at,
         webhook_url=license_obj.webhook_url,
         polygon_api_key=settings.POLYGON_API_KEY if is_valid else None,
@@ -670,12 +673,52 @@ async def atlas_validate_license(
         and license_obj.expires_at > datetime.utcnow()
     )
 
-    # Derive Docker image tag name from strategy name (same logic as DockerBuilder)
+    # Resolve the version: prefer what's stored on the license, fall back to
+    # the strategy's current version.
     import re as _re
+    license_version = license_obj.strategy_version or strategy.version or 1
+    current_version = strategy.version or 1
+
+    # Derive Docker image tag name from strategy name (same logic as DockerBuilder)
     _tag_name = _re.sub(r"[^a-z0-9-]", "", strategy.name.lower().replace("_", "-").replace(" ", "-")).strip("-")[:128] or "strategy"
-    _derived_registry_url = f"{settings.DO_REGISTRY_URL}/{_tag_name}:latest"
-    # Prefer the stored docker_image_url (has exact version), fall back to derived :latest
-    _registry_url = strategy.docker_image_url or _derived_registry_url
+
+    # Build the registry URL for the specific licensed version (e.g. :3 not :latest)
+    _registry_url = f"{settings.DO_REGISTRY_URL}/{_tag_name}:{license_version}"
+
+    # Fetch backtest results from the build that corresponds to the licensed version.
+    # Completed builds are ordered newest-first; version N maps to index (current - N).
+    backtest_results = strategy.backtest_results  # fallback
+    build_index = current_version - license_version
+    if build_index >= 0:
+        builds_result = await db.execute(
+            select(StrategyBuild)
+            .where(
+                StrategyBuild.strategy_id == strategy.uuid,
+                StrategyBuild.status == "complete",
+            )
+            .order_by(StrategyBuild.started_at.desc())
+            .offset(build_index)
+            .limit(1)
+        )
+        target_build = builds_result.scalar_one_or_none()
+        if target_build:
+            iters_result = await db.execute(
+                select(BuildIteration.backtest_results)
+                .where(
+                    BuildIteration.build_id == target_build.uuid,
+                    BuildIteration.status == "complete",
+                )
+            )
+            best_br = None
+            best_ret = None
+            for (br,) in iters_result.all():
+                if br:
+                    ret = float(br.get("total_return_pct") or br.get("total_return") or 0)
+                    if best_ret is None or ret > best_ret:
+                        best_ret = ret
+                        best_br = br
+            if best_br is not None:
+                backtest_results = best_br
 
     return AtlasLicenseValidationResponse(
         is_active=is_active,
@@ -684,8 +727,8 @@ async def atlas_validate_license(
         user_uuid=license_obj.user_id,
         strategy_name=strategy.name,
         strategy_description=strategy.description,
-        strategy_version=license_obj.strategy_version or strategy.version,  # Use license version or fall back to current strategy version
-        backtest_results=strategy.backtest_results,
+        strategy_version=license_version,
+        backtest_results=backtest_results,
         expires_at=license_obj.expires_at,
         registry_url=_registry_url,
         docker_image_name=_registry_url,

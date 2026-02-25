@@ -76,6 +76,7 @@ class LicenseValidationResponse(BaseModel):
     license_id: str
     user_id: str
     strategy_id: str
+    strategy_version: Optional[int] = None
     expires_at: datetime
     webhook_url: Optional[str] = None
     # Data provider keys (if license is active)

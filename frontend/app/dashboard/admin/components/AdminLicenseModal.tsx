@@ -48,6 +48,15 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strategyId])
 
+  // Once both license and versions are loaded, default the dropdown to the
+  // license's current version (so the user sees what's active), falling back
+  // to the latest build if there's no license yet.
+  useEffect(() => {
+    if (!loading && versions) {
+      setSelectedVersion(license?.strategy_version ?? versions.current_version)
+    }
+  }, [loading, versions])
+
   const fetchLicense = async () => {
     try {
       setLoading(true)
@@ -66,10 +75,6 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
     try {
       const data = await adminAPI.getStrategyVersions(strategyId)
       setVersions(data)
-      // Set default selected version to current version
-      if (data.versions.length > 0) {
-        setSelectedVersion(data.current_version)
-      }
     } catch (err) {
       console.error('Failed to load versions:', err)
     }
@@ -120,6 +125,7 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
   }
 
   const maskedKey = license ? '••••••••-••••-••••-••••-••••••••••••' : ''
+  const versionChanged = !!(license && selectedVersion !== null && selectedVersion !== license.strategy_version)
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -210,7 +216,12 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
                     )
                   })}
                 </select>
-                {versions && (
+                {versionChanged && (
+                  <p className="text-xs text-amber-400">
+                    Version changed — click Generate New to apply.
+                  </p>
+                )}
+                {!versionChanged && versions && (
                   <p className="text-xs text-text-secondary">
                     {versions.total_builds} completed build{versions.total_builds !== 1 ? 's' : ''} available
                   </p>
@@ -230,7 +241,11 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
                 <button
                   onClick={handleGenerate}
                   disabled={actionLoading || !selectedVersion}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-surface border border-border text-text rounded-lg hover:bg-surface-hover disabled:opacity-50 text-sm transition-colors ml-auto"
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg disabled:opacity-50 text-sm transition-colors ml-auto ${
+                    versionChanged
+                      ? 'bg-primary text-white hover:bg-primary-hover'
+                      : 'bg-surface border border-border text-text hover:bg-surface-hover'
+                  }`}
                 >
                   <RefreshCw size={15} />
                   {actionLoading ? 'Generating...' : 'Generate New'}
