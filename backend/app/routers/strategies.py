@@ -1109,7 +1109,10 @@ async def get_strategy_internal(
         base_url = strategy.docker_image_url.rsplit(":", 1)[0]
         docker_image_url = f"{base_url}:{resolved_version}"
 
-    # Create response with config and full backtest results
+    # Extract risk_management from config for top-level access
+    risk_management_data = config_data.get("risk_management") if config_data else None
+
+    # Create response with config, risk_management, and full backtest results
     return StrategyInternalResponse(
         uuid=strategy.uuid,
         name=strategy.name,
@@ -1118,8 +1121,9 @@ async def get_strategy_internal(
         strategy_type=strategy.strategy_type,
         symbols=strategy.symbols,
         target_return=strategy.target_return,
-        backtest_results=full_backtest_results,  # Full backtest results from BuildIteration
+        backtest_results=full_backtest_results,
         config=config_data,
+        risk_management=risk_management_data,
         docker_registry=strategy.docker_registry,
         docker_image_url=docker_image_url,
         version=resolved_version,

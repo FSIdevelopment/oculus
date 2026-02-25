@@ -118,7 +118,8 @@ class StrategyInternalResponse(BaseModel):
     symbols: Optional[Union[List, dict]] = None
     target_return: Optional[float] = None
     backtest_results: Optional[dict] = None
-    config: Optional[dict] = None  # Strategy config.json for SignalSynk
+    config: Optional[dict] = None  # Full strategy config.json
+    risk_management: Optional[dict] = None  # Extracted from config.risk_management for easy access
     docker_registry: Optional[str] = None
     docker_image_url: Optional[str] = None
     version: int
