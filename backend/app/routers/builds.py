@@ -1350,31 +1350,25 @@ async def _run_build_loop(
                         "max_iterations": max_iterations,
                     })
 
-                    # --- Docker build, test, and push ---
+                    # --- Remote Docker build and push ---
                     strat_result = await bg_db.execute(
                         select(Strategy).where(Strategy.uuid == strategy_id)
                     )
                     strategy_obj = strat_result.scalar_one_or_none()
                     docker_builder = DockerBuilder(bg_db)
 
-                    # Build the Docker image
-                    image_tag = await docker_builder.build_image(strategy_obj, build, strategy_output_dir)
-
-                    if image_tag:
-                        # Test the container
-                        test_result = await docker_builder.test_container(image_tag, strategy_output_dir)
-
-                        if test_result["passed"]:
-                            # Push to Digital Ocean Container Registry
-                            push_success = await docker_builder.push_image(image_tag, build)
-                            if push_success:
-                                iteration_logs.append(f"Iteration {iteration}: Docker image built, tested, and pushed")
-                            else:
-                                iteration_logs.append(f"Iteration {iteration}: Docker push failed")
-                        else:
-                            iteration_logs.append(f"Iteration {iteration}: Container test failed: {test_result.get('error', 'Unknown')}")
+                    strategy_files = (
+                        training_results.get("strategy_files") or {}
+                        if isinstance(training_results, dict)
+                        else {}
+                    )
+                    push_success = await docker_builder.remote_build_and_push(
+                        strategy_obj, build, strategy_files
+                    )
+                    if push_success:
+                        iteration_logs.append(f"Iteration {iteration}: Docker image built and pushed remotely")
                     else:
-                        iteration_logs.append(f"Iteration {iteration}: Docker build failed")
+                        iteration_logs.append(f"Iteration {iteration}: Remote Docker build failed")
 
                     build.phase = "complete"
                     build.status = "complete"
@@ -1624,24 +1618,14 @@ async def _run_build_loop(
                     strategy_obj = strat_result.scalar_one_or_none()
                     docker_builder = DockerBuilder(bg_db)
 
-                    # Build the Docker image
-                    image_tag = await docker_builder.build_image(strategy_obj, build, strategy_output_dir)
-
-                    if image_tag:
-                        # Test the container
-                        test_result = await docker_builder.test_container(image_tag, strategy_output_dir)
-
-                        if test_result["passed"]:
-                            # Push to Docker Hub
-                            push_success = await docker_builder.push_image(image_tag, build)
-                            if push_success:
-                                iteration_logs.append("Docker image built, tested, and pushed for best iteration")
-                            else:
-                                iteration_logs.append("Docker push failed for best iteration")
-                        else:
-                            iteration_logs.append(f"Container test failed for best iteration: {test_result.get('error', 'Unknown')}")
+                    # --- Remote Docker build and push ---
+                    push_success = await docker_builder.remote_build_and_push(
+                        strategy_obj, build, best_iter.strategy_files or {}
+                    )
+                    if push_success:
+                        iteration_logs.append("Docker image built and pushed remotely for best iteration")
                     else:
-                        iteration_logs.append("Docker build failed for best iteration")
+                        iteration_logs.append("Remote Docker build failed for best iteration")
 
                     build.status = "complete"
                     build.phase = "complete"

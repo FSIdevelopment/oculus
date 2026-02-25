@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     DO_REGISTRY_URL: str = "registry.digitalocean.com/oculus-strategies"
     DO_REGISTRY_TOKEN: str = ""
 
+    # Build Agent (signalSynk-Strategies Droplet)
+    BUILD_AGENT_URL: str = ""          # e.g. http://<droplet-ip>:8088
+    BUILD_AGENT_API_KEY: str = ""      # Shared secret matching Droplet BUILD_API_KEY
+
     # LLM and Build Orchestration
     ANTHROPIC_API_KEY: str = ""
     CLAUDE_MAX_TOKENS: int = 10000  # Max tokens for Claude API responses (must be > thinking budget)

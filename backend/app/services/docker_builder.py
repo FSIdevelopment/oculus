@@ -272,6 +272,94 @@ class DockerBuilder:
             await self.db.commit()
             return False
 
+    async def remote_build_and_push(
+        self,
+        strategy: Strategy,
+        build: StrategyBuild,
+        files: dict,
+    ) -> bool:
+        """
+        Send all strategy files to the remote build agent on the
+        signalSynk-Strategies Droplet for Docker build and push.
+
+        Args:
+            strategy: Strategy model instance
+            build: StrategyBuild model instance
+            files: Dict of {filename: content} — all 10 strategy files from
+                   BuildIteration.strategy_files
+
+        Returns:
+            True if the image was built and pushed successfully, False otherwise
+        """
+        import httpx
+
+        if not settings.BUILD_AGENT_URL:
+            logger.error("BUILD_AGENT_URL not configured — cannot build remotely")
+            build.logs = f"{build.logs or ''}\n\nRemote build agent not configured (BUILD_AGENT_URL missing)"
+            await self.db.commit()
+            return False
+
+        if not files:
+            logger.error("No strategy files provided for remote build")
+            build.logs = f"{build.logs or ''}\n\nNo strategy files available for Docker build"
+            await self.db.commit()
+            return False
+
+        version = strategy.version or 1
+        payload = {
+            "strategy_name": strategy.name,
+            "version": version,
+            "files": files,
+        }
+
+        logger.info(
+            "Sending build request to agent: strategy=%s version=%d files=%d",
+            strategy.name,
+            version,
+            len(files),
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=900.0) as client:
+                response = await client.post(
+                    f"{settings.BUILD_AGENT_URL}/build",
+                    json=payload,
+                    headers={"X-Build-Api-Key": settings.BUILD_AGENT_API_KEY},
+                )
+
+            if response.status_code != 200:
+                error_msg = f"Build agent HTTP {response.status_code}: {response.text[:500]}"
+                logger.error(error_msg)
+                build.logs = f"{build.logs or ''}\n\n{error_msg}"
+                await self.db.commit()
+                return False
+
+            result = response.json()
+
+            if not result.get("success"):
+                error_msg = f"Remote build failed: {result.get('error', 'unknown error')}"
+                logger.error(error_msg)
+                build.logs = f"{build.logs or ''}\n\n{error_msg}"
+                await self.db.commit()
+                return False
+
+            image_tag = result["image_tag"]
+            strategy.docker_registry = self.registry_url
+            strategy.docker_image_url = image_tag
+            build.status = "complete"
+            build.completed_at = datetime.utcnow()
+            await self.db.commit()
+
+            logger.info("Remote build successful: %s", image_tag)
+            return True
+
+        except Exception as e:
+            error_msg = f"Remote build agent error: {str(e)}"
+            logger.error(error_msg)
+            build.logs = f"{build.logs or ''}\n\n{error_msg}"
+            await self.db.commit()
+            return False
+
     async def run_backtest_verification(
         self,
         image_tag: str,
