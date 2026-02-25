@@ -578,7 +578,24 @@ async def get_strategy_versions(
     )
     completed_builds = builds_result.scalars().all()
 
-    # Build a list of available versions
+    # Get best return per build from completed iterations
+    best_returns: dict[str, float] = {}
+    build_ids = [b.uuid for b in completed_builds]
+    if build_ids:
+        iters_result = await db.execute(
+            select(BuildIteration.build_id, BuildIteration.backtest_results)
+            .where(
+                BuildIteration.build_id.in_(build_ids),
+                BuildIteration.status == "complete",
+            )
+        )
+        for iter_build_id, br in iters_result.all():
+            if br:
+                ret = float(br.get("total_return_pct") or br.get("total_return") or 0)
+                if iter_build_id not in best_returns or ret > best_returns[iter_build_id]:
+                    best_returns[iter_build_id] = ret
+
+    # Build a list of available versions with return data
     # Each completed build incremented the version, so we can reconstruct the version history
     versions = []
     if completed_builds:
@@ -588,14 +605,18 @@ async def get_strategy_versions(
         for i in range(num_builds):
             version = current_version - i
             if version > 0:
-                versions.append(version)
+                build = completed_builds[i]
+                versions.append({
+                    "version": version,
+                    "best_return_pct": best_returns.get(build.uuid)
+                })
 
     # If no builds but strategy has a version, include it
     if not versions and current_version > 0:
-        versions.append(current_version)
+        versions.append({"version": current_version, "best_return_pct": None})
 
     return {
-        "versions": sorted(versions, reverse=True),  # Latest first
+        "versions": sorted(versions, key=lambda x: x["version"], reverse=True),  # Latest first
         "current_version": current_version,
         "total_builds": len(completed_builds)
     }

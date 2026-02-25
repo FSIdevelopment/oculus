@@ -1,0 +1,1298 @@
+{
+  "info": {
+    "_postman_id": "oculus-strategy-api-v1",
+    "name": "Oculus Strategy API",
+    "description": "Complete API collection for Oculus Strategy / Signal Synk backend.\n\n## Setup\n1. Import this collection\n2. Import the environment file `OculusStrategy.postman_environment.json`\n3. Select the correct environment (Local or Production)\n4. Run **Auth > Login** first — the `access_token` and `refresh_token` are captured automatically\n5. All subsequent requests will use the token automatically\n\n## Authentication\nMost endpoints require a Bearer JWT token. The Login request auto-saves the token to the environment. Use **Auth > Refresh Token** when it expires.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global pre-request: ensure base URL is set",
+          "if (!pm.environment.get('base_url')) {",
+          "    console.warn('base_url is not set. Select an environment first.');",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global test: log status for every request",
+          "console.log(pm.info.requestName + ' → ' + pm.response.status);"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Registration, login, token refresh, and current user.",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"password\": \"securepassword123\",\n  \"phone_number\": \"+1234567890\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/auth/register", "host": ["{{base_url}}"], "path": ["api", "auth", "register"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const json = pm.response.json();",
+                  "    pm.environment.set('access_token', json.access_token);",
+                  "    pm.environment.set('refresh_token', json.refresh_token);",
+                  "    console.log('Tokens saved to environment.');",
+                  "}",
+                  "pm.test('Status is 200 or 201', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{user_email}}\",\n  \"password\": \"{{user_password}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/auth/login", "host": ["{{base_url}}"], "path": ["api", "auth", "login"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login successful', () => {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.environment.set('access_token', json.access_token);",
+                  "    pm.environment.set('refresh_token', json.refresh_token);",
+                  "    console.log('access_token and refresh_token saved.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/auth/refresh", "host": ["{{base_url}}"], "path": ["api", "auth", "refresh"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Token refreshed', () => { pm.expect(pm.response.code).to.equal(200); });",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.environment.set('access_token', json.access_token);",
+                  "    pm.environment.set('refresh_token', json.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/auth/me", "host": ["{{base_url}}"], "path": ["api", "auth", "me"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Got current user', () => { pm.expect(pm.response.code).to.equal(200); });",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.environment.set('user_id', json.uuid);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "description": "User profile management.",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/users/me", "host": ["{{base_url}}"], "path": ["api", "users", "me"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Status 200', () => { pm.expect(pm.response.code).to.equal(200); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Name\",\n  \"phone_number\": \"+1234567890\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/users/me", "host": ["{{base_url}}"], "path": ["api", "users", "me"]}
+          }
+        },
+        {
+          "name": "Update Payout Info",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payout_method\": \"stripe\",\n  \"account_details\": {}\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/users/me/payout", "host": ["{{base_url}}"], "path": ["api", "users", "me", "payout"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Strategies",
+      "description": "Create, list, update, delete strategies. Includes backtest, config, readme, and the internal import endpoint used by Signal Synk.",
+      "item": [
+        {
+          "name": "Create Strategy",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"My RSI Strategy\",\n  \"description\": \"RSI mean-reversion strategy on large-cap tech stocks.\",\n  \"config\": {\n    \"strategy_name\": \"My RSI Strategy\",\n    \"trading\": {\n      \"symbols\": [\"AAPL\", \"MSFT\"],\n      \"timeframe\": \"1d\",\n      \"default_quantity\": 10\n    }\n  }\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies", "host": ["{{base_url}}"], "path": ["api", "strategies"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Strategy created', () => { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "    pm.environment.set('strategy_id', pm.response.json().uuid);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Strategies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/strategies?skip=0&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "strategies"],
+              "query": [
+                {"key": "skip", "value": "0"},
+                {"key": "limit", "value": "10"},
+                {"key": "search", "value": "", "disabled": true},
+                {"key": "status", "value": "complete", "disabled": true},
+                {"key": "strategy_type", "value": "", "disabled": true},
+                {"key": "has_completed_build", "value": "true", "disabled": true},
+                {"key": "sort_by", "value": "created_at", "disabled": true},
+                {"key": "sort_order", "value": "desc", "disabled": true}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Strategy",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}"]}
+          }
+        },
+        {
+          "name": "Update Strategy",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Renamed Strategy\",\n  \"description\": \"Updated description.\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}"]}
+          }
+        },
+        {
+          "name": "Delete Strategy",
+          "request": {
+            "method": "DELETE",
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}"]}
+          }
+        },
+        {
+          "name": "Get Strategy Builds",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/builds", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "builds"]}
+          }
+        },
+        {
+          "name": "Retrain Strategy",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Improve win rate on momentum breakouts.\",\n  \"target_return\": 30.0\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/retrain", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "retrain"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    pm.environment.set('build_id', pm.response.json().uuid);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Build Backtest Results",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/builds/{{build_id}}/backtest", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "builds", "{{build_id}}", "backtest"]}
+          }
+        },
+        {
+          "name": "Get Build Config",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/builds/{{build_id}}/config", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "builds", "{{build_id}}", "config"]}
+          }
+        },
+        {
+          "name": "Get Build README",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/builds/{{build_id}}/readme", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "builds", "{{build_id}}", "readme"]}
+          }
+        },
+        {
+          "name": "Internal Import (Signal Synk)",
+          "description": "Used by Signal Synk to import strategy data. Returns backtest results, full config, risk_management, and Docker image URL for a specific version.\n\nPass `strategy_version` to get a specific version; omit for the latest.",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/strategies/{{strategy_id}}/internal?api_key={{internal_api_key}}&strategy_version={{strategy_version}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "strategies", "{{strategy_id}}", "internal"],
+              "query": [
+                {"key": "api_key", "value": "{{internal_api_key}}"},
+                {"key": "strategy_version", "value": "{{strategy_version}}", "description": "Specific version number. Omit for latest."}
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => { pm.expect(pm.response.code).to.equal(200); });",
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.test('Has backtest_results', () => { pm.expect(json).to.have.property('backtest_results'); });",
+                  "    pm.test('Has config', () => { pm.expect(json).to.have.property('config'); });",
+                  "    pm.test('Has risk_management', () => { pm.expect(json).to.have.property('risk_management'); });",
+                  "    pm.test('Has docker_image_url', () => { pm.expect(json).to.have.property('docker_image_url'); });",
+                  "    console.log('Version returned:', json.version);",
+                  "    console.log('Docker image:', json.docker_image_url);",
+                  "    console.log('Total return:', json.backtest_results?.total_return_pct);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Marketplace Listing",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"marketplace_listed\": true,\n  \"marketplace_price\": 29.99\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/marketplace", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "marketplace"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Marketplace",
+      "description": "Public marketplace endpoints — no authentication required.",
+      "item": [
+        {
+          "name": "List Marketplace Strategies",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/strategies/marketplace?skip=0&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "strategies", "marketplace"],
+              "query": [
+                {"key": "skip", "value": "0"},
+                {"key": "limit", "value": "20"},
+                {"key": "strategy_type", "value": "", "disabled": true},
+                {"key": "sort_by", "value": "rating", "disabled": true},
+                {"key": "sort_order", "value": "desc", "disabled": true}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Marketplace Strategy",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/strategies/marketplace/{{strategy_id}}", "host": ["{{base_url}}"], "path": ["api", "strategies", "marketplace", "{{strategy_id}}"]}
+          }
+        },
+        {
+          "name": "Get License Price",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/license/price", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "license", "price"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Builds",
+      "description": "Build triggers, status, iterations, stop and restart.",
+      "item": [
+        {
+          "name": "Trigger Build",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"strategy_id\": \"{{strategy_id}}\",\n  \"description\": \"Initial strategy build.\",\n  \"target_return\": 25.0\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/builds/trigger", "host": ["{{base_url}}"], "path": ["api", "builds", "trigger"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    pm.environment.set('build_id', pm.response.json().uuid);",
+                  "    console.log('build_id saved:', pm.response.json().uuid);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Builds",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/builds?skip=0&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "builds"],
+              "query": [
+                {"key": "skip", "value": "0"},
+                {"key": "limit", "value": "10"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Build",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/builds/{{build_id}}", "host": ["{{base_url}}"], "path": ["api", "builds", "{{build_id}}"]}
+          }
+        },
+        {
+          "name": "Get Build Iterations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/builds/{{build_id}}/iterations?page=1&page_size=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "builds", "{{build_id}}", "iterations"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "page_size", "value": "50"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Stop Build",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "{{base_url}}/api/builds/{{build_id}}/stop", "host": ["{{base_url}}"], "path": ["api", "builds", "{{build_id}}", "stop"]}
+          }
+        },
+        {
+          "name": "Restart Build",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "{{base_url}}/api/builds/{{build_id}}/restart", "host": ["{{base_url}}"], "path": ["api", "builds", "{{build_id}}", "restart"]}
+          }
+        },
+        {
+          "name": "Get Build Pricing",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/builds/pricing", "host": ["{{base_url}}"], "path": ["api", "builds", "pricing"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Licenses",
+      "description": "Purchase, manage, validate, and configure webhooks for strategy licenses.",
+      "item": [
+        {
+          "name": "Purchase License (Tokens)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"license_type\": \"monthly\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/license", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "license"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    pm.environment.set('license_id', pm.response.json().uuid);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Checkout License (Stripe)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"license_type\": \"annual\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/license/checkout", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "license", "checkout"]}
+          }
+        },
+        {
+          "name": "Subscribe License (Saved Card)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"license_type\": \"monthly\",\n  \"payment_method_id\": \"pm_xxxxxxxxxxxx\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/license/subscribe", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "license", "subscribe"]}
+          }
+        },
+        {
+          "name": "Setup Intent",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "{{base_url}}/api/licenses/setup-intent", "host": ["{{base_url}}"], "path": ["api", "licenses", "setup-intent"]}
+          }
+        },
+        {
+          "name": "List My Licenses",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/users/me/licenses?skip=0&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "me", "licenses"],
+              "query": [
+                {"key": "skip", "value": "0"},
+                {"key": "limit", "value": "20"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Validate License",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/licenses/{{license_id}}/validate", "host": ["{{base_url}}"], "path": ["api", "licenses", "{{license_id}}", "validate"]}
+          }
+        },
+        {
+          "name": "Atlas Validate License",
+          "description": "Returns is_active, strategy name, backtest results, and registry URL.",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/licenses/{{license_id}}/atlas-validate", "host": ["{{base_url}}"], "path": ["api", "licenses", "{{license_id}}", "atlas-validate"]}
+          }
+        },
+        {
+          "name": "Update License Webhook",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"webhook_url\": \"https://your-signalsynk-endpoint.com/webhook\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/licenses/{{license_id}}/webhook", "host": ["{{base_url}}"], "path": ["api", "licenses", "{{license_id}}", "webhook"]}
+          }
+        },
+        {
+          "name": "Renew License",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"license_type\": \"annual\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/licenses/{{license_id}}/renew", "host": ["{{base_url}}"], "path": ["api", "licenses", "{{license_id}}", "renew"]}
+          }
+        },
+        {
+          "name": "Cancel License",
+          "request": {
+            "method": "DELETE",
+            "url": {"raw": "{{base_url}}/api/licenses/{{license_id}}", "host": ["{{base_url}}"], "path": ["api", "licenses", "{{license_id}}"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ratings",
+      "description": "Submit and retrieve strategy ratings and reviews.",
+      "item": [
+        {
+          "name": "Submit Rating",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"score\": 4,\n  \"review\": \"Solid strategy with consistent performance.\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/ratings", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "ratings"]}
+          }
+        },
+        {
+          "name": "Get Strategy Ratings",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/strategies/{{strategy_id}}/ratings?page=1&page_size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "strategies", "{{strategy_id}}", "ratings"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "page_size", "value": "20"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Rating",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"score\": 5,\n  \"review\": \"Updated — even better after latest version.\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/ratings/{{rating_id}}", "host": ["{{base_url}}"], "path": ["api", "ratings", "{{rating_id}}"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "description": "Strategy AI chat messages.",
+      "item": [
+        {
+          "name": "Send Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Increase the RSI period from 14 to 21 and tighten the stop-loss.\",\n  \"role\": \"user\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/strategies/{{strategy_id}}/chat", "host": ["{{base_url}}"], "path": ["api", "strategies", "{{strategy_id}}", "chat"]}
+          }
+        },
+        {
+          "name": "Get Chat History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/strategies/{{strategy_id}}/chat?page=1&page_size=500",
+              "host": ["{{base_url}}"],
+              "path": ["api", "strategies", "{{strategy_id}}", "chat"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "page_size", "value": "500"}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Balance",
+      "description": "User token balance and transaction history.",
+      "item": [
+        {
+          "name": "Get Balance",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/users/me/balance", "host": ["{{base_url}}"], "path": ["api", "users", "me", "balance"]}
+          }
+        },
+        {
+          "name": "Get Balance History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/users/me/balance/history?page=1&page_size=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "me", "balance", "history"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "page_size", "value": "50"}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "description": "Stripe payment intents and confirmation for token purchases.",
+      "item": [
+        {
+          "name": "Create Payment Intent",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"idempotency_key\": \"{{$randomUUID}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/payments/create-intent", "host": ["{{base_url}}"], "path": ["api", "payments", "create-intent"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.environment.set('payment_intent_id', pm.response.json().payment_intent_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm Payment",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_intent_id\": \"{{payment_intent_id}}\",\n  \"product_id\": \"{{product_id}}\"\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/payments/confirm", "host": ["{{base_url}}"], "path": ["api", "payments", "confirm"]}
+          }
+        },
+        {
+          "name": "Stripe Webhook",
+          "description": "Stripe will POST to this endpoint — not for manual testing.",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Stripe-Signature", "value": "t=...,v1=...", "description": "Stripe webhook signature"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/webhooks/stripe", "host": ["{{base_url}}"], "path": ["api", "webhooks", "stripe"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "description": "Token package products.",
+      "item": [
+        {
+          "name": "List Products",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/products", "host": ["{{base_url}}"], "path": ["api", "products"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Subscriptions",
+      "description": "Free marketplace subscriptions and earnings.",
+      "item": [
+        {
+          "name": "Subscribe to Strategy",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "{{base_url}}/api/marketplace/{{strategy_id}}/subscribe", "host": ["{{base_url}}"], "path": ["api", "marketplace", "{{strategy_id}}", "subscribe"]}
+          }
+        },
+        {
+          "name": "List My Subscriptions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/users/me/subscriptions?skip=0&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "me", "subscriptions"],
+              "query": [
+                {"key": "skip", "value": "0"},
+                {"key": "limit", "value": "10"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get My Earnings",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/users/me/earnings", "host": ["{{base_url}}"], "path": ["api", "users", "me", "earnings"]}
+          }
+        },
+        {
+          "name": "Cancel Subscription",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "{{base_url}}/api/subscriptions/{{subscription_id}}/cancel", "host": ["{{base_url}}"], "path": ["api", "subscriptions", "{{subscription_id}}", "cancel"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stripe Connect",
+      "description": "Stripe Connect onboarding for seller payouts.",
+      "item": [
+        {
+          "name": "Start Onboarding",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "{{base_url}}/api/connect/onboard", "host": ["{{base_url}}"], "path": ["api", "connect", "onboard"]}
+          }
+        },
+        {
+          "name": "Get Connect Status",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/connect/status", "host": ["{{base_url}}"], "path": ["api", "connect", "status"]}
+          }
+        },
+        {
+          "name": "Get Dashboard Link",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/connect/dashboard-link", "host": ["{{base_url}}"], "path": ["api", "connect", "dashboard-link"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Admin-only endpoints. Requires admin role JWT.",
+      "item": [
+        {
+          "name": "Users",
+          "item": [
+            {
+              "name": "List Users",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/admin/users?skip=0&limit=20",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "users"],
+                  "query": [
+                    {"key": "skip", "value": "0"},
+                    {"key": "limit", "value": "20"},
+                    {"key": "search", "value": "", "disabled": true}
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Create User",
+              "request": {
+                "method": "POST",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"New User\",\n  \"email\": \"newuser@example.com\",\n  \"password\": \"TempPass123!\",\n  \"phone_number\": \"+1234567890\",\n  \"status\": \"active\",\n  \"user_role\": \"user\"\n}",
+                  "options": {"raw": {"language": "json"}}
+                },
+                "url": {"raw": "{{base_url}}/api/admin/users", "host": ["{{base_url}}"], "path": ["api", "admin", "users"]}
+              }
+            },
+            {
+              "name": "Get User",
+              "request": {
+                "method": "GET",
+                "url": {"raw": "{{base_url}}/api/admin/users/{{target_user_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "users", "{{target_user_id}}"]}
+              }
+            },
+            {
+              "name": "Update User",
+              "request": {
+                "method": "PUT",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"active\",\n  \"user_role\": \"admin\",\n  \"balance\": 100.0\n}",
+                  "options": {"raw": {"language": "json"}}
+                },
+                "url": {"raw": "{{base_url}}/api/admin/users/{{target_user_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "users", "{{target_user_id}}"]}
+              }
+            },
+            {
+              "name": "Delete User",
+              "request": {
+                "method": "DELETE",
+                "url": {"raw": "{{base_url}}/api/admin/users/{{target_user_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "users", "{{target_user_id}}"]}
+              }
+            },
+            {
+              "name": "Reset Password",
+              "request": {
+                "method": "POST",
+                "url": {"raw": "{{base_url}}/api/admin/users/{{target_user_id}}/reset-password", "host": ["{{base_url}}"], "path": ["api", "admin", "users", "{{target_user_id}}", "reset-password"]}
+              }
+            },
+            {
+              "name": "Impersonate User",
+              "request": {
+                "method": "POST",
+                "url": {"raw": "{{base_url}}/api/admin/users/{{target_user_id}}/impersonate", "host": ["{{base_url}}"], "path": ["api", "admin", "users", "{{target_user_id}}", "impersonate"]}
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 200) {",
+                      "    pm.environment.set('impersonation_token', pm.response.json().access_token);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Strategies",
+          "item": [
+            {
+              "name": "List All Strategies",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/admin/strategies?skip=0&limit=10",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "strategies"],
+                  "query": [
+                    {"key": "skip", "value": "0"},
+                    {"key": "limit", "value": "10"},
+                    {"key": "search", "value": "", "disabled": true}
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Update Strategy (Admin)",
+              "request": {
+                "method": "PUT",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"complete\",\n  \"marketplace_listed\": true\n}",
+                  "options": {"raw": {"language": "json"}}
+                },
+                "url": {"raw": "{{base_url}}/api/admin/strategies/{{strategy_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "strategies", "{{strategy_id}}"]}
+              }
+            },
+            {
+              "name": "Delete Strategy (Admin)",
+              "request": {
+                "method": "DELETE",
+                "url": {"raw": "{{base_url}}/api/admin/strategies/{{strategy_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "strategies", "{{strategy_id}}"]}
+              }
+            },
+            {
+              "name": "Get Strategy Versions",
+              "request": {
+                "method": "GET",
+                "url": {"raw": "{{base_url}}/api/admin/strategies/{{strategy_id}}/versions", "host": ["{{base_url}}"], "path": ["api", "admin", "strategies", "{{strategy_id}}", "versions"]}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Licenses",
+          "item": [
+            {
+              "name": "List All Licenses",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/admin/licenses?skip=0&limit=10",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "licenses"],
+                  "query": [
+                    {"key": "skip", "value": "0"},
+                    {"key": "limit", "value": "10"}
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Grant License to User",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{base_url}}/api/admin/strategies/{{strategy_id}}/license?strategy_version={{strategy_version}}",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "strategies", "{{strategy_id}}", "license"],
+                  "query": [
+                    {"key": "strategy_version", "value": "{{strategy_version}}"}
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Get Strategy License",
+              "request": {
+                "method": "GET",
+                "url": {"raw": "{{base_url}}/api/admin/strategies/{{strategy_id}}/license", "host": ["{{base_url}}"], "path": ["api", "admin", "strategies", "{{strategy_id}}", "license"]}
+              }
+            },
+            {
+              "name": "Revoke License",
+              "request": {
+                "method": "POST",
+                "url": {"raw": "{{base_url}}/api/admin/licenses/{{license_id}}/revoke", "host": ["{{base_url}}"], "path": ["api", "admin", "licenses", "{{license_id}}", "revoke"]}
+              }
+            },
+            {
+              "name": "Update License",
+              "request": {
+                "method": "PUT",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"active\",\n  \"expires_at\": \"2027-01-01T00:00:00Z\",\n  \"webhook_url\": \"https://example.com/webhook\"\n}",
+                  "options": {"raw": {"language": "json"}}
+                },
+                "url": {"raw": "{{base_url}}/api/admin/licenses/{{license_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "licenses", "{{license_id}}"]}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ratings",
+          "item": [
+            {
+              "name": "List All Ratings",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/api/admin/ratings?page=1&page_size=50",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "admin", "ratings"],
+                  "query": [
+                    {"key": "page", "value": "1"},
+                    {"key": "page_size", "value": "50"}
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Delete Rating",
+              "request": {
+                "method": "DELETE",
+                "url": {"raw": "{{base_url}}/api/admin/ratings/{{rating_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "ratings", "{{rating_id}}"]}
+              }
+            },
+            {
+              "name": "Recalculate All Ratings",
+              "request": {
+                "method": "POST",
+                "url": {"raw": "{{base_url}}/api/admin/ratings/recalculate-all", "host": ["{{base_url}}"], "path": ["api", "admin", "ratings", "recalculate-all"]}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Products",
+          "item": [
+            {
+              "name": "Create Product",
+              "request": {
+                "method": "POST",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"100 Tokens\",\n  \"description\": \"Purchase 100 Oculus tokens.\",\n  \"price_cents\": 999,\n  \"product_type\": \"tokens\",\n  \"token_amount\": 100\n}",
+                  "options": {"raw": {"language": "json"}}
+                },
+                "url": {"raw": "{{base_url}}/api/admin/products", "host": ["{{base_url}}"], "path": ["api", "admin", "products"]}
+              }
+            },
+            {
+              "name": "Update Product",
+              "request": {
+                "method": "PUT",
+                "header": [{"key": "Content-Type", "value": "application/json"}],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"100 Tokens (Sale)\",\n  \"price_cents\": 799\n}",
+                  "options": {"raw": {"language": "json"}}
+                },
+                "url": {"raw": "{{base_url}}/api/admin/products/{{product_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "products", "{{product_id}}"]}
+              }
+            },
+            {
+              "name": "Delete Product",
+              "request": {
+                "method": "DELETE",
+                "url": {"raw": "{{base_url}}/api/admin/products/{{product_id}}", "host": ["{{base_url}}"], "path": ["api", "admin", "products", "{{product_id}}"]}
+              }
+            }
+          ]
+        },
+        {
+          "name": "Monitoring",
+          "item": [
+            {
+              "name": "Queue Status",
+              "request": {
+                "method": "GET",
+                "url": {"raw": "{{base_url}}/api/admin/queue/status", "host": ["{{base_url}}"], "path": ["api", "admin", "queue", "status"]}
+              }
+            },
+            {
+              "name": "Health",
+              "request": {
+                "method": "GET",
+                "url": {"raw": "{{base_url}}/api/admin/health", "host": ["{{base_url}}"], "path": ["api", "admin", "health"]}
+              }
+            },
+            {
+              "name": "Scaling Recommendations",
+              "request": {
+                "method": "GET",
+                "url": {"raw": "{{base_url}}/api/admin/scaling/recommendations", "host": ["{{base_url}}"], "path": ["api", "admin", "scaling", "recommendations"]}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Worker",
+      "description": "Internal worker registration and heartbeat. Used by the background training worker, not for manual use.",
+      "item": [
+        {
+          "name": "Register Worker",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"worker_id\": \"worker-001\",\n  \"hostname\": \"gpu-box-1\",\n  \"capacity\": 2\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/worker/register", "host": ["{{base_url}}"], "path": ["api", "worker", "register"]}
+          }
+        },
+        {
+          "name": "Worker Heartbeat",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"worker_id\": \"worker-001\",\n  \"active_job_ids\": []\n}",
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {"raw": "{{base_url}}/api/worker/heartbeat", "host": ["{{base_url}}"], "path": ["api", "worker", "heartbeat"]}
+          }
+        },
+        {
+          "name": "Worker Stats",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/api/worker/stats", "host": ["{{base_url}}"], "path": ["api", "worker", "stats"]}
+          }
+        },
+        {
+          "name": "Cleanup Dead Workers",
+          "request": {
+            "method": "POST",
+            "url": {"raw": "{{base_url}}/api/worker/cleanup-dead", "host": ["{{base_url}}"], "path": ["api", "worker", "cleanup-dead"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "GET",
+            "url": {"raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"]}
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('API is healthy', () => {",
+                  "    pm.expect(pm.response.code).to.equal(200);",
+                  "    pm.expect(pm.response.json().status).to.equal('ok');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

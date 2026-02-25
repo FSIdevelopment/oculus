@@ -15,8 +15,13 @@ interface License {
   expires_at: string
 }
 
+interface VersionInfo {
+  version: number
+  best_return_pct: number | null
+}
+
 interface VersionsData {
-  versions: number[]
+  versions: VersionInfo[]
   current_version: number
   total_builds: number
 }
@@ -194,11 +199,16 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   disabled={!versions || versions.versions.length === 0}
                 >
-                  {versions?.versions.map((version) => (
-                    <option key={version} value={version}>
-                      Version {version} {version === versions.current_version ? '(Latest)' : ''}
-                    </option>
-                  ))}
+                  {versions?.versions.map(({ version, best_return_pct }) => {
+                    const returnStr = best_return_pct != null
+                      ? ` · ${best_return_pct >= 0 ? '+' : ''}${best_return_pct.toFixed(1)}% return`
+                      : ''
+                    return (
+                      <option key={version} value={version}>
+                        Version {version}{returnStr}{version === versions.current_version ? ' (Latest)' : ''}
+                      </option>
+                    )
+                  })}
                 </select>
                 {versions && (
                   <p className="text-xs text-text-secondary">
@@ -240,11 +250,16 @@ export default function AdminLicenseModal({ strategyId, strategyName, onClose }:
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   disabled={!versions || versions.versions.length === 0}
                 >
-                  {versions?.versions.map((version) => (
-                    <option key={version} value={version}>
-                      Version {version} {version === versions.current_version ? '(Latest)' : ''}
-                    </option>
-                  ))}
+                  {versions?.versions.map(({ version, best_return_pct }) => {
+                    const returnStr = best_return_pct != null
+                      ? ` · ${best_return_pct >= 0 ? '+' : ''}${best_return_pct.toFixed(1)}% return`
+                      : ''
+                    return (
+                      <option key={version} value={version}>
+                        Version {version}{returnStr}{version === versions.current_version ? ' (Latest)' : ''}
+                      </option>
+                    )
+                  })}
                 </select>
                 {versions && (
                   <p className="text-xs text-text-secondary">
