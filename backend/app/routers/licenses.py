@@ -685,9 +685,10 @@ async def atlas_validate_license(
     # Build the registry URL for the specific licensed version (e.g. :3 not :latest)
     _registry_url = f"{settings.DO_REGISTRY_URL}/{_tag_name}:{license_version}"
 
-    # Fetch backtest results from the build that corresponds to the licensed version.
+    # Fetch backtest results and config from the build that corresponds to the licensed version.
     # Completed builds are ordered newest-first; version N maps to index (current - N).
     backtest_results = strategy.backtest_results  # fallback
+    strategy_config = strategy.config            # fallback
     build_index = current_version - license_version
     if build_index >= 0:
         builds_result = await db.execute(
@@ -703,7 +704,7 @@ async def atlas_validate_license(
         target_build = builds_result.scalar_one_or_none()
         if target_build:
             iters_result = await db.execute(
-                select(BuildIteration.backtest_results)
+                select(BuildIteration.backtest_results, BuildIteration.strategy_files)
                 .where(
                     BuildIteration.build_id == target_build.uuid,
                     BuildIteration.status == "complete",
@@ -711,14 +712,26 @@ async def atlas_validate_license(
             )
             best_br = None
             best_ret = None
-            for (br,) in iters_result.all():
+            best_sf = None
+            for (br, sf) in iters_result.all():
                 if br:
                     ret = float(br.get("total_return_pct") or br.get("total_return") or 0)
                     if best_ret is None or ret > best_ret:
                         best_ret = ret
                         best_br = br
+                        best_sf = sf
             if best_br is not None:
                 backtest_results = best_br
+            if best_sf and isinstance(best_sf, dict):
+                raw = best_sf.get("config.json")
+                if isinstance(raw, str):
+                    try:
+                        import json as _json
+                        raw = _json.loads(raw)
+                    except (ValueError, TypeError):
+                        raw = None
+                if isinstance(raw, dict):
+                    strategy_config = raw
 
     return AtlasLicenseValidationResponse(
         is_active=is_active,
@@ -729,6 +742,7 @@ async def atlas_validate_license(
         strategy_description=strategy.description,
         strategy_version=license_version,
         backtest_results=backtest_results,
+        config=strategy_config,
         expires_at=license_obj.expires_at,
         registry_url=_registry_url,
         docker_image_name=_registry_url,

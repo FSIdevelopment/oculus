@@ -37,6 +37,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _parse_strategy_config(strategy_files: dict | None) -> dict | None:
+    """Extract and parse config.json from a strategy_files dict. Returns None if unavailable."""
+    if not strategy_files or not isinstance(strategy_files, dict):
+        return None
+    raw = strategy_files.get("config.json")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+    return None
+
+
 # Strong references to background tasks to prevent garbage collection.
 # Tasks are added on creation and removed via a done callback when they complete.
 _background_tasks: Set[asyncio.Task] = set()
@@ -1674,6 +1690,14 @@ async def _run_build_loop(
                 if strategy_record:
                     strategy_record.status = "complete"
                     strategy_record.backtest_results = (training_results or {}).get("backtest_results") or {}
+                    # Persist config.json so strategy.config is never NULL after a successful build
+                    strategy_record.config = _parse_strategy_config(
+                        (training_results or {}).get("strategy_files")
+                    )
+                    if strategy_record.config and not strategy_record.description:
+                        strategy_record.description = (
+                            strategy_record.config.get("description", "") or ""
+                        ).strip() or None
                     strategy_record.updated_at = datetime.utcnow()
                     logger.info(
                         "Strategy %s status updated to 'complete' with backtest_results (build %s)",

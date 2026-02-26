@@ -101,6 +101,7 @@ class AtlasLicenseValidationResponse(BaseModel):
     strategy_description: Optional[str] = None
     strategy_version: Optional[int] = None
     backtest_results: Optional[dict] = None
+    config: Optional[dict] = None
     expires_at: datetime
     registry_url: Optional[str] = None
     docker_image_name: Optional[str] = None
